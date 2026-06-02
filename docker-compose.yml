@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: job_prep_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-job_prep_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  redis:
+    image: redis:latest
+    container_name: job_prep_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: job_prep_backend
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres_pass@db:5432/job_prep_dev
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app-network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: job_prep_worker
+    restart: always
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres_pass@db:5432/job_prep_dev
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app-network
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: job_prep_beat
+    restart: always
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres_pass@db:5432/job_prep_dev
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge
