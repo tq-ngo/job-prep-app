@@ -7,7 +7,7 @@ from sqlmodel import Session
 from app.models.jobs import JobApplication
 
 @celery_app.task(name="tasks.sync_simplify_jobs")
-def sync_simplify_jobs():
+def sync_simplify_jobs(user_id: str):
     """
     Synchronizes jobs from the Simplify markdown tracker.
     Celery executes inside a synchronous thread execution framework,
@@ -19,9 +19,10 @@ def sync_simplify_jobs():
     # Persistent Sync Block to SQL Engine layer
     with Session(sync_engine) as session:
         for job in jobs:
-            # Avoid inserting duplicate application profiles
+            # Avoid inserting duplicate application profiles per user
             exists = session.query(JobApplication).filter(
-                JobApplication.job_url == job["job_url"]
+                JobApplication.job_url == job["job_url"],
+                JobApplication.user_id == uuid.UUID(user_id)
             ).first()
             
             if not exists:
@@ -31,7 +32,7 @@ def sync_simplify_jobs():
                     job_url=job["job_url"],
                     location=job.get("location"),
                     source=job["source"],
-                    user_id=uuid.UUID("00000000-0000-0000-0000-000000000000")
+                    user_id=uuid.UUID(user_id)
                 )
                 session.add(new_app)
         session.commit()

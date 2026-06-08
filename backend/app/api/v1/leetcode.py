@@ -11,7 +11,7 @@ router = APIRouter()
 
 @router.post("/submit", status_code=status.HTTP_201_CREATED, response_model=LeetCodeSubmission)
 async def record_leetcode_submission(
-    submission: LeetCodeSubmission, 
+    submission: LeetCodeSubmission,
     session: AsyncSession = Depends(get_session)
 ):
     ai_service = GeminiAgentService()
