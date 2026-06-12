@@ -25,6 +25,9 @@ COPY . .
 ENV PATH=/root/.local/bin:$PATH
 ENV PYTHONPATH=/backend
 
+# Install Playwright and its system dependencies
+RUN pip install playwright && playwright install --with-deps chromium
+
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

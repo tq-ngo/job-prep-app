@@ -5,8 +5,8 @@ from app.core.database import get_session
 from app.api.deps import get_current_user
 from app.models.jobs import JobApplication
 from app.models.users import User
-from app.workers.tasks import sync_simplify_jobs
-from typing import List
+from app.workers.tasks import sync_simplify_jobs, sync_linkedin_jobs
+from typing import List, Optional
 
 router = APIRouter()
 
@@ -25,17 +25,25 @@ async def read_jobs(
 @router.post("/trigger-sync", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_scraping_pipeline(current_user: User = Depends(get_current_user)):
     """
-    Enqueues a background scrape job via Celery.
-    Returns immediately with a task_id for polling.
-    202 Accepted is semantically correct — work is queued, not yet done.
+    Enqueues a background scrape job for Simplify via Celery.
     """
     task = sync_simplify_jobs.delay(str(current_user.id))
-    return {"message": "Scrape job queued", "task_id": task.id}
+    return {"message": "Simplify scrape job queued", "task_id": task.id}
 
-# Status endpoint to check task progress
-# @router.get("/sync-status/{task_id}")
-# async def get_sync_status(task_id: str):
-#     """Poll Celery task state by ID."""
-#     from app.workers.celery_app import celery_app
-#     task = celery_app.AsyncResult(task_id)
-#     return {"task_id": task_id, "status": task.status, "result": task.result}
+@router.post("/trigger-linkedin-sync", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_linkedin_scraping(
+    search_url: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Enqueues a background LinkedIn scrape job via Celery.
+    """
+    task = sync_linkedin_jobs.delay(str(current_user.id), search_url)
+    return {"message": "LinkedIn scrape job queued", "task_id": task.id}
+
+@router.get("/sync-status/{task_id}")
+async def get_sync_status(task_id: str):
+    """Poll Celery task state by ID."""
+    from app.workers.celery_app import celery_app
+    task = celery_app.AsyncResult(task_id)
+    return {"task_id": task_id, "status": task.status, "result": task.result}

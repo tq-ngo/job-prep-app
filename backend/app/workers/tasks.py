@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from app.workers.celery_app import celery_app
 from app.services.scrapers.simplify import SimplifyScraper
+from app.services.scrapers.linkedin import LinkedInScraper
 from app.core.database import sync_engine
 from sqlmodel import Session
 from app.models.jobs import JobApplication
@@ -10,12 +11,23 @@ from app.models.jobs import JobApplication
 def sync_simplify_jobs(user_id: str):
     """
     Synchronizes jobs from the Simplify markdown tracker.
-    Celery executes inside a synchronous thread execution framework,
-    so we bridge the async event loop internally.
     """
     scraper = SimplifyScraper()
     jobs = asyncio.run(scraper.fetch_and_parse())
-    
+    _sync_jobs_to_db(jobs, user_id)
+    return f"Successfully processed {len(jobs)} jobs from Simplify."
+
+@celery_app.task(name="tasks.sync_linkedin_jobs")
+def sync_linkedin_jobs(user_id: str, search_url: str):
+    """
+    Synchronizes jobs from LinkedIn using Playwright.
+    """
+    scraper = LinkedInScraper()
+    jobs = asyncio.run(scraper.fetch_and_parse(search_url))
+    _sync_jobs_to_db(jobs, user_id)
+    return f"Successfully processed {len(jobs)} jobs from LinkedIn."
+
+def _sync_jobs_to_db(jobs, user_id: str):
     # Persistent Sync Block to SQL Engine layer
     with Session(sync_engine) as session:
         for job in jobs:
@@ -24,7 +36,7 @@ def sync_simplify_jobs(user_id: str):
                 JobApplication.job_url == job["job_url"],
                 JobApplication.user_id == uuid.UUID(user_id)
             ).first()
-            
+
             if not exists:
                 new_app = JobApplication(
                     company_name=job["company_name"],
@@ -36,4 +48,3 @@ def sync_simplify_jobs(user_id: str):
                 )
                 session.add(new_app)
         session.commit()
-    return f"Successfully processed {len(jobs)} jobs."
