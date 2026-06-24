@@ -94,7 +94,34 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? "Logging in..." : "Login"}
             </Button>
-            <div className="text-sm text-center text-muted-foreground">
+            
+            <div className="relative w-full flex items-center justify-center my-2 text-xs uppercase">
+              <span className="absolute inset-x-0 border-t border-muted" />
+              <span className="relative bg-white px-2 text-muted-foreground z-10">
+                Or continue with
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 w-full">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full flex items-center gap-2"
+                onClick={() => window.location.href = "http://localhost:8000/api/v1/auth/google/login"}
+              >
+                Google
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full flex items-center gap-2"
+                onClick={() => window.location.href = "http://localhost:8000/api/v1/auth/github/login"}
+              >
+                GitHub
+              </Button>
+            </div>
+
+            <div className="text-sm text-center text-muted-foreground mt-2">
               Don't have an account?{" "}
               <Link href="/register" className="text-primary hover:underline">
                 Register

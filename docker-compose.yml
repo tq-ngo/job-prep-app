@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: job_prep_db
     restart: always
     environment:
@@ -36,13 +36,16 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/backend
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres_pass@db:5432/job_prep_dev
       - REDIS_URL=redis://redis:6379/0
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
     depends_on:
       - db
       - redis
+      - elasticsearch
     networks:
       - app-network
 
@@ -55,13 +58,16 @@ services:
     command: celery -A app.workers.celery_app worker --loglevel=info
     volumes:
       - ./backend:/backend
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres_pass@db:5432/job_prep_dev
       - REDIS_URL=redis://redis:6379/0
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
     depends_on:
       - db
       - redis
+      - elasticsearch
     networks:
       - app-network
 
@@ -74,12 +80,27 @@ services:
     command: celery -A app.workers.celery_app beat --loglevel=info
     volumes:
       - ./backend:/backend
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres_pass@db:5432/job_prep_dev
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
       - redis
+    networks:
+      - app-network
+
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: job_prep_elasticsearch
+    restart: always
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
     networks:
       - app-network
 

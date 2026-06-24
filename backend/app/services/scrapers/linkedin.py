@@ -3,22 +3,54 @@ import os
 import random
 from typing import List, Dict
 from playwright.async_api import async_playwright
+from app.services.scrapers.utils import ScraperCircuitBreaker
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+]
 
 class LinkedInScraper:
     def __init__(self):
         # Look for a session cookie injected via env var
         self.li_at_cookie = os.getenv("LINKEDIN_LI_AT", "")
+        self.cb = ScraperCircuitBreaker("linkedin")
 
-    async def _random_delay(self, min_ms: int = 1000, max_ms: int = 3000):
+    def _get_clean_url(self, raw_url: str) -> str:
+        """Extracts the canonical Job ID URL from a raw LinkedIn URL."""
+        if not raw_url:
+            return ""
+        
+        # Remove tracking parameters
+        clean_url = raw_url.split("?")[0]
+        
+        # Try to extract the job ID to form a standard URL
+        # Patterns: /jobs/view/123456 or /jobs/view/job-title-123456
+        import re
+        match = re.search(r'/view/(\d+)', clean_url)
+        if match:
+            job_id = match.group(1)
+            return f"https://www.linkedin.com/jobs/view/{job_id}"
+            
+        return clean_url
+
+    async def _random_delay(self, min_ms: int = 2000, max_ms: int = 5000):
+        # Increased delay for "gentle" crawling
         await asyncio.sleep(random.uniform(min_ms, max_ms) / 1000)
 
     async def fetch_and_parse(self, search_url: str) -> List[Dict[str, str]]:
+        if self.cb.is_open():
+            print("LinkedIn Circuit is OPEN. Skipping scrape.")
+            return []
+
         extracted_jobs = []
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent=random.choice(USER_AGENTS)
             )
 
             # Inject the session cookie to bypass login if available
@@ -39,6 +71,7 @@ class LinkedInScraper:
                 current_url = page.url
                 if "linkedin.com/checkpoint/lg/login" in current_url or "linkedin.com/authwall" in current_url:
                     print(f"Scraping blocked by authwall. Current URL: {current_url}")
+                    self.cb.record_failure(points=3)
                     return []
 
                 await self._random_delay(2000, 4000)
@@ -48,6 +81,7 @@ class LinkedInScraper:
                     await page.wait_for_selector(".job-search-card, .jobs-search-results__list-item, .base-card, .base-search-card, .jobs-search-results-list__item, .jobs-search-results-list", timeout=15000)
                 except Exception:
                     print(f"Timeout waiting for job cards on {search_url}. Possibly no jobs found or page structure mismatch.")
+                    self.cb.record_failure(points=1)
                     return []
 
                 # LinkedIn uses different DOM structures for logged-in vs logged-out users.
@@ -69,8 +103,8 @@ class LinkedInScraper:
                         
                         raw_url = await link_el.first.get_attribute("href") if await link_el.count() > 0 else ""
                         
-                        # Clean URL tracking parameters
-                        clean_url = raw_url.split("?")[0] if raw_url else ""
+                        # Clean URL using Job ID extraction
+                        clean_url = self._get_clean_url(raw_url)
 
                         if clean_url:
                             extracted_jobs.append({
@@ -86,9 +120,14 @@ class LinkedInScraper:
                     except Exception as e:
                         print(f"Failed to parse a job card: {e}")
                         continue
+                
+                # Record success if we found jobs
+                if extracted_jobs:
+                    self.cb.record_success()
                         
             except Exception as e:
                 print(f"Scraping failed: {e}")
+                self.cb.record_failure(points=1)
             finally:
                 await browser.close()
                 

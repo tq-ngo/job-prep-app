@@ -67,3 +67,17 @@ export interface CorporateNewsItem {
   published_at: string;
   processed_at: string;
 }
+
+export interface JobSearchItem {
+  id: string;
+  company_name: string;
+  job_title: string;
+  apply_url: string;
+  location?: string;
+  skills_required: string[];
+  remote_policy: string;
+  salary_min_usd?: number;
+  salary_max_usd?: number;
+  quality_score: number;
+  posted_at: string;
+}

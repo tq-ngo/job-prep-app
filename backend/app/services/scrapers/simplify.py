@@ -3,7 +3,7 @@ import re
 from typing import List, Dict
 
 class SimplifyScraper:
-    TARGET_URL = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md"
+    TARGET_URL = "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/refs/heads/dev/README.md"
 
     async def fetch_and_parse(self) -> List[Dict[str, str]]:
         async with httpx.AsyncClient() as client:
@@ -15,56 +15,75 @@ class SimplifyScraper:
 
     def _extract_table_data(self, markdown_text: str) -> List[Dict[str, str]]:
         extracted_jobs = []
-        
-        # Regex to isolate the table rows and individual cell contents
-        tr_pattern = re.compile(r"<tr>(.*?)</tr>", re.DOTALL)
-        td_pattern = re.compile(r"<td>(.*?)</td>", re.DOTALL)
-        
-        # Regex for specific data points within the HTML
-        company_name_pattern = re.compile(r"<strong>.*?<a[^>]*>(.*?)</a>.*?</strong>", re.DOTALL)
-        apply_url_pattern = re.compile(r'<a href="([^"]+)"[^>]*><img[^>]*alt="Apply"', re.DOTALL)
-        
         last_company = ""
         
-        for tr_match in tr_pattern.finditer(markdown_text):
-            td_content = td_pattern.findall(tr_match.group(1))
+        # Regex to extract href values from application link cell
+        link_pattern = re.compile(r'href="([^"]+)"')
+        
+        # Regex to extract text inside HTML anchors if present
+        anchor_text_pattern = re.compile(r'<a[^>]*>(.*?)</a>')
+        
+        # Split markdown text by lines
+        lines = markdown_text.split("\n")
+        
+        for line in lines:
+            line = line.strip()
+            if not line.startswith("|"):
+                continue
             
-            # The target table structure has 5 columns: Company, Role, Location, Application, Age
-            if len(td_content) < 4:
+            # Split line by markdown pipes
+            parts = [p.strip() for p in line.split("|")]
+            
+            # Valid row starts and ends with |, split yields: ["", Company, Role, Location, Application, Date, ""]
+            if len(parts) < 6:
                 continue
                 
-            company_raw = td_content[0].strip()
-            role_raw = td_content[1].strip()
-            location_raw = td_content[2].replace("<br>", ", ").replace("<br/>", ", ").strip()
-            application_raw = td_content[3].strip()
+            # Filter out headers and dividers
+            if "company" in parts[1].lower() or "---" in parts[1]:
+                continue
+                
+            company_raw = parts[1]
+            role_raw = parts[2]
+            location_raw = parts[3]
+            application_raw = parts[4]
             
-            # Handle nested roles (↳ symbol)
-            if "↳" in company_raw:
+            if not role_raw or not application_raw:
+                continue
+                
+            # 1. Extract Company Name
+            if "↳" in company_raw or company_raw == "":
                 company_name = last_company
             else:
-                # Extract clean company name from the link inside strong tags
-                name_match = company_name_pattern.search(company_raw)
-                if name_match:
-                    company_name = name_match.group(1).strip()
+                # If there's an HTML link in the company column, extract text
+                anchor_match = anchor_text_pattern.search(company_raw)
+                if anchor_match:
+                    company_name = anchor_match.group(1).strip()
                 else:
-                    # Fallback: strip all tags if the structure is different
+                    # Strip any HTML tags or markdown links
                     company_name = re.sub(r'<[^>]+>', '', company_raw).strip()
+                    company_name = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', company_name).strip()
                 
-                # Filter out emoji markers like 🔥
-                company_name = company_name.split(" ")[-1] if " " in company_name else company_name
+                # Strip hot markers / icons
+                company_name = company_name.replace("🔥", "").strip()
                 last_company = company_name
             
-            # Extract the direct application URL from the "Apply" image link
-            url_match = apply_url_pattern.search(application_raw)
+            # 2. Extract Application URL
+            url_match = link_pattern.search(application_raw)
             if not url_match:
                 continue
-                
             url = url_match.group(1)
             
-            # Clean role and location of any remaining HTML tags
+            # 3. Clean Role and Location metadata
             role = re.sub(r'<[^>]+>', '', role_raw).strip()
-            location = re.sub(r'<[^>]+>', '', location_raw).strip()
+            role = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', role).strip()
             
+            location = re.sub(r'<[^>]+>', '', location_raw).replace("<br>", ", ").replace("<br/>", ", ").strip()
+            location = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', location).strip()
+            
+            # Filter out closed roles (legend 🔒)
+            if "🔒" in role or "🔒" in application_raw:
+                continue
+                
             extracted_jobs.append({
                 "company_name": company_name,
                 "job_title": role,
@@ -72,5 +91,5 @@ class SimplifyScraper:
                 "job_url": url,
                 "source": "Simplify GitHub"
             })
-
+            
         return extracted_jobs
