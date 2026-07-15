@@ -1,35 +1,48 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlmodel import SQLModel, create_engine as sqlmodel_create_engine
-from typing import AsyncGenerator
-from app.core.config import settings
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlmodel import SQLModel
+from app.config import settings
 
-# CRITICAL: Database URL must use the postgresql+asyncpg:// driver prefix for async
-ASYNC_DATABASE_URL = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-SYNC_DATABASE_URL = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-
-async_engine = create_async_engine(
-    ASYNC_DATABASE_URL,
+# Creates a connection pool to PostgreSQL
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
     echo=False,
-    pool_pre_ping=True
 )
 
-# Synchronous engine for Celery tasks
-sync_engine = sqlmodel_create_engine(SYNC_DATABASE_URL, echo=False)
-
-# Create a session maker bound to the async engine
-async_session_maker = sessionmaker(
-    async_engine, 
-    class_=AsyncSession, 
-    expire_on_commit=False
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
 )
 
-async def init_db() -> None:
-    # SQLModel metadata generation requires running within an async engine context
-    async with async_engine.begin() as conn:
+
+async def get_session() -> AsyncSession:
+    """
+    FastAPI dependency: yields a database session and ensures cleanup.
+
+    Usage in a route:
+        @router.get("/jobs")
+        async def list_jobs(session: AsyncSession = Depends(get_session)):
+            ...
+
+    The 'async with' block ensures the session is closed even if an
+    exception occurs — like a try/finally block, but cleaner.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def create_all_tables():
+    """
+    Creates all tables defined in SQLModel models.
+    Called once on app startup if tables don't exist.
+    In production, use Alembic migrations instead.
+    """
+    async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with async_session_maker() as session:
-        yield session
