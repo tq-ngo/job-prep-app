@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ELASTICSEARCH_URL: str = Field(default="http://localhost:9200")
 
     GEMINI_API_KEY: str = Field(default="")
-    GEMINI_MODEL: str = Field(default="gemini-2.0-flash")
+    GEMINI_MODEL: str = Field(default="gemini-3.5-flash")
 
     SECRET_KEY: str = Field(...)
 

@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 import json
 import uuid
+import os
 
 from sqlmodel import select
 from sqlalchemy import update
@@ -14,6 +15,8 @@ from app.models.job import Job
 from app.ai.skill_extractor import extract_skills
 from app.ai.embedder import generate_embedding
 from app.core.redis import get_redis_pool
+from app.schemas.job import JobCreate
+from backend.app.scraping.parsers.linkedin import CustomLinkedInScraper
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,71 @@ async def _scrape_github(self):
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
     finally:
         await redis.delete(lock_key)
+
+
+@celery_app.task(
+    name="app.tasks.job_tasks.scrape_linkedin",
+    bind=True,
+    max_retries=1,
+    queue="scraping",
+)
+def scrape_linkedin(self, search_url: str):
+    from asgiref.sync import async_to_sync
+    return async_to_sync(_scrape_linkedin)(self, search_url)
+
+async def _scrape_linkedin(self, search_url: str):
+    """
+    Celery task: sequentially scrape LinkedIn job pages
+    """
+    logger.info(f"[{self.request.id}] Starting LinkedIn scrape for {search_url}")
+    redis = await get_redis_pool()
+    lock_key = "scrape_lock:linkedin"
+    
+    # Optional: fetch from DB/Redis instead of env
+    li_at = os.getenv("LINKEDIN_LI_AT", "") 
+
+    # Progress callback mapping directly to Celery task state
+    async def progress_tracker(percent: int, message: str):
+        self.update_state(
+            state='PROGRESS',
+            meta={'percent': percent, 'message': message}
+        )
+
+    scraper = CustomLinkedInScraper()
+    raw_jobs = await scraper.fetch_jobs(
+        base_search_url=search_url,
+        li_at_cookie=li_at,
+        max_pages=10,
+        progress_callback=progress_tracker
+    )
+    
+    if not raw_jobs:
+        return {"status": "failed or no jobs found"}
+
+    total_stats = {"new": 0, "updated": 0, "source": "linkedin"}
+    
+    async with AsyncSessionLocal() as session:
+        batch = []
+        for job_dict in raw_jobs:
+            job_dict["scraped_at"] = datetime.utcnow()
+            # Convert dictionary to JobCreate schema
+            batch.append(JobCreate(**job_dict))
+            
+            # Sync in chunks of 50 to respect memory and DB limits
+            if len(batch) >= 50:
+                stats = await sync_jobs_batch(batch, session)
+                total_stats["new"] += stats.get("new", 0)
+                total_stats["updated"] += stats.get("updated", 0)
+                batch.clear()
+        
+        # Flush remaining
+        if batch:
+            stats = await sync_jobs_batch(batch, session)
+            total_stats["new"] += stats.get("new", 0)
+            total_stats["updated"] += stats.get("updated", 0)
+            
+    logger.info(f"LinkedIn complete: {total_stats}")
+    return total_stats
 
 
 @celery_app.task(

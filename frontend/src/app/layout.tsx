@@ -11,8 +11,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-background text-foreground min-h-screen flex flex-row font-sans selection:bg-spruce-green/20 selection:text-spruce-green transition-colors duration-300">
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body suppressHydrationWarning className="bg-background text-foreground min-h-screen flex flex-row font-sans selection:bg-spruce-green/20 selection:text-spruce-green transition-colors duration-300">
         <Providers>
           {/* Fixed Left Navigation Sidebar */}
           <aside className="w-64 fixed inset-y-0 left-0 bg-background flex flex-col z-40 border-r border-slate-soft transition-colors duration-300">

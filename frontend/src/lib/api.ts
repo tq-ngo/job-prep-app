@@ -72,7 +72,7 @@ export const jobsApi = {
 };
 
 export const tasksApi = {
-  getStatus: async (taskId: string): Promise<{ status: string; result: any; error: string | null }> => {
+  getStatus: async (taskId: string): Promise<{ status: string; result: any; error: string | null; meta?: any }> => {
     const { data } = await apiClient.get(`/api/v1/tasks/${taskId}`);
     return data;
   },

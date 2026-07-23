@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import { tasksApi } from "@/lib/api";
 
-export function useScrapePolling(taskId: string | null, onComplete: () => void) {
+export function useScrapePolling(
+  taskId: string | null, 
+  onComplete: () => void,
+  onProgress?: (percent: number, message: string) => void
+) {
   useEffect(() => {
     if (!taskId) return;
 
@@ -15,6 +19,8 @@ export function useScrapePolling(taskId: string | null, onComplete: () => void) 
         } else if (result.status === "FAILURE") {
           clearInterval(pollInterval);
           console.error("Scraping task failed:", result.error);
+        } else if (result.status === "PROGRESS" && result.meta && onProgress) {
+          onProgress(result.meta.percent, result.meta.message);
         }
       } catch (error) {
         clearInterval(pollInterval);
@@ -23,5 +29,5 @@ export function useScrapePolling(taskId: string | null, onComplete: () => void) 
     }, 2000);
 
     return () => clearInterval(pollInterval);
-  }, [taskId, onComplete]);
+  }, [taskId, onComplete, onProgress]);
 }

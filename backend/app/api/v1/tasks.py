@@ -15,5 +15,6 @@ async def get_task_status(task_id: str):
         "task_id": task_id,
         "status": task.state,
         "result": str(task.result) if task.state == "SUCCESS" else None,
-        "error": str(task.info) if task.state == "FAILURE" else None
+        "error": str(task.info) if task.state == "FAILURE" else None,
+        "meta": task.info if task.state == "PROGRESS" else None
     }
