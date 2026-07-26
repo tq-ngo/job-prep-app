@@ -15,7 +15,6 @@ class JobCreate(BaseModel):
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
     salary_currency: Optional[str] = "USD"
-    tags: Optional[List[str]] = None
     is_remote: Optional[bool] = None
     posted_at: Optional[datetime] = None
     terms: Optional[List[str]] = None

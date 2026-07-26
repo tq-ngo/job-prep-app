@@ -17,6 +17,29 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+# ── Celery-safe factory (creates a new engine per call) ──────────────────
+def create_worker_session() -> async_sessionmaker[AsyncSession]:
+    """
+    Returns a NEW async_sessionmaker bound to a NEW engine.
+
+    Celery workers use async_to_sync() which spawns a fresh event loop
+    per task. Module-level engines get bound to the first loop and crash
+    on subsequent tasks with 'another operation is in progress'. This
+    factory avoids that by creating an isolated engine each time.
+    """
+    worker_engine = create_async_engine(
+        settings.DATABASE_URL,
+        pool_size=5,
+        max_overflow=10,
+        echo=False,
+    )
+    return async_sessionmaker(
+        worker_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+
 async def get_session() -> AsyncSession:
     """
     FastAPI dependency: yields a database session and ensures cleanup.

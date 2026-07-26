@@ -3,10 +3,10 @@ import re
 import uuid
 import hashlib
 from typing import AsyncIterator, List, Dict, Any
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import asyncio
 
-from app.scraping.http_scraper import http_scraper
+from app.scraping.http_scraper import TLSImpersonateScraper
 from app.schemas.job import JobCreate
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def parse_relative_date(date_str: str) -> datetime:
     date_str = date_str.lower().strip()
     date_str = re.sub(r'[*_]', '', date_str)
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     
     if "today" in date_str:
         return now
@@ -40,7 +40,7 @@ def parse_relative_date(date_str: str) -> datetime:
         day_str = match.group(2)
         try:
             parsed_date = datetime.strptime(f"{month_str} {day_str}", "%b %d")
-            posted_date = parsed_date.replace(year=now.year, tzinfo=timezone.utc)
+            posted_date = parsed_date.replace(year=now.year)
             if posted_date > now + timedelta(days=1):
                 posted_date = posted_date.replace(year=now.year - 1)
             return posted_date
@@ -56,15 +56,16 @@ TARGET_URLS = [
     "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/refs/heads/main/README.md",
 ]
 
+scraper = TLSImpersonateScraper()
+
 async def _parse_readme(url: str, include_inactive: bool = False) -> Dict[str, Any]:
     logger.info(f"Fetching README from {url}")
     
-    response = await http_scraper.fetch(url)
-    if response is None:
+    text = await scraper.fetch_page(url)
+    
+    if text is None:
         logger.warning(f"Failed to fetch {url} (circuit open, rate limited, or error)")
         return {"url": url, "jobs": [], "status": "failed"}
-        
-    text = response.text
     
     in_table = False
     last_company = "Unknown"

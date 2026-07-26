@@ -18,7 +18,17 @@ export default function NewsPage() {
     mutationFn: (url: string) => newsApi.triggerScrape(url),
     onSuccess: () => {
       setScrapeUrl("");
-      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["news"] }), 3000);
+      // Poll for the new article instead of blindly waiting
+      let attempts = 0;
+      const poll = () => {
+        if (attempts >= 10) return; // give up after ~20s
+        attempts++;
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ["news"] });
+          poll();
+        }, 2000);
+      };
+      poll();
     }
   });
 

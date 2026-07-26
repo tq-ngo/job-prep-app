@@ -11,12 +11,13 @@ def crawl_news_site(self, url: str):
 async def _crawl_news_site(self, url: str):
     logger.info(f"Crawling news site: {url}")
     
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import create_worker_session
     from app.models.news import NewsArticle
     from datetime import datetime
     import hashlib
     
-    async with AsyncSessionLocal() as session:
+    WorkerSession = create_worker_session()
+    async with WorkerSession() as session:
         # Note: A real implementation would use Playwright to fetch and Gemini to summarize.
         # We insert a simulated article to complete the data pipeline loop for the UI.
         article = NewsArticle(

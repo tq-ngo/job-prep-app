@@ -1,6 +1,22 @@
 import redis.asyncio as aioredis
 from app.config import settings
 
+
+# ── Celery-safe factory (isolated client per call) ───────────────────────
+def create_worker_redis() -> aioredis.Redis:
+    """
+    Creates an isolated Redis client for Celery workers.
+    Each call returns a fresh client not tied to any prior event loop.
+    """
+    pool = aioredis.ConnectionPool.from_url(
+        settings.REDIS_URL,
+        max_connections=10,
+        decode_responses=True,
+    )
+    return aioredis.Redis(connection_pool=pool)
+
+
+# ── FastAPI global pool (single event loop, safe) ────────────────────────
 # Connection pool: reuse connections instead of creating new ones per request
 # max_connections=50: Maximum simultaneous Redis connections
 _pool: aioredis.ConnectionPool | None = None

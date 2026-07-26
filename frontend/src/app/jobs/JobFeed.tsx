@@ -13,13 +13,20 @@ interface JobFeedProps {
 
 export default function JobFeed({ initialData }: JobFeedProps) {
   const [page, setPage] = useState(1);
+
+  // Client-side search (spec: use filter() only, not server-side)
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Server-side filters (passed as API query params)
   const [category, setCategory] = useState("");
   const [source, setSource] = useState("");
   const [isRemote, setIsRemote] = useState(false);
+
+  // Scraping state for the pull mechanism
   const [taskId, setTaskId] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
+  // Data fetching
   const { data: jobsResponse, isLoading, refetch } = useJobs({ 
     page, 
     page_size: 50,
@@ -30,6 +37,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
 
   const triggerScrape = useTriggerScrape();
 
+  // Stable callback for polling completion
   const onScrapeComplete = useCallback(() => {
     setTaskId(null);
     refetch();
@@ -37,22 +45,27 @@ export default function JobFeed({ initialData }: JobFeedProps) {
 
   useScrapePolling(taskId, onScrapeComplete);
 
+  // Trigger scraper matching current source filter, or all scrapers when unfiltered
   const handleRefreshScrapers = () => {
-    triggerScrape.mutate("github", {
+    const scrapeSource = source || "all";
+    triggerScrape.mutate(scrapeSource, {
       onSuccess: (data) => {
         if (data.task_id) {
           setTaskId(data.task_id);
         } else {
+          // Scrape already in progress — just refetch current data from DB
           refetch();
         }
       }
     });
   };
 
+  // Determine which data to show (SSR initial vs client-fetched)
   const isDefaultState = page === 1 && !isRemote && !source && !category;
   const currentData = isDefaultState && !jobsResponse ? initialData : jobsResponse;
   const currentJobs = currentData?.items ?? [];
 
+  // CLIENT-SIDE search filter (spec: "Must use standard filter() operations")
   const filteredJobs = useMemo(() => {
     if (!searchQuery.trim()) return currentJobs;
     const q = searchQuery.toLowerCase();
@@ -67,9 +80,10 @@ export default function JobFeed({ initialData }: JobFeedProps) {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
+
       {/* Top Header & Filter Bar */}
       <div className="bg-background border-b border-slate-soft pt-12 pb-8">
-        <div className="max-w-5xl mx-auto px-8 lg:px-12">
+        <div className="max-w-[1400px] mx-auto px-8 lg:px-12">
           <div className="flex justify-between items-end mb-8">
             <div>
               <h1 className="text-3xl font-serif font-medium text-slate-ink tracking-tight">Job Board</h1>
@@ -78,6 +92,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
               </p>
             </div>
             
+            {/* Essential "Refresh" Action Button */}
             <button 
               onClick={handleRefreshScrapers}
               disabled={isScraping}
@@ -89,7 +104,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
           </div>
 
           <div className="flex flex-col lg:flex-row gap-4 lg:items-center">
-            {/* Search bar */}
+            {/* Client-side search bar (spec: filter() only) */}
             <div className="flex-1 max-w-md relative">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-ink/40" />
               <input
@@ -109,8 +124,9 @@ export default function JobFeed({ initialData }: JobFeedProps) {
               )}
             </div>
 
-            {/* Filter dropdowns */}
+            {/* Filter pills */}
             <div className="flex flex-wrap gap-3 items-center lg:ml-auto">
+              {/* Category Filter */}
               <select
                 value={category}
                 onChange={(e) => { setCategory(e.target.value); setPage(1); }}
@@ -122,6 +138,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
                 <option value="Others">Others</option>
               </select>
 
+              {/* Source Filter */}
               <select
                 value={source}
                 onChange={(e) => { setSource(e.target.value); setPage(1); }}
@@ -132,6 +149,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
                 <option value="linkedin">LinkedIn</option>
               </select>
 
+              {/* Remote Toggle */}
               <button
                 type="button"
                 onClick={() => { setIsRemote(!isRemote); setPage(1); }}
@@ -148,9 +166,10 @@ export default function JobFeed({ initialData }: JobFeedProps) {
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="max-w-5xl mx-auto px-8 lg:px-12 py-12">
-        
+      {/* Main Content Area: 6-Column Table */}
+      <div className="max-w-[1400px] mx-auto px-8 lg:px-12 py-8">
+
+        {/* Empty state CTA */}
         {!isLoading && currentJobs.length === 0 && !searchQuery && (
           <div className="flex flex-col items-center justify-center py-32 text-center">
             <div className="w-16 h-16 rounded bg-neutral-soft border border-slate-soft flex items-center justify-center mb-6">
@@ -163,64 +182,96 @@ export default function JobFeed({ initialData }: JobFeedProps) {
           </div>
         )}
 
+        {/* Spec-compliant 6-column table */}
         {(isLoading || filteredJobs.length > 0) && (
-          <div className="border border-slate-soft bg-background flex flex-col -mx-px">
-            {isLoading ? (
-              Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="p-6 border-b border-slate-soft last:border-b-0 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-pulse">
-                  <div className="flex-1 space-y-3">
-                    <div className="h-5 bg-slate-soft rounded w-3/4 max-w-[300px]"></div>
-                    <div className="h-4 bg-slate-soft/50 rounded w-1/2 max-w-[200px]"></div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="h-3 bg-slate-soft/50 rounded w-20"></div>
-                    <div className="h-8 bg-slate-soft rounded w-24"></div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              filteredJobs.map((job: Job) => (
-                <div 
-                  key={job.id} 
-                  onClick={() => setSelectedJob(job)}
-                  className="bg-background p-6 border-b border-slate-soft last:border-b-0 hover:bg-neutral-soft transition-colors duration-200 cursor-pointer group flex flex-col md:flex-row md:items-start lg:items-center justify-between gap-4"
-                >
-                  <div className="flex-1 min-w-0 pr-4">
-                    <div className="flex justify-between md:justify-start items-start md:items-center gap-4">
-                      <h3 className="font-serif text-lg font-medium text-slate-ink group-hover:text-spruce-green transition-colors truncate">{job.title}</h3>
-                      <span className="font-mono text-xs text-amber-clay uppercase tracking-wider shrink-0 hidden md:inline-block">{job.source}</span>
-                    </div>
-                    <p className="font-sans text-sm text-slate-ink/70 mt-1.5 truncate">
-                      {job.company} — {job.location || (job.is_remote ? "Remote" : "Unknown")}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-6 mt-3 md:mt-0 shrink-0">
-                    <span className="font-mono text-xs text-slate-ink/40">
-                      {job.posted_at ? new Date(job.posted_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : "—"}
-                    </span>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); window.open(job.apply_url, '_blank', 'noopener,noreferrer'); }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-sans font-medium text-spruce-green bg-transparent border border-spruce-green/30 hover:border-spruce-green hover:bg-spruce-green/5 rounded transition-all"
-                    >
-                      Apply <ExternalLink size={12} />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="border border-slate-soft rounded overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-soft">
+                    <th className="px-5 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-ink/50">Role</th>
+                    <th className="px-5 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-ink/50">Company</th>
+                    <th className="px-5 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-ink/50">Location</th>
+                    <th className="px-5 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-ink/50">Source</th>
+                    <th className="px-5 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-ink/50 text-right">Apply</th>
+                    <th className="px-5 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-ink/50 text-right">Date Posted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isLoading ? (
+                    Array.from({ length: 8 }).map((_, i) => (
+                      <tr key={i} className="border-b border-slate-soft/50">
+                        <td colSpan={6} className="px-5 py-4">
+                          <div className="animate-pulse flex gap-8">
+                            <div className="h-4 w-48 bg-slate-soft rounded"></div>
+                            <div className="h-4 w-24 bg-slate-soft/50 rounded"></div>
+                            <div className="h-4 w-32 bg-slate-soft/50 rounded"></div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    filteredJobs.map((job: Job) => (
+                      <tr 
+                        key={job.id} 
+                        onClick={() => setSelectedJob(job)}
+                        className="border-b border-slate-soft/50 last:border-b-0 hover:bg-slate-soft/20 cursor-pointer transition-colors group"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedJob(job); }}
+                      >
+                        <td className="px-5 py-3.5 font-sans font-medium text-slate-ink group-hover:text-spruce-green transition-colors truncate max-w-[280px]">
+                          {job.title}
+                        </td>
+                        <td className="px-5 py-3.5 font-sans text-foreground truncate max-w-[180px]">
+                          {job.company}
+                        </td>
+                        <td className="px-5 py-3.5 font-sans text-slate-ink/60 truncate max-w-[180px]">
+                          {job.location || (job.is_remote ? "Remote" : "—")}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className="font-mono text-xs text-amber-clay uppercase tracking-wider">
+                            {job.source}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <a 
+                            href={job.apply_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-sans font-medium text-spruce-green bg-transparent border border-spruce-green/30 hover:border-spruce-green hover:bg-spruce-green/5 rounded transition-all"
+                          >
+                            Apply <ExternalLink size={12} />
+                          </a>
+                        </td>
+                        <td className="px-5 py-3.5 text-right font-mono text-xs text-slate-ink/40 whitespace-nowrap">
+                          {job.posted_at 
+                            ? new Date(job.posted_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                            : "—"
+                          }
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
+        {/* No search results */}
         {!isLoading && searchQuery && filteredJobs.length === 0 && currentJobs.length > 0 && (
           <div className="text-center py-24 font-serif text-slate-ink/60">
             No entries found for &ldquo;{searchQuery}&rdquo;.
           </div>
         )}
 
+        {/* Pagination */}
         {currentData && currentData.pages > 1 && (
           <div className="flex justify-between items-center mt-8">
             <span className="font-mono text-xs text-slate-ink/50 uppercase tracking-widest">
-              Page {page} of {currentData.pages}
+              Page {page} of {currentData.pages} ({currentData.total} total)
             </span>
             <div className="flex gap-2">
               <button
@@ -242,6 +293,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
         )}
       </div>
 
+      {/* Detail Overlay */}
       <JobDetailsSidebar 
         job={selectedJob} 
         onClose={() => setSelectedJob(null)} 

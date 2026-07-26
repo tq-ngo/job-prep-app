@@ -6,7 +6,7 @@ from typing import Optional
 from app.core.database import get_session
 from app.models.job import Job
 from app.schemas.job import JobRead, JobListResponse
-from app.tasks.job_tasks import scrape_github
+from app.tasks.job_tasks import scrape_github, scrape_linkedin
 from app.core.redis import get_redis_pool
 from sqlalchemy import or_
 import uuid
@@ -74,8 +74,8 @@ async def list_jobs(
             query = query.where(others_filter)
             count_query = count_query.where(others_filter)
 
-    # Order by most recently scraped
-    query = query.order_by(Job.scraped_at.desc()).offset(offset).limit(page_size)
+    # Order by date posted (latest on top)
+    query = query.order_by(Job.posted_at.desc().nulls_last()).offset(offset).limit(page_size)
     
     # Execute both queries
     jobs_result = await session.execute(query)
@@ -109,12 +109,31 @@ async def trigger_scrape(source: str):
     """
     task_map = {
         "github": scrape_github,
+        "linkedin": scrape_linkedin,
     }
+
+    if source == "all":
+        redis = await get_redis_pool()
+        task_ids = []
+        for src_name, src_task in task_map.items():
+            lock_key = f"scrape_lock:{src_name}"
+            acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
+            if acquired:
+                task = src_task.delay() if src_name == "github" else src_task.delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer")
+                task_ids.append({"source": src_name, "task_id": task.id})
+        if not task_ids:
+            return {"status": "in_progress", "message": "All scrapers are already running."}
+        return {
+            "status": "accepted",
+            "task_id": task_ids[0]["task_id"],
+            "tasks": task_ids,
+            "message": f"Triggered {len(task_ids)} scrapers",
+        }
     
     if source not in task_map:
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown source '{source}'. Valid: {list(task_map.keys())}"
+            detail=f"Unknown source '{source}'. Valid: {list(task_map.keys()) + ['all']}"
         )
         
     redis = await get_redis_pool()
@@ -128,7 +147,10 @@ async def trigger_scrape(source: str):
             "message": f"A scrape for {source} is already running."
         }
     
-    task = task_map[source].delay()
+    if source == "linkedin":
+        task = task_map[source].delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern")
+    else:
+        task = task_map[source].delay()
     
     return {
         "status": "accepted",

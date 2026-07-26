@@ -26,6 +26,7 @@ httpx[http2]>=0.27.0
 playwright>=1.44.0
 beautifulsoup4>=4.12.3
 lxml>=5.2.2
+curl-cffi
 
 # AI
 google-genai>=1.15.0

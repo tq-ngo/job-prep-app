@@ -1,3 +1,5 @@
+"use client";
+
 import { X, ExternalLink, MapPin, Building2, Calendar, Globe, Tag } from "lucide-react";
 import { Job } from "@/lib/api";
 

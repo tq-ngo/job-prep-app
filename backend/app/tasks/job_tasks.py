@@ -9,14 +9,14 @@ from sqlalchemy import update
 
 from app.tasks.celery_app import celery_app
 from app.scraping.parsers.github import parse_github_jobs
-from app.scraping.db_sync import sync_jobs_batch
-from app.core.database import AsyncSessionLocal
+from app.scraping.db_sync import DatabaseSyncService
+from app.core.database import create_worker_session
 from app.models.job import Job
 from app.ai.skill_extractor import extract_skills
 from app.ai.embedder import generate_embedding
-from app.core.redis import get_redis_pool
+from app.core.redis import create_worker_redis
 from app.schemas.job import JobCreate
-from backend.app.scraping.parsers.linkedin import CustomLinkedInScraper
+from app.scraping.parsers.linkedin import LinkedInScraper
 
 logger = logging.getLogger(__name__)
 
@@ -36,31 +36,30 @@ async def _scrape_github(self):
     """
     logger.info(f"[{self.request.id}] Starting Github scrape")
     
-    redis = await get_redis_pool()
+    redis = create_worker_redis()
     lock_key = "scrape_lock:github"
     scrape_start_time = datetime.utcnow()
     
     try:
         total_stats = {"new": 0, "skipped": 0, "updated": 0, "source": "github"}
         
-        async with AsyncSessionLocal() as session:
+        WorkerSession = create_worker_session()
+        async with WorkerSession() as session:
+            db_service = DatabaseSyncService(session)
             batch = []
             
             job_gen, successful_urls = await parse_github_jobs()
             for job in job_gen:
-                job.scraped_at = datetime.utcnow()
-                batch.append(job)
+                batch.append(job.model_dump())
                 
                 if len(batch) >= 100:
-                    stats = await sync_jobs_batch(batch, session)
-                    total_stats["new"] += stats.get("new", 0)
-                    total_stats["updated"] += stats.get("updated", 0)
+                    upserted_count = await db_service.bulk_upsert_jobs(batch)
+                    total_stats["new"] += upserted_count
                     batch.clear()
             
             if batch:
-                stats = await sync_jobs_batch(batch, session)
-                total_stats["new"] += stats.get("new", 0)
-                total_stats["updated"] += stats.get("updated", 0)
+                upserted_count = await db_service.bulk_upsert_jobs(batch)
+                total_stats["new"] += upserted_count
             
             if successful_urls:
                 stmt = (
@@ -97,7 +96,7 @@ async def _scrape_linkedin(self, search_url: str):
     Celery task: sequentially scrape LinkedIn job pages
     """
     logger.info(f"[{self.request.id}] Starting LinkedIn scrape for {search_url}")
-    redis = await get_redis_pool()
+    redis = create_worker_redis()
     lock_key = "scrape_lock:linkedin"
     
     # Optional: fetch from DB/Redis instead of env
@@ -110,7 +109,7 @@ async def _scrape_linkedin(self, search_url: str):
             meta={'percent': percent, 'message': message}
         )
 
-    scraper = CustomLinkedInScraper()
+    scraper = LinkedInScraper()
     raw_jobs = await scraper.fetch_jobs(
         base_search_url=search_url,
         li_at_cookie=li_at,
@@ -123,25 +122,25 @@ async def _scrape_linkedin(self, search_url: str):
 
     total_stats = {"new": 0, "updated": 0, "source": "linkedin"}
     
-    async with AsyncSessionLocal() as session:
+    WorkerSession = create_worker_session()
+    async with WorkerSession() as session:
+        db_service = DatabaseSyncService(session)
         batch = []
+
         for job_dict in raw_jobs:
-            job_dict["scraped_at"] = datetime.utcnow()
-            # Convert dictionary to JobCreate schema
-            batch.append(JobCreate(**job_dict))
+            job = JobCreate(**job_dict)
+            batch.append(job.model_dump())
             
             # Sync in chunks of 50 to respect memory and DB limits
             if len(batch) >= 50:
-                stats = await sync_jobs_batch(batch, session)
-                total_stats["new"] += stats.get("new", 0)
-                total_stats["updated"] += stats.get("updated", 0)
+                upserted_count = await db_service.bulk_upsert_jobs(batch)
+                total_stats["new"] += upserted_count
                 batch.clear()
         
         # Flush remaining
         if batch:
-            stats = await sync_jobs_batch(batch, session)
-            total_stats["new"] += stats.get("new", 0)
-            total_stats["updated"] += stats.get("updated", 0)
+            upserted_count = await db_service.bulk_upsert_jobs(batch)
+            total_stats["new"] += upserted_count
             
     logger.info(f"LinkedIn complete: {total_stats}")
     return total_stats
@@ -167,8 +166,9 @@ async def _enrich_job_with_ai(self, job_id: str):
     """
     logger.info(f"[{self.request.id}] Enriching job {job_id}")
     
+    WorkerSession = create_worker_session()
     try:
-        async with AsyncSessionLocal() as session:
+        async with WorkerSession() as session:
             job = await session.get(Job, uuid.UUID(job_id))
             if not job:
                 logger.error(f"Job {job_id} not found")
@@ -191,7 +191,6 @@ async def _enrich_job_with_ai(self, job_id: str):
             # Update the job record
             job.skills = skills
             job.embedding = embedding
-            job.enriched_at = datetime.utcnow()
             job.scrape_status = "enriched"
             
             session.add(job)
@@ -200,7 +199,7 @@ async def _enrich_job_with_ai(self, job_id: str):
             logger.info(f"Job {job_id} enriched: {len(skills)} skills, embedding={len(embedding)}d")
             
             # Publish to Redis Pub/Sub for WebSockets
-            redis = await get_redis_pool()
+            redis = create_worker_redis()
             await redis.publish(
                 "new_jobs_channel",
                 json.dumps({
@@ -218,7 +217,7 @@ async def _enrich_job_with_ai(self, job_id: str):
         # Dead Letter Queue implementation
         # If this is the last retry, mark as failed
         if self.request.retries >= self.max_retries:
-            async with AsyncSessionLocal() as session:
+            async with WorkerSession() as session:
                 job = await session.get(Job, uuid.UUID(job_id))
                 if job:
                     job.scrape_status = "failed"
@@ -247,7 +246,8 @@ async def _process_raw_jobs_batch(self, batch_size: int = 10):
     logger.info(f"[{self.request.id}] Starting AI Enrichment Batch")
 
     try:
-        async with AsyncSessionLocal() as session:
+        WorkerSession = create_worker_session()
+        async with WorkerSession() as session:
             query = select(Job).where(Job.scrape_status == "raw").limit(batch_size)
             result = await session.execute(query)
             jobs = result.scalars().all()

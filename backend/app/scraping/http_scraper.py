@@ -1,149 +1,75 @@
 import asyncio
+import random
 import logging
-from urllib.parse import urlparse
-from typing import Optional
-import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
-from app.scraping.circuit_breaker import circuit_breaker
+from typing import Optional, Dict, Any
+from curl_cffi import requests
 
 logger = logging.getLogger(__name__)
 
-# Realistic browser headers — some sites block requests without these
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-}
-
-
-class HttpScraper:
+class TLSImpersonateScraper:
     """
-    Static page scraper using httpx (async HTTP client).
-    
-    Use this for:
-    - Sites that return full HTML on first load (no JS needed)
-    - JSON APIs (RemoteOK, GitHub Simplify)
-    - RSS feeds
-    
-    Features:
-    - Connection pooling (one client shared across requests)
-    - Automatic retry with exponential backoff
-    - Circuit breaker integration
-    - Per-domain rate limiting (polite delay between requests)
-    - Gzip decompression
+    HTTP Engine using curl_cffi to bypass JA3/JA4 TLS fingerprinting checks.
+    Impersonates real Chrome browser handshakes at the C layer.
     """
-    
-    # Minimum seconds between requests to the same domain
-    # This is "being a good citizen" — don't hammer servers
-    MIN_DELAY_PER_DOMAIN = 1.0
-    
-    def __init__(self):
-        # httpx.AsyncClient is like requests.Session but async
-        # Limits control the connection pool size
-        self._client = httpx.AsyncClient(
-            headers=DEFAULT_HEADERS,
-            follow_redirects=True,         # Follow 301/302 redirects
-            timeout=httpx.Timeout(30.0),   # 30 second total timeout
-            limits=httpx.Limits(
-                max_connections=20,             # Max simultaneous connections
-                max_keepalive_connections=10,   # Keep 10 connections alive
-            ),
-        )
-        # Track last request time per domain for rate limiting
-        self._last_request_time: dict[str, float] = {}
-    
-    @retry(
-        # Retry up to 3 times
-        stop=stop_after_attempt(3),
-        # Wait 1s, then 2s, then 4s between retries (exponential backoff)
-        wait=wait_exponential(multiplier=1, min=1, max=8),
-        # Only retry on network errors and 5xx responses (not 4xx)
-        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
-    )
-    async def fetch(self, url: str) -> Optional[httpx.Response]:
+    def __init__(self, proxy_url: Optional[str] = None):
+        self.proxy_url = proxy_url
+        # Maintain browser headers consistent with Chrome 120
+        self.default_headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"macOS"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
+
+    async def fetch_page(
+        self, 
+        url: str, 
+        max_retries: int = 3, 
+        base_backoff: float = 2.0
+    ) -> Optional[str]:
         """
-        Fetch a URL with circuit breaker, rate limiting, and retries.
-        
-        Returns the Response object or None if circuit is open.
-        Raises httpx exceptions on persistent failures.
+        Fetches a target URL with TLS impersonation, automatic retries,
+        exponential backoff, and randomized jitter.
         """
-        domain = urlparse(url).netloc
-        
-        # Circuit Breaker Check
-        if not await circuit_breaker.allow_request(domain):
-            logger.info(f"Skipping {url[:60]} — circuit OPEN for {domain}")
-            return None
-        
-        # Rate Limiting (polite delay)
-        await self._polite_delay(domain)
-        
-        # Actual HTTP Request
-        try:
-            logger.debug(f"GET {url[:100]}")
-            import os
-            headers = {}
-            gh_token = os.getenv("GITHUB_TOKEN")
-            if gh_token and ("githubusercontent.com" in domain or "api.github.com" in domain):
-                headers["Authorization"] = f"Bearer {gh_token}"
-                
-            response = await self._client.get(url, headers=headers)
-            
-            # Record success even for 4xx (domain is responding)
-            # But raise for actual errors so retry logic kicks in
-            response.raise_for_status()
-            
-            await circuit_breaker.record_success(domain)
-            return response
-            
-        except httpx.HTTPStatusError as e:
-            # 4xx: client error (bad URL, auth required) — don't retry
-            if 400 <= e.response.status_code < 500:
-                logger.warning(f"4xx for {url}: {e.response.status_code}")
-                if e.response.status_code == 429:
-                    logger.warning("Rate limited (429). Returning None to gracefully skip.")
-                    await circuit_breaker.record_failure(domain)
+        proxies = {"http": self.proxy_url, "https": self.proxy_url} if self.proxy_url else None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Execute blocking curl_cffi call in threadpool to keep asyncio loop unblocked
+                response = await asyncio.to_thread(
+                    requests.get,
+                    url,
+                    headers=self.default_headers,
+                    impersonate="chrome120", # Exact TLS Cipher Suite & HTTP/2 frame spoofing
+                    proxies=proxies,
+                    timeout=15,
+                    allow_redirects=True
+                )
+
+                if response.status_code == 200:
+                    return response.text
+                elif response.status_code in (429, 503, 403):
+                    logger.warning(
+                        f"Attempt {attempt}/{max_retries}: Encountered status {response.status_code} for {url}. Backing off."
+                    )
+                else:
+                    logger.error(f"Unrecoverable HTTP status {response.status_code} for URL: {url}")
                     return None
-                await circuit_breaker.record_success(domain)  # Domain is up
-                raise
-            # 5xx: server error — record failure and retry
-            logger.warning(f"5xx for {url}: {e.response.status_code}")
-            await circuit_breaker.record_failure(domain)
-            raise
-            
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
-            logger.warning(f"Network error for {url}: {e}")
-            await circuit_breaker.record_failure(domain)
-            raise
-    
-    async def fetch_json(self, url: str) -> Optional[dict | list]:
-        """Fetch a URL and parse the response as JSON."""
-        response = await self.fetch(url)
-        if response is None:
-            return None
-        return response.json()
-    
-    async def _polite_delay(self, domain: str):
-        """
-        Enforce minimum time between requests to the same domain.
-        This prevents overwhelming servers and reduces ban risk.
-        """
-        import time
-        last = self._last_request_time.get(domain, 0)
-        elapsed = time.time() - last
-        if elapsed < self.MIN_DELAY_PER_DOMAIN:
-            await asyncio.sleep(self.MIN_DELAY_PER_DOMAIN - elapsed)
-        self._last_request_time[domain] = time.time()
-    
-    async def close(self):
-        await self._client.aclose()
 
+            except Exception as exc:
+                logger.error(f"Attempt {attempt}/{max_retries} failed for {url} with error: {exc}")
 
-# Singleton — shared across all scraper calls in this process
-http_scraper = HttpScraper()
+            # Calculate Exponential Backoff with Jitter: (Base * 2^attempt) + Random(0, 1)
+            jitter = random.uniform(0.5, 1.5)
+            backoff_delay = (base_backoff * (2 ** (attempt - 1))) + jitter
+            await asyncio.sleep(backoff_delay)
+
+        logger.error(f"Failed to fetch {url} after {max_retries} retries.")
+        return None
