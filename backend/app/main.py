@@ -6,32 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.core.database import create_all_tables
 from app.scraping.playwright_scraper import playwright_scraper
-from app.api.v1 import jobs, news, search, websocket, auth, tasks
+from app.api.v1 import jobs, news, search, auth, tasks, sse
 
 import asyncio
 import json
 from app.core.redis import get_redis_pool
-from app.api.v1.websocket import manager
+from app.core.redis import get_redis_pool
 
 logger = logging.getLogger(__name__)
 
-
-async def redis_listener():
-    """Background task to listen for job alerts on Redis and push to WebSockets."""
-    redis = await get_redis_pool()
-    pubsub = redis.pubsub()
-    await pubsub.subscribe("new_jobs_channel")
-    logger.info("Subscribed to Redis new_jobs_channel")
-    
-    try:
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                job_data = json.loads(message["data"])
-                await manager.broadcast_new_job(job_data)
-    except asyncio.CancelledError:
-        logger.info("Redis listener cancelled")
-    finally:
-        await pubsub.unsubscribe("new_jobs_channel")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,8 +33,7 @@ async def lifespan(app: FastAPI):
     # Start Playwright browser (expensive — do once)
     await playwright_scraper.start()
     
-    # Start the Redis background listener
-    listener_task = asyncio.create_task(redis_listener())
+
     
     logger.info("Startup complete")
     
@@ -59,7 +41,6 @@ async def lifespan(app: FastAPI):
     
     # ── SHUTDOWN ──────────────────────────────────────────────────────────
     logger.info("Shutting down...")
-    listener_task.cancel()  # Clean up listener
     await playwright_scraper.stop()
     logger.info("Shutdown complete")
 
@@ -88,7 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
     app.include_router(news.router, prefix="/api/v1/news", tags=["News"])
     app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])
-    app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
+    app.include_router(sse.router, prefix="/api/v1/stream", tags=["SSE"])
     app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["Tasks"])
     
     @app.get("/health")

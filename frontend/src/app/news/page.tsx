@@ -3,11 +3,26 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { newsApi } from "@/lib/api";
 import { useState } from "react";
-import { ExternalLink, Radio } from "lucide-react";
+import { ExternalLink, Radio, Loader2 } from "lucide-react";
+import { useScrapePolling } from "@/hooks/useScrapePolling";
 
 export default function NewsPage() {
   const queryClient = useQueryClient();
   const [scrapeUrl, setScrapeUrl] = useState("");
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string>("");
+
+  useScrapePolling(
+    taskId,
+    () => {
+      setTaskId(null);
+      setStatusMsg("");
+      queryClient.invalidateQueries({ queryKey: ["news"] });
+    },
+    (percent, message) => {
+      setStatusMsg(message || "Processing article...");
+    }
+  );
 
   const { data: articles, isLoading } = useQuery({
     queryKey: ["news"],
@@ -16,19 +31,14 @@ export default function NewsPage() {
 
   const { mutate: triggerScrape, isPending } = useMutation({
     mutationFn: (url: string) => newsApi.triggerScrape(url),
-    onSuccess: () => {
+    onSuccess: (data) => {
       setScrapeUrl("");
-      // Poll for the new article instead of blindly waiting
-      let attempts = 0;
-      const poll = () => {
-        if (attempts >= 10) return; // give up after ~20s
-        attempts++;
-        setTimeout(() => {
-          queryClient.invalidateQueries({ queryKey: ["news"] });
-          poll();
-        }, 2000);
-      };
-      poll();
+      if (data && data.task_id) {
+        setTaskId(data.task_id);
+        setStatusMsg("Analyzing article content and generating AI summary...");
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["news"] });
+      }
     }
   });
 
@@ -36,6 +46,7 @@ export default function NewsPage() {
     e.preventDefault();
     if (scrapeUrl) triggerScrape(scrapeUrl);
   };
+
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans pt-12 pb-24">
@@ -69,12 +80,25 @@ export default function NewsPage() {
             <button 
               type="submit" 
               disabled={isPending}
-              className="bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-slate-ink/50 text-warm-ivory px-6 py-3 rounded font-sans font-medium transition-colors text-sm border border-transparent disabled:border-slate-soft"
+              className="bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-slate-ink/50 text-warm-ivory px-6 py-3 rounded font-sans font-medium transition-colors text-sm border border-transparent disabled:border-slate-soft flex items-center gap-2"
             >
-              {isPending ? "Analyzing..." : "Analyze"}
+              {(isPending || taskId) ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Analyzing...
+                </>
+              ) : (
+                "Analyze"
+              )}
             </button>
           </form>
         </div>
+
+        {statusMsg && (
+          <div className="bg-spruce-green/10 border border-spruce-green/30 text-spruce-green px-4 py-3 rounded mb-8 font-mono text-xs flex items-center gap-2 animate-pulse">
+            <Loader2 size={14} className="animate-spin" />
+            {statusMsg}
+          </div>
+        )}
 
         {/* Articles Feed */}
         {isLoading ? (

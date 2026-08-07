@@ -3,7 +3,6 @@ from sqlmodel import Field, SQLModel, Column
 from sqlalchemy import JSON
 from datetime import datetime
 
-
 class User(SQLModel, table=True):
     __tablename__ = "users"
     id: Optional[int] = Field(default=None, primary_key=True)

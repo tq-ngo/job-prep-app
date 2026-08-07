@@ -31,12 +31,6 @@ curl-cffi
 # AI
 google-genai>=1.15.0
 
-# Search
-elasticsearch[async]>=8.13.0
-
-# Object storage
-minio>=7.2.7
-
 # Auth & Security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
@@ -46,3 +40,4 @@ email-validator>=2.1.0
 # Utilities
 tenacity>=8.3.0
 structlog>=24.1.0
+cachetools>=5.3.0

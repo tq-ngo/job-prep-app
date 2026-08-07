@@ -17,7 +17,7 @@ router = APIRouter()
 async def list_jobs(
     # Query parameters with defaults and validation
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
-    page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
+    page_size: int = Query(default=30, ge=1, le=100, description="Items per page"),
     source: Optional[str] = Query(default=None, description="Filter by source"),
     is_remote: Optional[bool] = Query(default=None),
     min_salary: Optional[int] = Query(default=None, ge=0),
@@ -35,6 +35,17 @@ async def list_jobs(
     - Page N: OFFSET (N-1)*page_size LIMIT page_size
     """
     offset = (page - 1) * page_size
+    
+    # ENFORCE MAX 500 JOBS LIMIT
+    max_allowed_jobs = 500
+    if offset >= max_allowed_jobs:
+        return JobListResponse(
+            items=[],
+            total=max_allowed_jobs,
+            page=page,
+            page_size=page_size,
+            pages=(max_allowed_jobs + page_size - 1) // page_size,
+        )
     
     # Build query dynamically based on filters
     query = select(Job).where(Job.is_active == True)
@@ -93,6 +104,9 @@ async def list_jobs(
         await redis.set(cache_key, total, ex=300)
 
     
+    if total > max_allowed_jobs:
+        total = max_allowed_jobs
+        
     return JobListResponse(
         items=jobs,
         total=total,
@@ -119,13 +133,14 @@ async def trigger_scrape(source: str):
             lock_key = f"scrape_lock:{src_name}"
             acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
             if acquired:
-                task = src_task.delay() if src_name == "github" else src_task.delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer")
+                task = src_task.delay() if src_name == "github" else src_task.delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern")
                 task_ids.append({"source": src_name, "task_id": task.id})
         if not task_ids:
             return {"status": "in_progress", "message": "All scrapers are already running."}
+        combined_task_id = ",".join([t["task_id"] for t in task_ids])
         return {
             "status": "accepted",
-            "task_id": task_ids[0]["task_id"],
+            "task_id": combined_task_id,
             "tasks": task_ids,
             "message": f"Triggered {len(task_ids)} scrapers",
         }

@@ -73,3 +73,17 @@ class TLSImpersonateScraper:
 
         logger.error(f"Failed to fetch {url} after {max_retries} retries.")
         return None
+
+    async def fetch(self, url: str, max_retries: int = 3) -> Optional[Any]:
+        """Alias for fetch_page that returns an object with a text attribute for compatibility."""
+        text = await self.fetch_page(url, max_retries=max_retries)
+        if text is None:
+            return None
+        class ResponseWrapper:
+            def __init__(self, t):
+                self.text = t
+        return ResponseWrapper(text)
+
+
+# Singleton instance shared across crawlers and tasks
+http_scraper = TLSImpersonateScraper()

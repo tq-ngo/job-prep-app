@@ -28,13 +28,13 @@ logger = logging.getLogger(__name__)
 )
 def scrape_github(self):
     from asgiref.sync import async_to_sync
-    return async_to_sync(_scrape_github)(self)
+    return async_to_sync(_scrape_github)(self, self.request.id)
 
-async def _scrape_github(self):
+async def _scrape_github(self, task_id: str = None):
     """
     Celery task: scrape internship listings from GitHub repos
     """
-    logger.info(f"[{self.request.id}] Starting Github scrape")
+    logger.info(f"[{task_id or self.request.id}] Starting Github scrape")
     
     redis = create_worker_redis()
     lock_key = "scrape_lock:github"
@@ -89,13 +89,13 @@ async def _scrape_github(self):
 )
 def scrape_linkedin(self, search_url: str):
     from asgiref.sync import async_to_sync
-    return async_to_sync(_scrape_linkedin)(self, search_url)
+    return async_to_sync(_scrape_linkedin)(self, search_url, self.request.id)
 
-async def _scrape_linkedin(self, search_url: str):
+async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     """
     Celery task: sequentially scrape LinkedIn job pages
     """
-    logger.info(f"[{self.request.id}] Starting LinkedIn scrape for {search_url}")
+    logger.info(f"[{task_id or self.request.id}] Starting LinkedIn scrape for {search_url}")
     redis = create_worker_redis()
     lock_key = "scrape_lock:linkedin"
     
@@ -106,14 +106,15 @@ async def _scrape_linkedin(self, search_url: str):
     async def progress_tracker(percent: int, message: str):
         self.update_state(
             state='PROGRESS',
-            meta={'percent': percent, 'message': message}
+            meta={'percent': percent, 'message': message},
+            task_id=task_id or self.request.id
         )
 
     scraper = LinkedInScraper()
     raw_jobs = await scraper.fetch_jobs(
         base_search_url=search_url,
         li_at_cookie=li_at,
-        max_pages=10,
+        max_pages=5,
         progress_callback=progress_tracker
     )
     
@@ -155,16 +156,16 @@ async def _scrape_linkedin(self, search_url: str):
 )
 def enrich_job_with_ai(self, job_id: str):
     from asgiref.sync import async_to_sync
-    return async_to_sync(_enrich_job_with_ai)(self, job_id)
+    return async_to_sync(_enrich_job_with_ai)(self, job_id, self.request.id)
 
-async def _enrich_job_with_ai(self, job_id: str):
+async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
     """
     Celery task: enrich a single job with Gemini AI.
     
     Called after a job is saved to the database.
     Extracts skills, generates embedding, updates the record.
     """
-    logger.info(f"[{self.request.id}] Enriching job {job_id}")
+    logger.info(f"[{task_id or self.request.id}] Enriching job {job_id}")
     
     WorkerSession = create_worker_session()
     try:
@@ -236,14 +237,14 @@ async def _enrich_job_with_ai(self, job_id: str):
 )
 def process_raw_jobs_batch(self, batch_size: int = 10):
     from asgiref.sync import async_to_sync
-    return async_to_sync(_process_raw_jobs_batch)(self, batch_size)
+    return async_to_sync(_process_raw_jobs_batch)(self, batch_size, self.request.id)
 
-async def _process_raw_jobs_batch(self, batch_size: int = 10):
+async def _process_raw_jobs_batch(self, batch_size: int = 10, task_id: str = None):
     """
     Periodic task: Find 'raw' jobs and enqueue them for enrichment.
     Rate limiting is handled by Celery on the enrich_job_with_ai task itself.
     """
-    logger.info(f"[{self.request.id}] Starting AI Enrichment Batch")
+    logger.info(f"[{task_id or self.request.id}] Starting AI Enrichment Batch")
 
     try:
         WorkerSession = create_worker_session()

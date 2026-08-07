@@ -218,19 +218,11 @@ class BFSNewsCrawler:
             "url": url,
             "title": title,
             "content_raw": content[:50000],  # Cap at 50KB
+            "html": html,
             "source_domain": urlparse(url).netloc,
         }
     
     async def _save_article(self, article_data: dict, session: AsyncSession):
-        """Save article to PostgreSQL."""
-        from app.scraping.dedup import url_to_sha256
-        
-        article = NewsArticle(
-            url=article_data["url"],
-            url_sha256=url_to_sha256(article_data["url"]),
-            title=article_data.get("title"),
-            content_raw=article_data.get("content_raw"),
-            source_domain=article_data.get("source_domain"),
-        )
-        session.add(article)
-        await session.flush()  # Get the ID without committing
+        """Save article to PostgreSQL with rich metadata and AI summarization."""
+        from app.scraping.news_parser import process_and_save_article
+        await process_and_save_article(article_data["url"], article_data.get("html", "") or article_data.get("content_raw", ""), session)
