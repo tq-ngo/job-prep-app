@@ -6,7 +6,8 @@ export default async function JobsPage() {
   
   try {
     const apiUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const res = await fetch(`${apiUrl}/api/v1/jobs/?page=1&page_size=50`, {
+    
+    const res = await fetch(`${apiUrl}/api/v1/jobs/?page=1&page_size=30`, {
       next: { revalidate: 30 }
     });
     if (res.ok) {

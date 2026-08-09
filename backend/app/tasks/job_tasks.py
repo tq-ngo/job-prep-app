@@ -39,6 +39,13 @@ async def _scrape_github(self, task_id: str = None):
     redis = create_worker_redis()
     lock_key = "scrape_lock:github"
     scrape_start_time = datetime.utcnow()
+
+    # Acquire the lock inside the async body so it applies to
+    # BOTH API-triggered and Beat-triggered runs.
+    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
+    if not lock_acquired:
+        logger.info(f"[{task_id}] GitHub scrape already running — skipping (lock held)")
+        return {"status": "skipped", "reason": "lock_held"}
     
     try:
         total_stats = {"new": 0, "skipped": 0, "updated": 0, "source": "github"}
@@ -49,8 +56,10 @@ async def _scrape_github(self, task_id: str = None):
             batch = []
             
             job_gen, successful_urls = await parse_github_jobs()
+            seen_external_ids = []
             for job in job_gen:
                 batch.append(job.model_dump())
+                seen_external_ids.append(job.external_id)
                 
                 if len(batch) >= 100:
                     upserted_count = await db_service.bulk_upsert_jobs(batch)
@@ -61,12 +70,21 @@ async def _scrape_github(self, task_id: str = None):
                 upserted_count = await db_service.bulk_upsert_jobs(batch)
                 total_stats["new"] += upserted_count
             
-            if successful_urls:
+            # Mark stale jobs inactive: any GitHub job from a successfully-crawled
+            # source that is NO LONGER in the current batch was removed from the
+            # README and should be hidden from the UI.
+            #
+            # BUG FIX: The old logic used `source_url.in_(successful_urls)` +
+            # `scraped_at < scrape_start_time`. Since source_url = README raw URL
+            # (not the apply URL), this matched ALL GitHub jobs from those repos.
+            # And since dedup hits don't update scraped_at, EVERY existing job
+            # was silently deactivated on re-run. Fixed by comparing external_ids.
+            if successful_urls and seen_external_ids:
                 stmt = (
                     update(Job)
                     .where(Job.source == "github")
                     .where(Job.source_url.in_(successful_urls))
-                    .where(Job.scraped_at < scrape_start_time)
+                    .where(Job.external_id.notin_(seen_external_ids))
                     .values(is_active=False)
                 )
                 await session.execute(stmt)
@@ -78,7 +96,12 @@ async def _scrape_github(self, task_id: str = None):
         logger.error(f"GitHub scrape failed: {exc}", exc_info=True)
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
     finally:
-        await redis.delete(lock_key)
+        # C4 FIX: Only release the lock if THIS task acquired it.
+        # Previously the finally always deleted the key — on a Beat-triggered
+        # run (no lock) this silently deleted a lock held by a concurrent
+        # API-triggered run, unblocking it prematurely.
+        if lock_acquired:
+            await redis.delete(lock_key)
 
 
 @celery_app.task(
@@ -99,8 +122,16 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     redis = create_worker_redis()
     lock_key = "scrape_lock:linkedin"
     
+    # C5 FIX: Acquire the lock inside the async body so Beat-triggered
+    # runs are also protected. If the API handler already set the lock,
+    # we skip rather than running a duplicate scrape.
+    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
+    if not lock_acquired:
+        logger.info(f"[{task_id}] LinkedIn scrape already running — skipping (lock held)")
+        return {"status": "skipped", "reason": "lock_held"}
+
     # Optional: fetch from DB/Redis instead of env
-    li_at = os.getenv("LINKEDIN_LI_AT", "") 
+    li_at = os.getenv("LINKEDIN_LI_AT", "")
 
     # Progress callback mapping directly to Celery task state
     async def progress_tracker(percent: int, message: str):
@@ -110,41 +141,58 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
             task_id=task_id or self.request.id
         )
 
-    scraper = LinkedInScraper()
-    raw_jobs = await scraper.fetch_jobs(
-        base_search_url=search_url,
-        li_at_cookie=li_at,
-        max_pages=5,
-        progress_callback=progress_tracker
-    )
-    
-    if not raw_jobs:
-        return {"status": "failed or no jobs found"}
+    try:
+        scraper = LinkedInScraper()
+        raw_jobs = await scraper.fetch_jobs(
+            base_search_url=search_url,
+            li_at_cookie=li_at,
+            max_pages=5,
+            progress_callback=progress_tracker
+        )
+        
+        if not raw_jobs:
+            logger.warning(f"[{task_id}] LinkedIn returned no jobs — possible rate limit or anti-bot block")
+            return {"status": "failed", "reason": "no_jobs_returned"}
 
-    total_stats = {"new": 0, "updated": 0, "source": "linkedin"}
-    
-    WorkerSession = create_worker_session()
-    async with WorkerSession() as session:
-        db_service = DatabaseSyncService(session)
-        batch = []
+        total_stats = {"new": 0, "updated": 0, "source": "linkedin"}
+        
+        WorkerSession = create_worker_session()
+        async with WorkerSession() as session:
+            db_service = DatabaseSyncService(session)
+            batch = []
 
-        for job_dict in raw_jobs:
-            job = JobCreate(**job_dict)
-            batch.append(job.model_dump())
+            for job_dict in raw_jobs:
+                job = JobCreate(**job_dict)
+                batch.append(job.model_dump())
+                
+                # Sync in chunks of 50 to respect memory and DB limits
+                if len(batch) >= 50:
+                    upserted_count = await db_service.bulk_upsert_jobs(batch)
+                    total_stats["new"] += upserted_count
+                    batch.clear()
             
-            # Sync in chunks of 50 to respect memory and DB limits
-            if len(batch) >= 50:
+            # Flush remaining
+            if batch:
                 upserted_count = await db_service.bulk_upsert_jobs(batch)
                 total_stats["new"] += upserted_count
-                batch.clear()
-        
-        # Flush remaining
-        if batch:
-            upserted_count = await db_service.bulk_upsert_jobs(batch)
-            total_stats["new"] += upserted_count
-            
-    logger.info(f"LinkedIn complete: {total_stats}")
-    return total_stats
+                
+        logger.info(f"LinkedIn complete: {total_stats}")
+        return total_stats
+
+    except Exception as exc:
+        # C5 FIX: Previously there was no try/except here — any 403/429
+        # or network error crashed silently with no retry. Now it retries
+        # once (max_retries=1) with a 120s backoff before giving up.
+        logger.error(f"LinkedIn scrape failed: {exc}", exc_info=True)
+        raise self.retry(exc=exc, countdown=120)
+
+    finally:
+        # C5 FIX: Unconditionally release the lock on exit (success OR
+        # failure). Previously there was no finally block, so a failed
+        # LinkedIn scrape left the lock set for 600s (10 min), blocking
+        # all subsequent manual refreshes from the UI.
+        if lock_acquired:
+            await redis.delete(lock_key)
 
 
 @celery_app.task(
@@ -180,6 +228,23 @@ async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
                 job.scrape_status = "enriched"
                 session.add(job)
                 await session.commit()
+                # Publish even for jobs with no description — GitHub jobs from
+                # README tables never have descriptions but should still appear
+                # on the live board immediately after enrichment completes.
+                redis = create_worker_redis()
+                await redis.publish(
+                    "new_jobs_channel",
+                    json.dumps({
+                        "id": str(job.id),
+                        "title": job.title,
+                        "company": job.company,
+                        "location": job.location,
+                        "skills": [],
+                        "apply_url": job.apply_url,
+                        "source": job.source,
+                        "is_remote": job.is_remote,
+                    })
+                )
                 return
             
             # Extract skills using Gemini
@@ -199,7 +264,7 @@ async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
             
             logger.info(f"Job {job_id} enriched: {len(skills)} skills, embedding={len(embedding)}d")
             
-            # Publish to Redis Pub/Sub for WebSockets
+            # Publish to SSE channel for live board updates
             redis = create_worker_redis()
             await redis.publish(
                 "new_jobs_channel",
@@ -207,8 +272,11 @@ async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
                     "id": str(job.id),
                     "title": job.title,
                     "company": job.company,
+                    "location": job.location,
                     "skills": skills,
-                    "apply_url": job.apply_url
+                    "apply_url": job.apply_url,
+                    "source": job.source,
+                    "is_remote": job.is_remote,
                 })
             )
             

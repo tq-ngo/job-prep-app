@@ -1,7 +1,6 @@
 import re
 import hashlib
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
-import unicodecsv as csv # For clean string processing
 
 class JobDeduplicator:
     """
@@ -65,3 +64,6 @@ class JobDeduplicator:
         
         raw_composite = f"{norm_company}|{norm_title}|{norm_location}"
         return hashlib.sha256(raw_composite.encode("utf-8")).hexdigest()
+
+
+dedup_engine = JobDeduplicator()

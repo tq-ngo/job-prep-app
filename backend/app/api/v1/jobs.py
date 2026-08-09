@@ -36,17 +36,6 @@ async def list_jobs(
     """
     offset = (page - 1) * page_size
     
-    # ENFORCE MAX 500 JOBS LIMIT
-    max_allowed_jobs = 500
-    if offset >= max_allowed_jobs:
-        return JobListResponse(
-            items=[],
-            total=max_allowed_jobs,
-            page=page,
-            page_size=page_size,
-            pages=(max_allowed_jobs + page_size - 1) // page_size,
-        )
-    
     # Build query dynamically based on filters
     query = select(Job).where(Job.is_active == True)
     count_query = select(func.count(Job.id)).where(Job.is_active == True)
@@ -69,57 +58,79 @@ async def list_jobs(
         count_query = count_query.where(search_filter)
 
     if category:
+        faang = ["meta", "apple", "amazon", "netflix", "google", "microsoft", "nvidia", "tesla", "tiktok", "bytedance"]
+        faang_filter = or_(*[Job.company.ilike(f"%{c}%") for c in faang])
+        
+        quant_companies = [
+            "jane street", "citadel", "two sigma", "hrt", "hudson river trading", 
+            "optiver", "jump trading", "akuna", "drw", "imc", "tower research", 
+            "point72", "deshaw", "de shaw", "renaissance", "susquehanna", "sig"
+        ]
+        quant_roles = ["quant", "quantitative", "algo", "trading", "hft"]
+        quant_filter = or_(
+            *[Job.company.ilike(f"%{c}%") for c in quant_companies],
+            *[Job.title.ilike(f"%{r}%") for r in quant_roles]
+        )
+
         if category == "FAANG+":
-            faang = ["facebook", "meta", "apple", "amazon", "netflix", "google", "microsoft", "nvidia"]
-            faang_filter = or_(*[Job.company.op("~*")(f"\\b{c}\\b") for c in faang])
             query = query.where(faang_filter)
             count_query = count_query.where(faang_filter)
         elif category == "Quant":
-            quant = ["jane street", "citadel", "two sigma", "hrt", "optiver", "jump trading"]
-            quant_filter = or_(*[Job.company.op("~*")(f"\\b{c}\\b") for c in quant])
             query = query.where(quant_filter)
             count_query = count_query.where(quant_filter)
         elif category == "Others":
-            faang_quant = ["facebook", "meta", "apple", "amazon", "netflix", "google", "microsoft", "nvidia", "jane street", "citadel", "two sigma", "hrt", "optiver", "jump trading"]
-            others_filter = ~or_(*[Job.company.op("~*")(f"\\b{c}\\b") for c in faang_quant])
+            others_filter = ~or_(faang_filter, quant_filter)
             query = query.where(others_filter)
             count_query = count_query.where(others_filter)
 
-    # Order by date posted (latest on top)
-    query = query.order_by(Job.posted_at.desc().nulls_last()).offset(offset).limit(page_size)
-    
-    # Execute both queries
-    jobs_result = await session.execute(query)
-    jobs = jobs_result.scalars().all()
-    
+
+    MAX_UI_JOBS = 500  # All jobs are stored in DB; UI displays at most 500
     redis = await get_redis_pool()
     cache_key = f"jobs_count:{source}:{is_remote}:{min_salary}:{q}:{category}"
     cached_total = await redis.get(cache_key)
     
     if cached_total:
-        total = int(cached_total)
+        raw_total = int(cached_total)
     else:
         count_result = await session.execute(count_query)
-        total = count_result.scalar()
-        await redis.set(cache_key, total, ex=300)
-
+        raw_total = count_result.scalar()
+        await redis.set(cache_key, raw_total, ex=30)
     
-    if total > max_allowed_jobs:
-        total = max_allowed_jobs
-        
+    # Clamp display total to 500 — DB still holds all records
+    total = min(raw_total, MAX_UI_JOBS)
+    pages = (total + page_size - 1) // page_size if total > 0 else 1
+    
+    if offset >= total:
+        return JobListResponse(
+            items=[],
+            total=total,
+            page=page,
+            page_size=page_size,
+            pages=pages,
+        )
+
+    # Order by date posted (latest on top), apply pagination
+    query = query.order_by(Job.posted_at.desc().nulls_last()).offset(offset).limit(page_size)
+    
+    # Execute data query
+    jobs_result = await session.execute(query)
+    jobs = jobs_result.scalars().all()
+    
     return JobListResponse(
         items=jobs,
         total=total,
         page=page,
         page_size=page_size,
-        pages=(total + page_size - 1) // page_size,
+        pages=pages,
     )
 
 
 @router.post("/scrape/{source}", status_code=202)
 async def trigger_scrape(source: str):
     """
-    Trigger a background scrape job with an idempotency lock.
+    Trigger a background scrape job. Idempotency is handled inside each
+    task via Redis NX locks — the API simply dispatches and
+    the task will self-skip if already running.
     """
     task_map = {
         "github": scrape_github,
@@ -127,22 +138,18 @@ async def trigger_scrape(source: str):
     }
 
     if source == "all":
-        redis = await get_redis_pool()
         task_ids = []
         for src_name, src_task in task_map.items():
-            lock_key = f"scrape_lock:{src_name}"
-            acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
-            if acquired:
-                task = src_task.delay() if src_name == "github" else src_task.delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern")
-                task_ids.append({"source": src_name, "task_id": task.id})
-        if not task_ids:
-            return {"status": "in_progress", "message": "All scrapers are already running."}
+            task = src_task.delay() if src_name == "github" else src_task.delay(
+                "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern"
+            )
+            task_ids.append({"source": src_name, "task_id": task.id})
         combined_task_id = ",".join([t["task_id"] for t in task_ids])
         return {
             "status": "accepted",
             "task_id": combined_task_id,
             "tasks": task_ids,
-            "message": f"Triggered {len(task_ids)} scrapers",
+            "message": f"Triggered {len(task_ids)} scrapers (each will self-skip if already running)",
         }
     
     if source not in task_map:
@@ -150,18 +157,7 @@ async def trigger_scrape(source: str):
             status_code=422,
             detail=f"Unknown source '{source}'. Valid: {list(task_map.keys()) + ['all']}"
         )
-        
-    redis = await get_redis_pool()
-    lock_key = f"scrape_lock:{source}"
-    
-    acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
-    
-    if not acquired:
-        return {
-            "status": "in_progress",
-            "message": f"A scrape for {source} is already running."
-        }
-    
+
     if source == "linkedin":
         task = task_map[source].delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern")
     else:
@@ -170,7 +166,7 @@ async def trigger_scrape(source: str):
     return {
         "status": "accepted",
         "task_id": task.id,
-        "message": f"Scraping {source} in background",
+        "message": f"Scraping {source} in background (will self-skip if already running)",
         "status_url": f"/api/v1/tasks/{task.id}",
     }
 

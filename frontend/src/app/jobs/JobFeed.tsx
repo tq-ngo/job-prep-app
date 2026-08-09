@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useJobs, useTriggerScrape } from "@/hooks/useJobs";
+import { useQueryClient } from "@tanstack/react-query";
 import { Job, JobListResponse } from "@/lib/api";
 import JobDetailsSidebar from "@/components/JobDetailsSidebar";
 import { Search, ExternalLink, RefreshCw, Briefcase } from "lucide-react";
 import { useScrapePolling } from "@/hooks/useScrapePolling";
+import { useJobAlerts } from "@/hooks/useJobAlerts";
 
 interface JobFeedProps {
   initialData?: JobListResponse;
@@ -25,28 +27,15 @@ export default function JobFeed({ initialData }: JobFeedProps) {
   // Scraping state for the pull mechanism
   const [taskId, setTaskId] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [liveJobs, setLiveJobs] = useState<Job[]>([]);
 
-  // 1. Establish SSE Connection
-  useEffect(() => {
-    if (source || isRemote) return;
+  const queryClient = useQueryClient();
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const eventSource = new EventSource(`${apiUrl}/api/v1/stream/jobs/alerts`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const newJob = JSON.parse(event.data);
-        setLiveJobs(prev => [newJob, ...prev]);
-      } catch (e) {
-        console.error("Failed to parse SSE job data", e);
-      }
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [source, isRemote]);
+  const { connected: sseConnected } = useJobAlerts({
+    onNewJob: useCallback(() => {
+      // Invalidate the jobs query cache — React Query will refetch in background
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }, [queryClient]),
+  });
 
   // Data fetching
   const { data: jobsResponse, isLoading, refetch } = useJobs({ 
@@ -87,13 +76,8 @@ export default function JobFeed({ initialData }: JobFeedProps) {
   const currentData = isDefaultState && !jobsResponse ? initialData : jobsResponse;
   
   const currentJobs = useMemo(() => {
-    const fetchedJobs = currentData?.items ?? [];
-    // Deduplicate in case a live job comes in exactly as a refetch happens
-    const fetchedIds = new Set(fetchedJobs.map(j => j.id));
-    const uniqueLiveJobs = liveJobs.filter(j => !fetchedIds.has(j.id));
-    
-    return [...uniqueLiveJobs, ...fetchedJobs];
-  }, [currentData, liveJobs]);
+    return currentData?.items ?? [];
+  }, [currentData]);
 
   // CLIENT-SIDE search filter (spec: "Must use standard filter() operations")
   const filteredJobs = useMemo(() => {
@@ -122,7 +106,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
               </p>
             </div>
             
-            {/* Essential "Refresh" Action Button */}
+            {/* "Refresh" Action Button */}
             <button
               onClick={handleRefreshScrapers}
               disabled={isScraping}
@@ -134,7 +118,7 @@ export default function JobFeed({ initialData }: JobFeedProps) {
           </div>
 
           <div className="flex flex-col lg:flex-row gap-4 lg:items-center">
-            {/* Client-side search bar (spec: filter() only) */}
+            {/* Client-side search bar */}
             <div className="flex-1 max-w-md relative">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-ink/40" />
               <input

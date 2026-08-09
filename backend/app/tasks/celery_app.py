@@ -1,7 +1,8 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.config import settings
 
-# Create the Celery application
+# Create Celery app
 # The first argument is the name of the current module (for task naming)
 celery_app = Celery(
     "job-prep-app",
@@ -18,10 +19,12 @@ celery_app.conf.update(
     # Task routing: different task types go to different queues
     # This lets you scale scraping workers independently from AI workers
     task_routes={
-        "app.tasks.job_tasks.scrape_source": {"queue": "scraping"},
+        "app.tasks.job_tasks.scrape_github": {"queue": "scraping"},
+        "app.tasks.job_tasks.scrape_linkedin": {"queue": "scraping"},
         "app.tasks.job_tasks.enrich_job_with_ai": {"queue": "ai"},
         "app.tasks.job_tasks.process_raw_jobs_batch": {"queue": "ai"},
         "app.tasks.news_tasks.crawl_news_site": {"queue": "scraping"},
+        "app.tasks.news_tasks.scrape_linkedin_news": {"queue": "scraping"},
         "app.tasks.news_tasks.summarize_article": {"queue": "ai"},
     },
     
@@ -47,10 +50,12 @@ celery_app.conf.update(
         "scrape-github-every-6h": {
             "task": "app.tasks.job_tasks.scrape_github",
             "schedule": 6 * 60 * 60,
-            # Note: listings.json is updated roughly every 30 minutes by
-            # the upstream repo's own GitHub Actions, so you could safely
-            # tighten this to e.g. 1 * 60 * 60 if you want fresher data —
-            # there's very little cost since it's one small JSON fetch.
+        },
+        # LinkedIn runs at 06:00 UTC daily
+        "scrape-linkedin-daily": {
+            "task": "app.tasks.job_tasks.scrape_linkedin",
+            "schedule": crontab(hour=6, minute=0),
+            "args": ("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern",),
         },
         "enrich-raw-jobs-every-minute": {
             "task": "app.tasks.job_tasks.process_raw_jobs_batch",

@@ -2,7 +2,7 @@ import time
 import logging
 from enum import Enum
 from dataclasses import dataclass
-from app.core.redis import get_redis_pool
+from app.core.redis import create_worker_redis
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class CircuitBreaker:
     
     async def get_status(self, domain: str) -> CircuitStatus:
         """Fetch current circuit state from Redis."""
-        redis = await get_redis_pool()
+        redis = create_worker_redis()
         
         # Pipeline: batch multiple Redis commands into one round-trip
         async with redis.pipeline(transaction=False) as pipe:
@@ -100,7 +100,7 @@ class CircuitBreaker:
         
         if status.state == CircuitState.HALF_OPEN:
             # Only one test request allowed in HALF_OPEN
-            # (In a distributed system, use Redis lock for atomicity)
+            # use Redis lock for atomicity
             return True
         
         return False
@@ -110,7 +110,7 @@ class CircuitBreaker:
         Call this after a successful HTTP response.
         Resets failure count and closes the circuit.
         """
-        redis = await get_redis_pool()
+        redis = create_worker_redis()
         status = await self.get_status(domain)
         
         if status.state in (CircuitState.HALF_OPEN, CircuitState.OPEN):
@@ -128,7 +128,7 @@ class CircuitBreaker:
         Call this after a failed HTTP request (timeout, 4xx, 5xx, etc.).
         Increments failure count; opens circuit if threshold reached.
         """
-        redis = await get_redis_pool()
+        redis = create_worker_redis()
         status = await self.get_status(domain)
         
         if status.state == CircuitState.HALF_OPEN:
@@ -150,7 +150,7 @@ class CircuitBreaker:
             await self._open_circuit(domain)
     
     async def _open_circuit(self, domain: str):
-        redis = await get_redis_pool()
+        redis = create_worker_redis()
         async with redis.pipeline(transaction=True) as pipe:
             pipe.set(f"{CB_PREFIX}:{domain}:state", CircuitState.OPEN.value)
             pipe.set(f"{CB_PREFIX}:{domain}:opened_at", str(time.time()))
@@ -158,7 +158,7 @@ class CircuitBreaker:
             await pipe.execute()
     
     async def _set_state(self, domain: str, state: CircuitState):
-        redis = await get_redis_pool()
+        redis = create_worker_redis()
         await redis.set(f"{CB_PREFIX}:{domain}:state", state.value)
 
 
