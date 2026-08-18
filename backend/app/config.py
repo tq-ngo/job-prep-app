@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = Field(...)
     CELERY_RESULT_BACKEND: str = Field(...)
 
-    ELASTICSEARCH_URL: str = Field(default="http://localhost:9200")
-
     GEMINI_API_KEY: str = Field(default="")
     GEMINI_MODEL: str = Field(default="gemini-3.5-flash")
 
