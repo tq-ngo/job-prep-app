@@ -9,6 +9,7 @@ class NewsRead(BaseModel):
     url: str
     source_domain: str
     published_at: Optional[datetime] = None
+    scraped_at: datetime
     summary: Optional[str] = None
     categories: Optional[List[str]] = None
     tags: Optional[List[str]] = None

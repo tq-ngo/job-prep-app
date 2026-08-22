@@ -6,7 +6,7 @@ from typing import List
 from app.core.database import get_session
 from app.models.news import NewsArticle
 from app.schemas.news import NewsRead
-from app.tasks.news_tasks import crawl_news_site
+from app.tasks.news_tasks import crawl_news_site, scrape_linkedin_news
 
 router = APIRouter()
 
@@ -20,3 +20,9 @@ async def list_news(session: AsyncSession = Depends(get_session)):
 async def trigger_news_scrape(url: str):
     task = crawl_news_site.delay(url)
     return {"status": "accepted", "task_id": task.id, "message": f"Crawling {url}"}
+
+@router.post("/scrape/linkedin")
+async def trigger_linkedin_news():
+    """Trigger an on-demand LinkedIn News crawl"""
+    task = scrape_linkedin_news.delay()
+    return {"status": "accepted", "task_id": task.id, "message": "Fetching LinkedIn daily news"}

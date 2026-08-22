@@ -128,8 +128,10 @@ export interface NewsArticle {
   url: string;
   source_domain: string;
   published_at: string | null;
+  scraped_at: string;
   summary: string | null;
   categories: string[] | null;
+  tags: string[] | null;
 }
 
 export const newsApi = {
@@ -139,6 +141,10 @@ export const newsApi = {
   },
   triggerScrape: async (url: string) => {
     const { data } = await apiClient.post("/api/v1/news/scrape", null, { params: { url } });
+    return data;
+  },
+  triggerLinkedInNews: async (): Promise<{ task_id: string; status: string }> => {
+    const { data } = await apiClient.post("/api/v1/news/scrape/linkedin");
     return data;
   },
 };
