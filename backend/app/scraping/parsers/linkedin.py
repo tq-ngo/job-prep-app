@@ -98,6 +98,19 @@ class LinkedInScraper:
                     company_name = company_el.get_text(strip=True) if company_el else "Unknown"
                     location_text = location_el.get_text(strip=True) if location_el else ""
                     
+                    # Extract posted date from time element if available
+                    date_el = card.select_one("time, .job-search-card__listdate, .job-search-card__listdate--new") if card else None
+                    posted_at = None
+                    if date_el:
+                        # LinkedIn uses a `datetime` attribute on <time> elements
+                        dt_attr = date_el.get("datetime")
+                        if dt_attr:
+                            posted_at = dt_attr  # ISO format string, e.g. "2026-08-15"
+                    
+                    # Determine remote status from location text
+                    location_clean = location_text.split("\n")[0].strip()
+                    is_remote = bool(re.search(r'\bremote\b', location_clean, re.IGNORECASE))
+                    
                     # Clean up common noise in title/company
                     job_title = re.sub(r'\s+', ' ', job_title).strip()
                     company_name = re.sub(r'\s+', ' ', company_name).strip()
@@ -108,9 +121,11 @@ class LinkedInScraper:
                             "source": "linkedin",
                             "title": job_title,
                             "company": company_name,
-                            "location": location_text.split("\n")[0].strip(),
+                            "location": location_clean,
                             "apply_url": clean_url,
-                            "source_url": clean_url
+                            "source_url": clean_url,
+                            "posted_at": posted_at,
+                            "is_remote": is_remote,
                         })
                 except Exception as e:
                     logger.debug(f"Error parsing job card: {e}")

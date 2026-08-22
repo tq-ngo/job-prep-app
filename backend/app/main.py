@@ -7,11 +7,7 @@ from app.config import settings
 from app.core.database import create_all_tables
 from app.scraping.playwright_scraper import playwright_scraper
 from app.api.v1 import jobs, news, search, auth, tasks, sse
-
-import asyncio
-import json
-from app.core.redis import get_redis_pool
-from app.core.redis import get_redis_pool
+from app.core.redis import close_redis_pool
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +38,7 @@ async def lifespan(app: FastAPI):
     # ── SHUTDOWN ──────────────────────────────────────────────────────────
     logger.info("Shutting down...")
     await playwright_scraper.stop()
+    await close_redis_pool()
     logger.info("Shutdown complete")
 
 

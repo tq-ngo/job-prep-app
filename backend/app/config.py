@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: str = Field(default="")
     GEMINI_MODEL: str = Field(default="gemini-3.5-flash")
+    EMBEDDING_MODEL: str = Field(default="text-embedding-004")
 
     SECRET_KEY: str = Field(...)
 

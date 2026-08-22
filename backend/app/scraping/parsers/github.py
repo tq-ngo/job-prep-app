@@ -11,7 +11,7 @@ from app.schemas.job import JobCreate
 
 logger = logging.getLogger(__name__)
 
-def parse_relative_date(date_str: str) -> datetime:
+def parse_relative_date(date_str: str) -> datetime | None:
     date_str = date_str.lower().strip()
     date_str = re.sub(r'[*_]', '', date_str)
     now = datetime.utcnow()
@@ -46,8 +46,8 @@ def parse_relative_date(date_str: str) -> datetime:
             return posted_date
         except ValueError:
             pass
-            
-    return now
+        
+    return None
 
 TARGET_URLS = [
     "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/refs/heads/main/README.md",
@@ -179,18 +179,25 @@ async def _parse_readme(url: str, include_inactive: bool = False) -> Dict[str, A
 async def parse_github_jobs(include_inactive: bool = False):
     """
     Fetch and parse internship listings concurrently.
-    Returns (generator_of_jobs, successful_urls)
+    Returns (list_of_jobs, successful_urls)
+
+    NOTE: Previously returned a lazy generator, but successful_urls was
+    populated as a side-effect of iteration — meaning it was always empty
+    at return time.  Now eagerly collects so successful_urls is reliable
+    for the stale-job deactivation logic in job_tasks.py.
     """
     tasks = [_parse_readme(url, include_inactive) for url in TARGET_URLS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    successful_urls = []
-    
-    def job_generator():
-        for res in results:
-            if isinstance(res, dict) and res.get("status") == "success":
-                successful_urls.append(res["url"])
-                for job in res["jobs"]:
-                    yield job
 
-    return job_generator(), successful_urls
+    successful_urls = []
+    all_jobs = []
+
+    for res in results:
+        if isinstance(res, Exception):
+            logger.error(f"README fetch raised: {res}")
+            continue
+        if isinstance(res, dict) and res.get("status") == "success":
+            successful_urls.append(res["url"])
+            all_jobs.extend(res["jobs"])
+
+    return all_jobs, successful_urls
