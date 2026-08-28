@@ -5,8 +5,10 @@ from typing import Optional
 
 from app.core.database import get_session
 from app.models.job import Job
+from app.models.users import User
 from app.schemas.job import JobListResponse
 from app.ai.embedder import generate_embedding
+from app.api.v1.auth import get_current_user
 
 router = APIRouter()
 
@@ -15,7 +17,8 @@ async def semantic_search(
     query_text: str = Query(..., description="E.g., 'A frontend job using React and Tailwind' or paste a resume snippet"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Semantic Vector Search powered by pgvector.

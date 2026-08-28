@@ -5,9 +5,11 @@ from typing import Optional
 
 from app.core.database import get_session
 from app.models.job import Job
+from app.models.users import User
 from app.schemas.job import JobRead, JobListResponse
 from app.tasks.job_tasks import scrape_github, scrape_linkedin
 from app.core.redis import get_redis_pool
+from app.api.v1.auth import get_current_user
 from sqlalchemy import or_
 import uuid
 
@@ -25,6 +27,7 @@ async def list_jobs(
     category: Optional[str] = Query(default=None, description="Filter by category (FAANG+, Quant, Others)"),
     # FastAPI dependency injection: session is automatically managed
     session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     List jobs with pagination and filtering.
@@ -126,7 +129,7 @@ async def list_jobs(
 
 
 @router.post("/scrape/{source}", status_code=202)
-async def trigger_scrape(source: str):
+async def trigger_scrape(source: str, current_user: User = Depends(get_current_user)):
     """
     Trigger a background scrape job. Idempotency is handled inside each
     task via Redis NX locks — the API simply dispatches and
@@ -172,7 +175,7 @@ async def trigger_scrape(source: str):
 
 
 @router.get("/{job_id}", response_model=JobRead)
-async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session), current_user: User = Depends(get_current_user)):
     """Get a single job by ID."""
     job = await session.get(Job, job_id)
     if not job:

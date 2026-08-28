@@ -19,8 +19,21 @@ export default function RegisterPage() {
     try {
       await authApi.register(email, password);
       router.push("/login");
-    } catch {
-      setError("Registration failed. Email may already be in use.");
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      if (typeof detail === "string") {
+        setError(detail);
+      } else if (Array.isArray(detail)) {
+        // Pydantic validation errors come as an array of objects with a "msg" field
+        const messages = detail.map((d: any) => {
+          const msg = d.msg || "";
+          // Strip the "Value error, " prefix that Pydantic adds
+          return msg.replace(/^Value error,\s*/i, "");
+        });
+        setError(messages.join(". "));
+      } else {
+        setError("Registration failed. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }

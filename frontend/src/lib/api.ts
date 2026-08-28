@@ -102,10 +102,14 @@ export interface User {
 
 export const authApi = {
   login: async (email: string, password: string) => {
-    const formData = new FormData();
-    formData.append("username", email);
-    formData.append("password", password);
-    const { data } = await apiClient.post<{ access_token: string; token_type: string }>("/api/v1/auth/login", formData);
+    const params = new URLSearchParams();
+    params.append("username", email);
+    params.append("password", password);
+    const { data } = await apiClient.post<{ access_token: string; token_type: string }>(
+      "/api/v1/auth/login",
+      params,
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
     return data;
   },
   register: async (email: string, password: string) => {
