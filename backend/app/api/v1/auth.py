@@ -67,11 +67,27 @@ async def login(
 ):
     # OAuth2PasswordRequestForm uses 'username' and 'password' fields. 
     # Our 'username' is the email.
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Login attempt for: '{form_data.username}'")
+    
     query = select(User).where(User.email == form_data.username)
     result = await session.execute(query)
     user = result.scalar_one_or_none()
     
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
+        logger.warning(f"Login failed: no user found with email '{form_data.username}'")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    pwd_ok = verify_password(form_data.password, user.hashed_password)
+    logger.info(f"Password verification for '{form_data.username}': {pwd_ok}, hash prefix: {user.hashed_password[:10]}...")
+    
+    if not pwd_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
