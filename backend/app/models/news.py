@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.core.datetime_utils import utc_now
 from typing import Optional, List
 from sqlmodel import Field, SQLModel, Column
 from sqlalchemy import Text, JSON
@@ -25,5 +26,5 @@ class NewsArticle(SQLModel, table=True):
     source_domain: str = Field(index=True)
     crawl_depth: int = Field(default=0)
     embedding: Optional[List[float]] = Field(default=None, sa_column=Column(Vector(768)))
-    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+    scraped_at: datetime = Field(default_factory=utc_now)
     enriched_at: Optional[datetime] = None

@@ -4,6 +4,8 @@ import logging
 from typing import Optional, Dict, Any
 from curl_cffi import requests
 
+from app.core.url_guard import UnsafeUrlError, validate_crawl_url
+
 logger = logging.getLogger(__name__)
 
 class TLSImpersonateScraper:
@@ -40,6 +42,15 @@ class TLSImpersonateScraper:
         """
         proxies = {"http": self.proxy_url, "https": self.proxy_url} if self.proxy_url else None
 
+        # Re-validate at FETCH time, not just at request time: DNS can
+        # re-resolve between the API accepting a URL and the worker fetching
+        # it (DNS rebinding), and redirects can land somewhere private.
+        try:
+            validate_crawl_url(url)
+        except UnsafeUrlError as exc:
+            logger.error("Refusing to fetch unsafe URL %s: %s", url, exc)
+            return None
+
         for attempt in range(1, max_retries + 1):
             try:
                 # Execute blocking curl_cffi call in threadpool to keep asyncio loop unblocked
@@ -66,10 +77,13 @@ class TLSImpersonateScraper:
             except Exception as exc:
                 logger.error(f"Attempt {attempt}/{max_retries} failed for {url} with error: {exc}")
 
-            # Calculate Exponential Backoff with Jitter: (Base * 2^attempt) + Random(0, 1)
-            jitter = random.uniform(0.5, 1.5)
-            backoff_delay = (base_backoff * (2 ** (attempt - 1))) + jitter
-            await asyncio.sleep(backoff_delay)
+            # Back off before the NEXT attempt only. Sleeping after the final
+            # attempt added ~8s of dead wait per permanently-failing URL,
+            # which across a 300-job crawl is minutes of pure latency.
+            if attempt < max_retries:
+                jitter = random.uniform(0.5, 1.5)
+                backoff_delay = (base_backoff * (2 ** (attempt - 1))) + jitter
+                await asyncio.sleep(backoff_delay)
 
         logger.error(f"Failed to fetch {url} after {max_retries} retries.")
         return None

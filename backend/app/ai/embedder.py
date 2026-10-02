@@ -3,7 +3,11 @@ from google import genai
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+# Reuse the shared per-event-loop client. A module-level genai.Client binds
+# its async transport to the first event loop that touches it, and Celery's
+# async_to_sync creates a new loop per task -> "Event loop is closed" on the
+# second and every later task.
+from app.ai.gemini_client import _get_client
 
 
 async def generate_embedding(text: str) -> list[float]:
@@ -23,7 +27,7 @@ async def generate_embedding(text: str) -> list[float]:
     text-embedding-004 produces 768-dimensional vectors.
     (768 floats × 4 bytes each = ~3KB per embedding)
     """
-    response = await _client.aio.models.embed_content(
+    response = await _get_client().aio.models.embed_content(
         model=settings.EMBEDDING_MODEL,
         contents=text[:8000],  # Model has an input token limit
         config={

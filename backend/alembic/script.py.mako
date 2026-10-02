@@ -9,6 +9,8 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+import sqlmodel                    # SQLModel emits sqlmodel.sql.sqltypes.AutoString
+import pgvector.sqlalchemy         # pgvector emits pgvector.sqlalchemy.vector.VECTOR
 ${imports if imports else ""}
 
 # revision identifiers, used by Alembic.

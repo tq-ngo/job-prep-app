@@ -2,10 +2,14 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import _rate_limit_exceeded_handler
 
 from app.config import settings
-from app.core.database import create_all_tables
-from app.scraping.playwright_scraper import playwright_scraper
+from app.core.database import assert_schema_current
+from app.core.rate_limit import limiter
+from app.ai.gemini_client import verify_model
 from app.api.v1 import jobs, news, search, auth, tasks, sse
 from app.core.redis import close_redis_pool
 
@@ -22,22 +26,25 @@ async def lifespan(app: FastAPI):
     """
     # ── STARTUP ──────────────────────────────────────────────────────────
     logger.info("Starting Job Prep Platform...")
-    
-    # Create DB tables (in production, use Alembic instead)
-    await create_all_tables()
-    
-    # Start Playwright browser (expensive — do once)
-    await playwright_scraper.start()
-    
 
-    
+    # Schema is owned by Alembic; `alembic upgrade head` runs in the
+    # entrypoint before uvicorn. This only asserts it actually happened.
+    await assert_schema_current()
+
+    # Fail fast on a wrong/retired GEMINI_MODEL rather than 404ing on every
+    # call while the pipeline reports success. No-ops without an API key.
+    await verify_model()
+
+    # NOTE: Playwright/Chromium was started here, costing ~300MB RSS on every
+    # API replica, but PlaywrightScraper.fetch has no call sites. JD extraction
+    # uses the HTTP path (TLSImpersonateScraper) instead. Removed.
+
     logger.info("Startup complete")
-    
+
     yield  # App runs here
-    
+
     # ── SHUTDOWN ──────────────────────────────────────────────────────────
     logger.info("Shutting down...")
-    await playwright_scraper.stop()
     await close_redis_pool()
     logger.info("Shutdown complete")
 
@@ -51,11 +58,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     
+    # Rate limiting (Redis-backed, shared across replicas).
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+
     # CORS: Allow the frontend to call the API
     # In production: replace "*" with your actual frontend domain
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS.split(","),
+        allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

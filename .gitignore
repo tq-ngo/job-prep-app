@@ -37,6 +37,10 @@ Thumbs.db
 # Docker
 *.log
 
+# Celery
+celerybeat-schedule
+celerybeat-schedule.db
+
 # Coverage
 htmlcov/
 .coverage

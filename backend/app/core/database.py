@@ -1,5 +1,6 @@
+from pathlib import Path
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlmodel import SQLModel
 from app.config import settings
 
 # Creates a connection pool to PostgreSQL
@@ -18,6 +19,8 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 # ── Celery-safe factory (creates a new engine per call) ──────────────────
+from contextlib import asynccontextmanager as _asynccontextmanager
+
 def create_worker_session() -> async_sessionmaker[AsyncSession]:
     """
     Returns a NEW async_sessionmaker bound to a NEW engine.
@@ -26,6 +29,10 @@ def create_worker_session() -> async_sessionmaker[AsyncSession]:
     per task. Module-level engines get bound to the first loop and crash
     on subsequent tasks with 'another operation is in progress'. This
     factory avoids that by creating an isolated engine each time.
+
+    IMPORTANT: Callers should use `create_worker_session_ctx()` instead
+    when possible — it automatically disposes the engine on exit,
+    preventing connection pool leaks.
     """
     worker_engine = create_async_engine(
         settings.DATABASE_URL,
@@ -38,6 +45,36 @@ def create_worker_session() -> async_sessionmaker[AsyncSession]:
         class_=AsyncSession,
         expire_on_commit=False,
     )
+
+
+@_asynccontextmanager
+async def create_worker_session_ctx():
+    """
+    Context manager that yields a session and disposes the underlying
+    engine on exit — preventing the connection pool leak that occurred
+    when create_worker_session() was called without cleanup.
+
+    Usage:
+        async with create_worker_session_ctx() as session:
+            ...  # session and engine are cleaned up automatically
+    """
+    worker_engine = create_async_engine(
+        settings.DATABASE_URL,
+        pool_size=5,
+        max_overflow=10,
+        echo=False,
+    )
+    SessionLocal = async_sessionmaker(
+        worker_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    try:
+        async with SessionLocal() as session:
+            yield session
+    finally:
+        await worker_engine.dispose()
+
 
 
 async def get_session() -> AsyncSession:
@@ -61,11 +98,39 @@ async def get_session() -> AsyncSession:
             raise
 
 
-async def create_all_tables():
+async def assert_schema_current() -> None:
     """
-    Creates all tables defined in SQLModel models.
-    Called once on app startup if tables don't exist.
-    In production, use Alembic migrations instead.
+    Verify the database is migrated to the latest Alembic revision.
+
+    Replaces the old create_all_tables(). create_all() only ever CREATEs
+    missing tables — it never ALTERs an existing one — so any column added
+    to a model was silently absent at runtime. Schema is now owned entirely
+    by Alembic (`alembic upgrade head`, run from the container entrypoint).
+
+    This is a fail-fast guard, not a migrator: it refuses to serve traffic
+    against a database whose revision doesn't match the migration head,
+    which is what surfaces "forgot to migrate" as a startup error instead
+    of a confusing UndefinedColumnError on the first request.
     """
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import text
+
+    alembic_cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    expected_heads = set(ScriptDirectory.from_config(alembic_cfg).get_heads())
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT version_num FROM alembic_version"
+                " WHERE EXISTS (SELECT 1 FROM information_schema.tables"
+                " WHERE table_name = 'alembic_version')"
+            )
+        )
+        applied = {row[0] for row in result}
+
+    if applied != expected_heads:
+        raise RuntimeError(
+            f"Database schema is out of date: applied={applied or '{}'} "
+            f"expected={expected_heads}. Run `alembic upgrade head`."
+        )

@@ -11,9 +11,20 @@ from app.tasks.job_tasks import scrape_github, scrape_linkedin
 from app.core.redis import get_redis_pool
 from app.api.v1.auth import get_current_user
 from sqlalchemy import or_
+from sqlalchemy.orm import defer
+import hashlib
 import uuid
 
 router = APIRouter()
+
+# NOTE: this endpoint used to accept anonymous callers via an "optional auth"
+# dependency, and the comment claimed authenticated users got richer data.
+# That gating was never implemented — the response was byte-identical for
+# anonymous and authenticated callers. Combined with the absence of any edge
+# guard, the Next.js server component at (app)/jobs/page.tsx fetched
+# this route with no credentials and embedded the result in the RSC payload,
+# so job data shipped to anyone who requested /jobs. Auth is now required.
+
 
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
@@ -39,9 +50,18 @@ async def list_jobs(
     """
     offset = (page - 1) * page_size
     
-    # Build query dynamically based on filters
-    query = select(Job).where(Job.is_active == True)
-    count_query = select(func.count(Job.id)).where(Job.is_active == True)
+    # Build query dynamically based on filters.
+    #
+    # `canonical_id IS NULL` collapses cross-source duplicates: db_sync links
+    # a duplicate to the first row it saw rather than discarding it, so every
+    # row is still queryable but the feed shows each role once.
+    #
+    # defer(Job.embedding) keeps the 768-float pgvector column out of the
+    # result set — ~3KB per row x 30 rows fetched and then thrown away by
+    # JobRead on every single page request.
+    base_filters = [Job.is_active == True, Job.canonical_id.is_(None)]
+    query = select(Job).options(defer(Job.embedding)).where(*base_filters)
+    count_query = select(func.count(Job.id)).where(*base_filters)
     
     if source:
         query = query.where(Job.source == source)
@@ -89,20 +109,28 @@ async def list_jobs(
 
     MAX_UI_JOBS = 500  # All jobs are stored in DB; UI displays at most 500
     redis = await get_redis_pool()
-    cache_key = f"jobs_count:{source}:{is_remote}:{min_salary}:{q}:{category}"
+    # The `q` term is attacker-controlled and was interpolated raw, so a ":"
+    # corrupted key namespacing and an unbounded term let anyone write
+    # arbitrary Redis keys. Hash the variable part to a fixed-width digest.
+    filter_digest = hashlib.sha256(
+        "|".join(
+            str(v) for v in (source, is_remote, min_salary, q, category)
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    cache_key = f"jobs_count:{filter_digest}"
     cached_total = await redis.get(cache_key)
-    
-    if cached_total:
+
+    if cached_total is not None:
         raw_total = int(cached_total)
     else:
         count_result = await session.execute(count_query)
         raw_total = count_result.scalar()
         await redis.set(cache_key, raw_total, ex=30)
-    
+
     # Clamp display total to 500 — DB still holds all records
     total = min(raw_total, MAX_UI_JOBS)
     pages = (total + page_size - 1) // page_size if total > 0 else 1
-    
+
     if offset >= total:
         return JobListResponse(
             items=[],
@@ -112,9 +140,23 @@ async def list_jobs(
             pages=pages,
         )
 
-    # Order by date posted (latest on top), apply pagination
-    query = query.order_by(Job.posted_at.desc().nulls_last()).offset(offset).limit(page_size)
-    
+    # Order by date posted (latest on top), apply pagination.
+    #
+    # `Job.id` is a REQUIRED tiebreaker, not decoration: ordering by
+    # posted_at alone is non-deterministic across pages whenever rows share a
+    # timestamp (or are all NULL), so rows could repeat on one page and vanish
+    # from another. Matches index ix_jobs_active_posted.
+    #
+    # The limit is clamped to the remaining rows under MAX_UI_JOBS. Previously
+    # LIMIT/OFFSET ran against the UNCLAMPED query, so with total=500 and
+    # page_size=30 page 17 returned rows 481-510 — ten rows past the cap.
+    remaining = total - offset
+    query = (
+        query.order_by(Job.posted_at.desc().nulls_last(), Job.id)
+        .offset(offset)
+        .limit(min(page_size, remaining))
+    )
+
     # Execute data query
     jobs_result = await session.execute(query)
     jobs = jobs_result.scalars().all()

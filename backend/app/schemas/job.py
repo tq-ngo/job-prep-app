@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import uuid
+
+from app.core.datetime_utils import as_utc
 
 class JobCreate(BaseModel):
     external_id: str
@@ -18,6 +20,18 @@ class JobCreate(BaseModel):
     is_remote: Optional[bool] = None
     posted_at: Optional[datetime] = None
     terms: Optional[List[str]] = None
+
+    @field_validator("posted_at")
+    @classmethod
+    def _ensure_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        """Normalize posted_at to aware UTC.
+
+        Scraped dates arrive naive — LinkedIn sends an ISO date string that
+        pydantic coerces without a timezone, GitHub's README dates come from
+        strptime. The DB column is TIMESTAMPTZ and rejects naive values, so
+        normalize once here rather than at each call site.
+        """
+        return as_utc(v)
 
 class JobRead(BaseModel):
     id: uuid.UUID

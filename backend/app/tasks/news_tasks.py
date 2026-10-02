@@ -69,7 +69,7 @@ async def _scrape_linkedin_news(self):
     WorkerSession = create_worker_session()
     
     async with WorkerSession() as session:
-        for link in story_links[:5]:
+        for link in story_links[:15]:
             story_url = link["href"]
             if story_url.startswith("/"):
                 story_url = "https://www.linkedin.com" + story_url

@@ -46,7 +46,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # Migrations run here (single owner) before uvicorn starts. Celery
+    # services deliberately do NOT migrate, to avoid concurrent upgrades.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   celery-worker:
     build:
@@ -85,7 +93,7 @@ services:
       - ./backend:/app
     ports:
       - "5555:5555"
-    command: celery -A app.tasks.celery_app flower --port=5555
+    command: celery -A app.tasks.celery_app flower --port=5555 --basic_auth=${FLOWER_BASIC_AUTH:-admin:jobprep2026}
     depends_on:
       - celery-worker
 
@@ -93,17 +101,28 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Inlined into the client bundle at BUILD time (see frontend/Dockerfile).
+        # Override per environment, e.g.:
+        #   NEXT_PUBLIC_API_URL=https://api.example.com docker compose build frontend
+        # P1.3 will move this to same-origin "" (browser -> nginx /api/ -> backend)
+        # so SameSite=Lax auth cookies work without SameSite=None.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     container_name: job-prep-frontend
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # Server-side only (RSC / route handlers), resolved on the compose network.
       - INTERNAL_API_URL=http://backend:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   nginx:
     image: nginx:alpine
@@ -113,8 +132,10 @@ services:
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:

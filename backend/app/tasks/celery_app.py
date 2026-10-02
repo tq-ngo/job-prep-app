@@ -23,8 +23,9 @@ celery_app.conf.update(
         "app.tasks.job_tasks.scrape_linkedin": {"queue": "scraping"},
         "app.tasks.job_tasks.enrich_job_with_ai": {"queue": "ai"},
         "app.tasks.job_tasks.process_raw_jobs_batch": {"queue": "ai"},
+        "app.tasks.job_tasks.requeue_stuck_jobs": {"queue": "ai"},
+        "app.tasks.job_tasks.backfill_descriptions": {"queue": "scraping"},
         "app.tasks.news_tasks.crawl_news_site": {"queue": "scraping"},
-        "app.tasks.news_tasks.scrape_linkedin_news": {"queue": "scraping"},
         "app.tasks.news_tasks.summarize_article": {"queue": "ai"},
         "app.tasks.news_tasks.scrape_linkedin_news": {"queue": "scraping"},
     },
@@ -62,6 +63,13 @@ celery_app.conf.update(
             "task": "app.tasks.job_tasks.process_raw_jobs_batch",
             "schedule": 60,
             "kwargs": {"batch_size": 10},
+        },
+        # Counterpart to the raw->queued claim in process_raw_jobs_batch:
+        # returns rows stranded by a worker that died mid-enrichment.
+        "requeue-stuck-jobs": {
+            "task": "app.tasks.job_tasks.requeue_stuck_jobs",
+            "schedule": 10 * 60,
+            "kwargs": {"stale_after_minutes": 30},
         },
         # LinkedIn News: crawl top daily headlines at 07:00 UTC
         "scrape-linkedin-news-daily": {

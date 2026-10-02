@@ -2,24 +2,30 @@ import logging
 import re
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple, List, Dict, Any
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.news import NewsArticle
-from app.ai.gemini_client import generate_text
+from app.ai.gemini_client import (
+    generate_text,
+    GeminiConfigError,
+    GeminiTransientError,
+    GeminiTruncatedError,
+)
+from app.core.datetime_utils import as_utc, utc_now
 
 logger = logging.getLogger(__name__)
 
-async def summarize_with_ai(title: str, content: str) -> Tuple[str, List[str]]:
+async def summarize_with_ai(title: str, content: str) -> Tuple[str, List[str], List[str]]:
     """
-    Use Gemini AI to summarize news article and assign categories.
+    Use Gemini AI to summarize news article and assign categories and skill/tech tags.
     Falls back gracefully if API is unconfigured or errors out.
     """
     if not content or len(content) < 50:
-        return "No sufficient content to summarize.", ["News"]
+        return "No sufficient content to summarize.", ["News"], ["Tech"]
         
     prompt = f"""
 Article Title: {title}
@@ -27,18 +33,19 @@ Article Content (excerpt):
 {content[:3500]}
 
 Please provide:
-1. A concise, professional 2-sentence executive summary of this technology/industry news.
+1. A concise, professional 2-sentence executive summary of this technology/industry news, followed by 2-3 structured key takeaway bullets.
 2. An array of 2 to 4 relevant category tags (e.g., ["AI", "Startups", "Enterprise", "Cybersecurity", "Cloud"]).
+3. An array of 2 to 4 relevant technology or skill tags mentioned (e.g., ["PyTorch", "Kubernetes", "CUDA", "TypeScript"]).
 
 Return ONLY valid JSON in this format:
-{{"summary": "...", "categories": ["..."]}}
+{{"summary": "...", "categories": ["..."], "tags": ["..."]}}
 """
     try:
         response_text = await generate_text(
             prompt=prompt,
             system_instruction="You are an expert technical news analyst. Output strict JSON only.",
             temperature=0.2,
-            max_tokens=300
+            max_tokens=1024
         )
         clean = response_text.strip()
         clean = re.sub(r'^```json\s*', '', clean)
@@ -47,11 +54,23 @@ Return ONLY valid JSON in this format:
         data = json.loads(clean)
         summary = str(data.get("summary", "")).strip()
         categories = [str(c).strip() for c in data.get("categories", []) if c]
+        tags = [str(t).strip() for t in data.get("tags", []) if t]
         if summary and categories:
-            return summary, categories[:4]
+            return summary, categories[:4], tags[:4]
+    except (GeminiConfigError, GeminiTruncatedError):
+        # Deployment fault or truncated output. Do NOT silently degrade to the
+        # extractive summary — that hid a total Gemini outage behind
+        # plausible-looking output, and only at DEBUG level.
+        raise
+    except GeminiTransientError as e:
+        # Retryable: prefer the extractive summary for this one article over
+        # failing the whole crawl, but log loudly so a sustained outage shows.
+        logger.warning(f"Gemini transient error for {title!r}, using extractive fallback: {e}")
     except Exception as e:
-        logger.debug(f"AI summarization fallback triggered: {e}")
-        
+        # Genuine per-article failure (malformed JSON, safety block, timeout):
+        # the extractive fallback below is the correct response.
+        logger.warning(f"AI summarization failed for {title!r}, using extractive fallback: {e}")
+
     # Extractive fallback
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', content) if len(s.strip()) > 20]
     fallback_summary = " ".join(sentences[:2]) if sentences else content[:250]
@@ -61,16 +80,19 @@ Return ONLY valid JSON in this format:
     # Heuristic category tags from text
     lower_content = (title + " " + content).lower()
     fallback_cats = ["Tech"]
+    fallback_tags = []
     if any(k in lower_content for k in ["ai", "llm", "gpt", "model", "machine learning"]):
         fallback_cats.append("AI")
+        fallback_tags.append("LLM")
     if any(k in lower_content for k in ["security", "hack", "breach", "cyber", "vulnerability"]):
         fallback_cats.append("Security")
+        fallback_tags.append("Cybersecurity")
     if any(k in lower_content for k in ["cloud", "aws", "azure", "gcp", "kubernetes"]):
         fallback_cats.append("Cloud")
     if any(k in lower_content for k in ["startup", "funding", "series a", "venture", "vc"]):
         fallback_cats.append("Startups")
         
-    return fallback_summary or "Article content analyzed.", list(set(fallback_cats))[:4]
+    return fallback_summary or "Article content analyzed.", list(set(fallback_cats))[:4], list(set(fallback_tags))[:4]
 
 def extract_article_metadata(url: str, html: str) -> Dict[str, Any]:
     """
@@ -120,7 +142,7 @@ def extract_article_metadata(url: str, html: str) -> Dict[str, Any]:
                 break
                 
     # 3. Published date extraction
-    published_at = datetime.utcnow()
+    published_at = utc_now()
     for selector in [
         "meta[property='article:published_time']",
         "meta[name='pubdate']",
@@ -134,7 +156,9 @@ def extract_article_metadata(url: str, html: str) -> Dict[str, Any]:
                 try:
                     # Clean ISO format strings
                     date_str = re.sub(r'\.\d+', '', date_str.split('T')[0] if 'T' in date_str else date_str)
-                    published_at = datetime.strptime(date_str[:10], "%Y-%m-%d")
+                    published_at = as_utc(
+                        datetime.strptime(date_str[:10], "%Y-%m-%d")
+                    )
                     break
                 except Exception:
                     pass
@@ -186,7 +210,7 @@ async def process_and_save_article(url: str, html: str, session: AsyncSession) -
     meta = extract_article_metadata(url, html)
     
     # Summarize & Categorize
-    summary, categories = await summarize_with_ai(meta["title"], meta["content_clean"] or meta["meta_desc"] or "")
+    summary, categories, tags = await summarize_with_ai(meta["title"], meta["content_clean"] or meta["meta_desc"] or "")
     if not summary and meta["meta_desc"]:
         summary = meta["meta_desc"]
         
@@ -196,7 +220,8 @@ async def process_and_save_article(url: str, html: str, session: AsyncSession) -
         existing.content_clean = meta["content_clean"]
         existing.summary = summary
         existing.categories = categories
-        existing.scraped_at = datetime.utcnow()
+        existing.tags = tags
+        existing.scraped_at = utc_now()
         session.add(existing)
         await session.commit()
         await session.refresh(existing)
@@ -213,6 +238,7 @@ async def process_and_save_article(url: str, html: str, session: AsyncSession) -
             content_raw=meta["content_clean"],
             summary=summary,
             categories=categories,
+            tags=tags,
             source_domain=meta["source_domain"]
         )
         session.add(article)

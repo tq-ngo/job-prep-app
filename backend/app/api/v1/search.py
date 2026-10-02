@@ -40,14 +40,20 @@ async def semantic_search(
     stmt = (
         select(Job)
         .where(Job.is_active == True)
+        .where(Job.canonical_id.is_(None))  # Collapse cross-source duplicates to canonical entity
         .where(Job.embedding != None)  # Only search jobs that have AI embeddings
         .order_by(Job.embedding.cosine_distance(query_embedding))
         .offset(offset)
         .limit(page_size)
     )
     
-    # Get total count of enriched jobs for pagination metadata
-    count_stmt = select(func.count(Job.id)).where(Job.is_active == True).where(Job.embedding != None)
+    # Get total count of enriched canonical jobs for pagination metadata
+    count_stmt = (
+        select(func.count(Job.id))
+        .where(Job.is_active == True)
+        .where(Job.canonical_id.is_(None))
+        .where(Job.embedding != None)
+    )
     
     jobs_result = await session.execute(stmt)
     count_result = await session.execute(count_stmt)

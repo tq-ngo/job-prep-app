@@ -3,30 +3,83 @@ import axios from "axios";
 const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   headers: { "Content-Type": "application/json" },
+  // Send the HttpOnly auth cookies on every request. Tokens are no longer
+  // held in localStorage, where any XSS could read them.
+  withCredentials: true,
 });
 
-// Attach JWT token to requests
+/** Read a non-HttpOnly cookie (only the CSRF token is readable by design). */
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(
+    new RegExp("(?:^|; )" + name.replace(/([.$?*|{}()[\]\\/+^])/g, "\\$1") + "=([^;]*)")
+  );
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+// Echo the CSRF cookie back in a header (double-submit). The browser attaches
+// the auth cookie automatically, so state-changing calls need this second
+// factor that a cross-origin attacker cannot read or set.
 apiClient.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("access_token");
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+  const method = (config.method || "get").toLowerCase();
+  if (!["get", "head", "options"].includes(method)) {
+    const csrf = readCookie("csrf_token");
+    if (csrf && config.headers) config.headers["X-CSRF-Token"] = csrf;
   }
   return config;
 });
 
-// Handle expired/invalid tokens globally
+// Transparently refresh an expired access token, then replay the request.
+// Access tokens are short-lived (15 min), so without this every session
+// would bounce to /login a quarter of an hour after signing in.
+let refreshPromise: Promise<unknown> | null = null;
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (
-      error.response?.status === 401 &&
-      typeof window !== "undefined" &&
-      !error.config?.url?.includes("/auth/login")
-    ) {
-      localStorage.removeItem("access_token");
-      window.location.href = "/login";
+  async (error) => {
+    const original = error.config;
+    const status = error.response?.status;
+    const url: string = original?.url || "";
+    const isAuthCall =
+      url.includes("/auth/login") ||
+      url.includes("/auth/refresh") ||
+      url.includes("/auth/register");
+    const isMeCall = url.includes("/auth/me");
+
+    // Only attempt refresh if:
+    // 1. Status is 401
+    // 2. Not already retried
+    // 3. Not an auth call (login, refresh, register)
+    // 4. A session actually exists (indicated by the csrf_token cookie). If there's no
+    //    CSRF cookie, the user is unauthenticated — do NOT spam /refresh or trigger reload loops.
+    const hasSessionCookie = Boolean(readCookie("csrf_token"));
+
+    if (status === 401 && !isAuthCall && !original?._retried && hasSessionCookie) {
+      original._retried = true;
+      try {
+        // Collapse concurrent 401s into a single refresh call.
+        refreshPromise =
+          refreshPromise || apiClient.post("/api/v1/auth/refresh");
+        await refreshPromise;
+        refreshPromise = null;
+        return apiClient(original);
+      } catch {
+        refreshPromise = null;
+        // Never redirect if this was an identity check (/auth/me) or if we are already
+        // on a public or auth route (/login, /register, /).
+        if (!isMeCall && typeof window !== "undefined") {
+          const currentPath = window.location.pathname;
+          if (
+            currentPath !== "/login" &&
+            currentPath !== "/register" &&
+            currentPath !== "/"
+          ) {
+            window.location.href = `/login?next=${encodeURIComponent(
+              currentPath + window.location.search
+            )}`;
+          }
+        }
+      }
     }
     return Promise.reject(error);
   }
@@ -105,12 +158,22 @@ export const authApi = {
     const params = new URLSearchParams();
     params.append("username", email);
     params.append("password", password);
-    const { data } = await apiClient.post<{ access_token: string; token_type: string }>(
+    // The response body no longer contains a token: the server sets
+    // HttpOnly cookies instead. It returns the CSRF token for the
+    // double-submit header.
+    const { data } = await apiClient.post<{ status: string; csrf_token: string }>(
       "/api/v1/auth/login",
       params,
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
     return data;
+  },
+  logout: async () => {
+    await apiClient.post("/api/v1/auth/logout");
+  },
+  googleLoginUrl: (next = "/jobs") => {
+    const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    return `${base}/api/v1/auth/google/login?next=${encodeURIComponent(next)}`;
   },
   register: async (email: string, password: string) => {
     const { data } = await apiClient.post<User>("/api/v1/auth/register", { email, password });

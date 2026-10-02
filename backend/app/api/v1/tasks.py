@@ -1,10 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.tasks.celery_app import celery_app
+from app.models.users import User
+from app.api.v1.auth import get_current_user
 
 router = APIRouter()
 
 @router.get("/{task_id}")
-async def get_task_status(task_id: str):
+async def get_task_status(task_id: str, current_user: User = Depends(get_current_user)):
     """
     Poll Celery task state by ID. Supports comma-separated task IDs for batch tracking.
     Returns standard Celery states: PENDING, STARTED, SUCCESS, FAILURE, PROGRESS

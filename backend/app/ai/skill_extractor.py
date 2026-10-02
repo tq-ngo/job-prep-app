@@ -1,7 +1,12 @@
 import json
 import logging
 import re
-from app.ai.gemini_client import generate_text
+from app.ai.gemini_client import (
+    generate_text,
+    GeminiConfigError,
+    GeminiTransientError,
+    GeminiTruncatedError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +54,7 @@ Return ONLY a JSON array of strings. No explanation, no markdown, no backticks.
             prompt=prompt,
             system_instruction=SKILL_EXTRACTION_SYSTEM_PROMPT,
             temperature=0.0,    # Fully deterministic
-            max_tokens=256,
+            max_tokens=1024,
         )
         
         # Clean up the response (sometimes Gemini wraps in ```json ... ```)
@@ -65,6 +70,12 @@ Return ONLY a JSON array of strings. No explanation, no markdown, no backticks.
         
         return []
         
+    except (GeminiConfigError, GeminiTransientError, GeminiTruncatedError):
+        # Deployment fault, retryable upstream blip, or a truncated response.
+        # None of these mean "this job has no skills", so propagate and let
+        # the Celery task retry/fail visibly. Returning [] here is what made
+        # a total Gemini outage look like successful enrichment.
+        raise
     except json.JSONDecodeError as e:
         logger.error(f"Skill extraction: failed to parse JSON: {e}\nResponse: {response_text}")
         return []

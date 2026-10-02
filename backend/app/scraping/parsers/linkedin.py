@@ -20,7 +20,7 @@ class LinkedInScraper:
         self, 
         base_search_url: str, 
         li_at_cookie: str = "",
-        max_pages: int = 10,
+        max_pages: int = 5,
         progress_callback: Optional[Callable[[int, str], Awaitable[None]]] = None
     ) -> List[Dict]:
         extracted_jobs = []

@@ -3,18 +3,19 @@ import re
 import uuid
 import hashlib
 from typing import AsyncIterator, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 
 from app.scraping.http_scraper import TLSImpersonateScraper
 from app.schemas.job import JobCreate
+from app.core.datetime_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
 def parse_relative_date(date_str: str) -> datetime | None:
     date_str = date_str.lower().strip()
     date_str = re.sub(r'[*_]', '', date_str)
-    now = datetime.utcnow()
+    now = utc_now()
     
     if "today" in date_str:
         return now
@@ -40,7 +41,9 @@ def parse_relative_date(date_str: str) -> datetime | None:
         day_str = match.group(2)
         try:
             parsed_date = datetime.strptime(f"{month_str} {day_str}", "%b %d")
-            posted_date = parsed_date.replace(year=now.year)
+            # strptime yields a naive datetime; `now` is aware, so attach UTC
+            # before any comparison or DB write.
+            posted_date = parsed_date.replace(year=now.year, tzinfo=timezone.utc)
             if posted_date > now + timedelta(days=1):
                 posted_date = posted_date.replace(year=now.year - 1)
             return posted_date

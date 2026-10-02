@@ -1,0 +1,33 @@
+# Secrets — COPY . . previously baked these straight into the image layer.
+.env
+.env.*
+!.env.example
+
+# Python caches / build artefacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+venv/
+.venv/
+
+# Celery beat state (a binary shelve DB; was also committed to git by mistake)
+celerybeat-schedule
+celerybeat-schedule.db
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
