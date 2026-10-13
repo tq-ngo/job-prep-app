@@ -10,7 +10,7 @@ from app.config import settings
 from app.core.database import assert_schema_current
 from app.core.rate_limit import limiter
 from app.ai.gemini_client import verify_model
-from app.api.v1 import jobs, news, search, auth, tasks, sse
+from app.api.v1 import jobs, news, search, auth, tasks, sse, stats
 from app.core.redis import close_redis_pool
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])
     app.include_router(sse.router, prefix="/api/v1/stream", tags=["SSE"])
     app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["Tasks"])
+    app.include_router(stats.router, prefix="/api/v1/stats", tags=["Stats"])
     
     @app.get("/health")
     async def health_check():

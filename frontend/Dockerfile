@@ -1,11 +1,13 @@
-FROM node:20-alpine AS builder
+# syntax=docker/dockerfile:1
+# Node 20 reached end-of-life in April 2026; 22 is the active LTS.
+FROM node:22-alpine AS builder
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 
@@ -14,13 +16,21 @@ COPY . .
 # effect: the browser fell back to the hardcoded "http://localhost:8000"
 # default in src/lib/api.ts, which works on a localhost demo and silently
 # breaks on any other host. It must be a build arg.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+# Empty = same-origin (relative /api/... behind nginx), the supported setup.
+ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+# Destination of the /api rewrite in next.config.ts (resolved at build time).
+ARG INTERNAL_API_URL=http://backend:8000
+ENV INTERNAL_API_URL=${INTERNAL_API_URL}
+# The landing page is prerendered at build time, so its absolute metadata
+# URLs (metadataBase, og:image) need the public origin now, not just at runtime.
+ARG SITE_URL=http://localhost
+ENV SITE_URL=${SITE_URL}
 
 RUN npm run build
 
 # ── Production image ─────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production

@@ -22,8 +22,8 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_cookies import ACCESS_COOKIE, is_token_denied
-from app.core.database import get_session
+from app.core.auth_cookies import ACCESS_COOKIE, is_payload_revoked
+from app.core.events import JOBS_STREAM, KIND_ENRICHED, publish_job_event  # noqa: F401 (re-export)
 from app.core.redis import create_worker_redis
 from app.core.security import TOKEN_TYPE_ACCESS, TokenError, decode_token
 
@@ -31,24 +31,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SSE_KEEPALIVE_SECONDS = 25
-JOBS_STREAM = "jobs:events"
-# Bounded so the backlog can't grow without limit. ~10k events is far more
-# than any client needs to catch up on after a reconnect.
-JOBS_STREAM_MAXLEN = 10_000
 # Re-check the token periodically: a connection previously outlived token
 # expiry for up to nginx's proxy_read_timeout (24h) because auth was only
 # ever validated once, at connect.
 AUTH_RECHECK_SECONDS = 60
-
-
-async def publish_job_event(redis, payload: dict) -> str:
-    """Append an event to the stream. Returns its id."""
-    return await redis.xadd(
-        JOBS_STREAM,
-        {"data": json.dumps(payload)},
-        maxlen=JOBS_STREAM_MAXLEN,
-        approximate=True,
-    )
 
 
 def _authorize(raw_token: Optional[str]) -> dict:
@@ -89,12 +75,17 @@ async def job_event_generator(
             if now - last_auth_check > AUTH_RECHECK_SECONDS:
                 try:
                     payload = decode_token(raw_token, TOKEN_TYPE_ACCESS)
-                    if await is_token_denied(payload.get("jti")):
+                    if await is_payload_revoked(payload):
                         raise TokenError("revoked")
                 except TokenError:
-                    # Close the stream; the client will reconnect and get a
-                    # clean 401, which routes it through the logout path.
+                    # Tell the client WHY before closing. EventSource can't
+                    # see HTTP status codes, so without this a routine 15-min
+                    # access-token expiry looked like a network fault: the
+                    # client retried with the same expired cookie, got 401s,
+                    # and gave up — live updates silently died. On this
+                    # event the client refreshes its session, then reconnects.
                     logger.info("SSE closing: token expired or revoked")
+                    yield "event: auth-expired\ndata: {}\n\n"
                     break
                 last_auth_check = now
 
@@ -125,9 +116,16 @@ async def job_event_generator(
                         logger.warning("Skipping malformed SSE entry %s", message_id)
                         continue
 
-                    job_skills = {s.lower() for s in (job_data.get("skills") or [])}
-                    if user_skills and not (user_skills & job_skills):
-                        continue
+                    if user_skills:
+                        # Skill-filtered alerts can only match once skills
+                        # exist, i.e. on the `enriched` event. Events from
+                        # before `kind` existed carried skills, so they count
+                        # as enriched.
+                        if job_data.get("kind", KIND_ENRICHED) != KIND_ENRICHED:
+                            continue
+                        job_skills = {s.lower() for s in (job_data.get("skills") or [])}
+                        if not (user_skills & job_skills):
+                            continue
                     # The id: field is what makes Last-Event-ID resume work.
                     yield f"id: {message_id}\nevent: job\ndata: {json.dumps(job_data)}\n\n"
 
@@ -154,7 +152,7 @@ async def stream_job_alerts(
     `{ withCredentials: true }`.
     """
     payload = _authorize(access_token)
-    if await is_token_denied(payload.get("jti")):
+    if await is_payload_revoked(payload):
         raise HTTPException(status_code=401, detail="Token revoked")
 
     parsed_skills = {s.strip().lower() for s in skills.split(",") if s.strip()}

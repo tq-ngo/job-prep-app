@@ -19,13 +19,13 @@ export default function RegisterPage() {
     try {
       await authApi.register(email, password);
       router.push("/login");
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       if (typeof detail === "string") {
         setError(detail);
       } else if (Array.isArray(detail)) {
         // Pydantic validation errors come as an array of objects with a "msg" field
-        const messages = detail.map((d: any) => {
+        const messages = detail.map((d: { msg?: string }) => {
           const msg = d.msg || "";
           // Strip the "Value error, " prefix that Pydantic adds
           return msg.replace(/^Value error,\s*/i, "");

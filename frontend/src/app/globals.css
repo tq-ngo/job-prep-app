@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Tailwind v4's `dark:` variant follows prefers-color-scheme by default, but
+   this app themes via a `.dark` class on <html> (set before paint by the
+   inline script in layout.tsx), so bind the variant to that class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Every colour pair below is checked by `npm run check:contrast`
+   (scripts/check-contrast.mjs); keep that list in sync when adding tokens. */
+
 :root {
   --background: #faf9f5;
   --foreground: #2d2c2a;
@@ -18,18 +26,20 @@
   --foreground-subtle: #6b6760;  /* ~5.1:1 on #faf9f5  (AA)       */
 }
 
+/* Warm dark palette. The previous one switched to cool slate (#0f1115 /
+   #94a3b8 / #1e293b), which broke the editorial ivory/ink look of light mode. */
 .dark {
-  --background: #0f1115;
-  --foreground: #94a3b8;
-  --foreground-heading: #f1f5f9;
-  --spruce-green: #34d399;
-  --spruce-green-hover: #10b981;
-  --amber-clay: #f59e0b;
-  --border-soft: #1e293b;
-  --neutral-soft: #1e293b;
+  --background: #1a1915;
+  --foreground: #c9c5bb;         /* 10.2:1 */
+  --foreground-heading: #f2efe8; /* 15.3:1 */
+  --spruce-green: #5fd39b;       /*  9.5:1 */
+  --spruce-green-hover: #4bc48a;
+  --amber-clay: #f0a03c;         /*  8.2:1 */
+  --border-soft: #2e2c27;
+  --neutral-soft: #24221e;
 
-  --foreground-muted: #c2cbd6;   /* ~11.4:1 on #0f1115 (AAA) */
-  --foreground-subtle: #9aa6b4;  /*  ~7.6:1 on #0f1115 (AAA) */
+  --foreground-muted: #d3cfc5;   /* 11.3:1 on #1a1915 (AAA) */
+  --foreground-subtle: #a8a398;  /*  7.0:1 on #1a1915 (AAA) */
 }
 
 @theme inline {
@@ -45,9 +55,13 @@
   --color-foreground-subtle: var(--foreground-subtle);
   --color-neutral-soft: var(--neutral-soft);
 
-  --font-sans: var(--font-sans), 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-serif: var(--font-serif), 'Lora', 'Georgia', serif;
-  --font-mono: var(--font-mono), 'Fira Code', monospace;
+  /* next/font exposes its faces as --font-jakarta/--font-lora/--font-fira.
+     They used to be named --font-sans etc., the same names as these theme
+     variables, making `--font-sans: var(--font-sans), ...` self-referential:
+     a cycle resolves to nothing, so the faces could silently fall back. */
+  --font-sans: var(--font-jakarta), system-ui, sans-serif;
+  --font-serif: var(--font-lora), Georgia, serif;
+  --font-mono: var(--font-fira), ui-monospace, monospace;
 
   --animate-fadeSlideIn: fadeSlideIn 0.4s ease-out both;
 }
@@ -66,7 +80,7 @@
 body {
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: var(--font-sans);
+  font-family: var(--font-jakarta), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

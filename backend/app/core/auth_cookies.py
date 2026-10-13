@@ -7,8 +7,10 @@ token as a URL query parameter (logged by nginx, kept in browser history and
 Referer headers). Cookies marked HttpOnly are unreadable from JavaScript and
 are attached automatically by EventSource, which removes both problems.
 """
+import asyncio
+import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Response
 
@@ -27,6 +29,11 @@ CSRF_HEADER = "x-csrf-token"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 _DENYLIST_PREFIX = "jwt:denied:"
+_FAMILY_REVOKED_PREFIX = "jwt:family:revoked:"
+# Marks a refresh jti as spent; lives for the token's remaining lifetime.
+_ROTATION_CLAIM_PREFIX = "jwt:rotating:"
+# The pair minted by that rotation, kept briefly for concurrent callers.
+_ROTATION_RESULT_PREFIX = "jwt:rotated:"
 
 
 def _base_kwargs() -> dict:
@@ -97,8 +104,70 @@ async def deny_token(jti: str, ttl_seconds: int) -> None:
     await redis.setex(f"{_DENYLIST_PREFIX}{jti}", ttl_seconds, "1")
 
 
-async def is_token_denied(jti: Optional[str]) -> bool:
-    if not jti:
+async def revoke_family(family: str, ttl_seconds: int) -> None:
+    """Revoke every token descended from one sign-in."""
+    if not family or ttl_seconds <= 0:
+        return
+    redis = await get_redis_pool()
+    await redis.setex(f"{_FAMILY_REVOKED_PREFIX}{family}", ttl_seconds, "1")
+
+
+async def is_payload_revoked(payload: Dict[str, Any]) -> bool:
+    """True if this token's jti, or its whole family, has been revoked."""
+    keys = []
+    if payload.get("jti"):
+        keys.append(f"{_DENYLIST_PREFIX}{payload['jti']}")
+    if payload.get("fam"):
+        keys.append(f"{_FAMILY_REVOKED_PREFIX}{payload['fam']}")
+    if not keys:
         return False
     redis = await get_redis_pool()
-    return bool(await redis.exists(f"{_DENYLIST_PREFIX}{jti}"))
+    return bool(await redis.exists(*keys))
+
+
+# ── Refresh rotation with a reuse grace window ───────────────────────────
+#
+# Rotation used to denylist the presented refresh token immediately. Two tabs
+# refreshing at the same moment both sent the same cookie; the second lost
+# the race, got 401 "already used", and logged the user out. Now the first
+# caller claims the jti and publishes the pair it minted; a caller arriving
+# within the grace window receives that same pair. Only a reuse AFTER the
+# window is treated as theft.
+
+async def claim_rotation(jti: str, ttl_seconds: int) -> bool:
+    """Atomically mark a refresh jti as spent. True for the first caller only."""
+    redis = await get_redis_pool()
+    return bool(
+        await redis.set(f"{_ROTATION_CLAIM_PREFIX}{jti}", "1", nx=True, ex=max(ttl_seconds, 1))
+    )
+
+
+async def store_rotation_result(
+    jti: str, tokens: Tuple[str, str, str], grace_seconds: int
+) -> None:
+    redis = await get_redis_pool()
+    await redis.setex(
+        f"{_ROTATION_RESULT_PREFIX}{jti}", grace_seconds, json.dumps(list(tokens))
+    )
+
+
+async def await_rotation_result(
+    jti: str, timeout: float = 3.0, interval: float = 0.1
+) -> Optional[Tuple[str, str, str]]:
+    """
+    Fetch the pair minted for an already-claimed jti.
+
+    Polls briefly because a concurrent caller may have claimed the jti but
+    not yet finished minting. None means the grace window has passed.
+    """
+    redis = await get_redis_pool()
+    key = f"{_ROTATION_RESULT_PREFIX}{jti}"
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        raw = await redis.get(key)
+        if raw is not None:
+            access, refresh, csrf = json.loads(raw)
+            return access, refresh, csrf
+        if asyncio.get_running_loop().time() >= deadline:
+            return None
+        await asyncio.sleep(interval)

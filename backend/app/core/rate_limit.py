@@ -24,13 +24,17 @@ def _client_key(request) -> str:
     """
     Identify the caller for limiting purposes.
 
-    Prefers the left-most X-Forwarded-For entry because the app sits behind
-    nginx, where get_remote_address() would otherwise see the proxy's IP and
-    bucket every user together.
+    Behind nginx, get_remote_address() sees the proxy's IP and would bucket
+    every user together, so X-Forwarded-For is used — but its RIGHT-most
+    entry, the one written by our own proxy. The left-most entry (used
+    previously) is whatever the client sent: any caller could put a random
+    value there and get a fresh bucket per request, defeating the /login
+    brute-force limit. nginx.conf also overwrites the header with
+    $remote_addr, so in the supported setup it holds exactly one address.
     """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        return forwarded.split(",")[-1].strip()
     return get_remote_address(request)
 
 

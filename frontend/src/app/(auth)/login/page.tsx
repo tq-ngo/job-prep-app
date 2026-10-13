@@ -15,6 +15,10 @@ export default async function LoginPage({
 }) {
   const { next } = await searchParams;
   // Only accept relative paths — an absolute URL here would be an open redirect.
-  const nextPath = next && next.startsWith("/") && !next.startsWith("//") ? next : "/jobs";
+  // Backslashes too: browsers treat `/\evil.com` as `//evil.com`.
+  const nextPath =
+    next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\")
+      ? next
+      : "/jobs";
   return <LoginForm nextPath={nextPath} />;
 }

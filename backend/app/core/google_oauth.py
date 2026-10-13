@@ -84,11 +84,13 @@ async def consume_state(state: str) -> Dict[str, Any]:
         raise OAuthError("Missing state parameter")
     redis = await get_redis_pool()
     key = f"{_STATE_PREFIX}{state}"
-    raw = await redis.get(key)
+    # GETDEL is a single atomic command. A separate GET then DEL let two
+    # concurrent callbacks carrying the same state both read it before
+    # either deleted it.
+    raw = await redis.getdel(key)
     if raw is None:
         # Unknown, expired, or already used -> treat as CSRF / replay.
         raise OAuthError("Invalid or expired state parameter")
-    await redis.delete(key)
     return json.loads(raw)
 
 

@@ -15,15 +15,22 @@ from app.scraping.jd_extractor import enrich_with_descriptions
 from app.core.database import create_worker_session, create_worker_session_ctx
 from app.core.datetime_utils import utc_now
 from app.models.job import Job
-from app.ai.skill_extractor import extract_skills
+from app.ai.skill_extractor import extract_job_attributes
 from app.ai.embedder import generate_embedding
 from app.core.redis import create_worker_redis
-from app.api.v1.sse import publish_job_event
+from app.core.events import KIND_ENRICHED, job_event_payload, publish_job_event
 from app.config import settings
 from app.schemas.job import JobCreate
 from app.scraping.parsers.linkedin import LinkedInScraper
 
 logger = logging.getLogger(__name__)
+
+# Scrape locks must outlive a full crawl. A first crawl against an empty DB
+# fetches a JD for every posting (~1s each at concurrency 4), and the old
+# 600s TTL could expire mid-run and let a second crawl start alongside it.
+# soft_time_limit stops a hung crawl before its lock expires.
+SCRAPE_LOCK_TTL_SECONDS = 3600
+SCRAPE_SOFT_TIME_LIMIT = 3300
 
 
 async def _publish_job_event(job: Job, skills: list) -> None:
@@ -37,16 +44,7 @@ async def _publish_job_event(job: Job, skills: list) -> None:
     try:
         # Redis Stream, not pub/sub: pub/sub had no backlog, so any event
         # published while a client was reconnecting was lost forever.
-        await publish_job_event(redis, {
-            "id": str(job.id),
-            "title": job.title,
-            "company": job.company,
-            "location": job.location,
-            "skills": skills,
-            "apply_url": job.apply_url,
-            "source": job.source,
-            "is_remote": job.is_remote,
-        })
+        await publish_job_event(redis, job_event_payload(job, KIND_ENRICHED, skills))
     finally:
         await redis.aclose()
 
@@ -55,6 +53,7 @@ async def _publish_job_event(job: Job, skills: list) -> None:
     bind=True,
     max_retries=3,
     queue="scraping",
+    soft_time_limit=SCRAPE_SOFT_TIME_LIMIT,
 )
 def scrape_github(self):
     from asgiref.sync import async_to_sync
@@ -72,7 +71,7 @@ async def _scrape_github(self, task_id: str = None):
 
     # Acquire the lock inside the async body so it applies to
     # BOTH API-triggered and Beat-triggered runs.
-    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
+    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=SCRAPE_LOCK_TTL_SECONDS)
     if not lock_acquired:
         logger.info(f"[{task_id}] GitHub scrape already running — skipping (lock held)")
         return {"status": "skipped", "reason": "lock_held"}
@@ -89,18 +88,13 @@ async def _scrape_github(self, task_id: str = None):
             seen_external_ids = []
 
             async def flush(records):
-                if not records:
-                    return
-                # Fetch the real JD before upserting. GitHub READMEs are just
-                # link tables, so the description lives behind apply_url on
-                # the ATS (Greenhouse/Lever/Ashby/...).
-                total_stats["descriptions"] += await enrich_with_descriptions(records)
-                for r in records:
-                    if r.get("description"):
-                        r["description_fetched_at"] = utc_now()
-                result = await db_service.bulk_upsert_jobs(records)
-                for key in ("inserted", "updated", "skipped", "linked"):
-                    total_stats[key] += result[key]
+                # GitHub READMEs are just link tables, so the JD lives behind
+                # apply_url on the ATS. sync_batch dedups FIRST and only
+                # fetches descriptions for postings that still need one.
+                result = await db_service.sync_batch(records, enrich_with_descriptions)
+                for key in total_stats:
+                    if key in result:
+                        total_stats[key] += result[key]
 
             for job in job_gen:
                 batch.append(job.model_dump())
@@ -127,9 +121,15 @@ async def _scrape_github(self, task_id: str = None):
                     .where(Job.source == "github")
                     .where(Job.source_url.in_(successful_urls))
                     .where(Job.external_id.notin_(seen_external_ids))
+                    .where(Job.is_active == True)  # noqa: E712
                     .values(is_active=False)
+                    .returning(Job.canonical_hash)
                 )
-                await session.execute(stmt)
+                deactivated = (await session.execute(stmt)).scalars().all()
+                # A deactivated canonical row must hand canonical status to an
+                # active duplicate, or that duplicate disappears from the feed.
+                await db_service.relink_hashes({h for h in deactivated if h})
+                total_stats["deactivated"] = len(deactivated)
             await session.commit()
             
         logger.info(f"GitHub complete: {total_stats}")
@@ -151,6 +151,7 @@ async def _scrape_github(self, task_id: str = None):
     bind=True,
     max_retries=1,
     queue="scraping",
+    soft_time_limit=SCRAPE_SOFT_TIME_LIMIT,
 )
 def scrape_linkedin(self, search_url: str):
     from asgiref.sync import async_to_sync
@@ -167,7 +168,7 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     # C5 FIX: Acquire the lock inside the async body so Beat-triggered
     # runs are also protected. If the API handler already set the lock,
     # we skip rather than running a duplicate scrape.
-    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=600)
+    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=SCRAPE_LOCK_TTL_SECONDS)
     if not lock_acquired:
         logger.info(f"[{task_id}] LinkedIn scrape already running — skipping (lock held)")
         return {"status": "skipped", "reason": "lock_held"}
@@ -204,18 +205,12 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
             batch = []
 
             async def flush(records):
-                if not records:
-                    return
-                # One extra request per job against LinkedIn's guest detail
-                # endpoint. enrich_with_descriptions bounds concurrency and
-                # jitters between calls to stay polite.
-                total_stats["descriptions"] += await enrich_with_descriptions(records)
-                for r in records:
-                    if r.get("description"):
-                        r["description_fetched_at"] = utc_now()
-                result = await db_service.bulk_upsert_jobs(records)
-                for key in ("inserted", "updated", "skipped", "linked"):
-                    total_stats[key] += result[key]
+                # One extra request per NEW job against LinkedIn's guest
+                # detail endpoint; already-synced postings cost nothing.
+                result = await db_service.sync_batch(records, enrich_with_descriptions)
+                for key in total_stats:
+                    if key in result:
+                        total_stats[key] += result[key]
 
             for job_dict in raw_jobs:
                 job = JobCreate(**job_dict)
@@ -290,15 +285,23 @@ async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
                 await _publish_job_event(job, skills=[])
                 return
 
-            # Extract skills using Gemini
-            skills = await extract_skills(job.title, job.description)
+            # One structured call: skills plus pay / seniority / employment.
+            attrs = await extract_job_attributes(job.title, job.description)
+            skills = attrs.skills
 
             # Generate vector embedding
             text_for_embedding = f"{job.title} {job.company} {job.description}"
             embedding = await generate_embedding(text_for_embedding)
 
-            # Update the job record
+            # Update the job record. Pay and level only fill gaps: a value
+            # that came from the source posting wins over the model's reading.
             job.skills = skills
+            if job.salary_min is None and job.salary_max is None and attrs.salary_period:
+                job.salary_min = attrs.salary_min
+                job.salary_max = attrs.salary_max
+                job.salary_period = attrs.salary_period
+            job.seniority_level = job.seniority_level or attrs.seniority_level
+            job.employment_type = job.employment_type or attrs.employment_type
             job.embedding = embedding
             job.scrape_status = "enriched"
             job.enriched_at = utc_now()   # existed on the model but was never set
@@ -370,7 +373,7 @@ async def _process_raw_jobs_batch(self, batch_size: int = 10, task_id: str = Non
             claimed = await session.execute(
                 text(
                     """
-                    UPDATE jobs SET scrape_status = 'queued'
+                    UPDATE jobs SET scrape_status = 'queued', queued_at = NOW()
                     WHERE id IN (
                         SELECT id FROM jobs
                         WHERE scrape_status = 'raw'
@@ -423,9 +426,13 @@ async def _requeue_stuck_jobs(self, stale_after_minutes: int = 30):
         result = await session.execute(
             text(
                 """
-                UPDATE jobs SET scrape_status = 'raw'
+                UPDATE jobs SET scrape_status = 'raw', queued_at = NULL
                 WHERE scrape_status = 'queued'
-                  AND scraped_at < NOW() - (:mins || ' minutes')::interval
+                  -- queued_at, not scraped_at: an old posting claimed a
+                  -- second ago has an old scraped_at and was requeued while
+                  -- still being enriched.
+                  AND (queued_at IS NULL
+                       OR queued_at < NOW() - (:mins || ' minutes')::interval)
                 RETURNING id
                 """
             ),
@@ -490,6 +497,7 @@ async def _backfill_descriptions(self, batch_size: int = 50):
             job.description_fetched_at = now
             if record.get("description"):
                 job.description = record["description"]
+                job.description_source = record.get("description_source")
                 # Force re-enrichment now that there is text to analyse.
                 job.scrape_status = "raw"
                 requeued += 1

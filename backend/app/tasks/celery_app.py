@@ -71,6 +71,13 @@ celery_app.conf.update(
             "schedule": 10 * 60,
             "kwargs": {"stale_after_minutes": 30},
         },
+        # Walks the description backlog (rows never attempted). It was routed
+        # but never scheduled, so it only ran if someone triggered it by hand.
+        "backfill-descriptions-hourly": {
+            "task": "app.tasks.job_tasks.backfill_descriptions",
+            "schedule": 60 * 60,
+            "kwargs": {"batch_size": 50},
+        },
         # LinkedIn News: crawl top daily headlines at 07:00 UTC
         "scrape-linkedin-news-daily": {
             "task": "app.tasks.news_tasks.scrape_linkedin_news",

@@ -16,7 +16,9 @@ from typing import Any, Dict, Optional
 import uuid
 
 import bcrypt
-from jose import jwt, JWTError
+# PyJWT, not python-jose: jose is barely maintained and has a history of
+# algorithm-confusion CVEs; FastAPI's own docs moved to PyJWT.
+import jwt
 
 from app.config import settings
 
@@ -60,7 +62,20 @@ def get_password_hash(password: str) -> str:
     ).decode("utf-8")
 
 
-def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> tuple[str, str, datetime]:
+def new_token_family() -> str:
+    """
+    Id shared by every token descended from one sign-in.
+
+    Refresh rotation carries it forward, so a replayed (stolen) refresh token
+    can revoke the whole chain — including the thief's freshly minted tokens —
+    rather than only the one jti that was replayed.
+    """
+    return str(uuid.uuid4())
+
+
+def _create_token(
+    subject: str, token_type: str, expires_delta: timedelta, family: str
+) -> tuple[str, str, datetime]:
     """Mint a signed JWT. Returns (token, jti, expiry)."""
     now = datetime.now(timezone.utc)
     expire = now + expires_delta
@@ -69,6 +84,7 @@ def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> tu
         "sub": subject,
         "typ": token_type,
         "jti": jti,
+        "fam": family,
         "iat": now,
         "nbf": now,
         "exp": expire,
@@ -78,19 +94,25 @@ def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> tu
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM), jti, expire
 
 
-def create_access_token(subject: str, expires_delta: Optional[timedelta] = None):
+def create_access_token(
+    subject: str, family: str, expires_delta: Optional[timedelta] = None
+):
     return _create_token(
         subject,
         TOKEN_TYPE_ACCESS,
         expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        family,
     )
 
 
-def create_refresh_token(subject: str, expires_delta: Optional[timedelta] = None):
+def create_refresh_token(
+    subject: str, family: str, expires_delta: Optional[timedelta] = None
+):
     return _create_token(
         subject,
         TOKEN_TYPE_REFRESH,
         expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        family,
     )
 
 
@@ -108,8 +130,11 @@ def decode_token(token: str, expected_type: str) -> Dict[str, Any]:
             algorithms=[ALGORITHM],
             audience=_AUDIENCE,
             issuer=_ISSUER,
+            # Reject tokens missing any claim the rest of the app relies on,
+            # rather than failing later with a KeyError.
+            options={"require": ["exp", "iat", "sub", "jti", "iss", "aud"]},
         )
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise TokenError(f"Invalid token: {exc}") from exc
 
     if payload.get("typ") != expected_type:

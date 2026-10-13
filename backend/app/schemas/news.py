@@ -13,4 +13,7 @@ class NewsRead(BaseModel):
     summary: Optional[str] = None
     categories: Optional[List[str]] = None
     tags: Optional[List[str]] = None
+    # None while the AI summary is still queued; `summary` then holds the
+    # page's own meta description.
+    enriched_at: Optional[datetime] = None
     model_config = {"from_attributes": True}

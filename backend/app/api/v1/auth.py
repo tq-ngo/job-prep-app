@@ -1,10 +1,11 @@
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
+from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -15,10 +16,14 @@ from app.core.auth_cookies import (
     CSRF_COOKIE,
     CSRF_HEADER,
     REFRESH_COOKIE,
+    await_rotation_result,
+    claim_rotation,
     clear_auth_cookies,
     deny_token,
-    is_token_denied,
+    is_payload_revoked,
+    revoke_family,
     set_auth_cookies,
+    store_rotation_result,
 )
 from app.core.database import get_session
 from app.core.datetime_utils import utc_now
@@ -38,6 +43,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     get_password_hash,
+    new_token_family,
     verify_password,
 )
 from app.models.users import User
@@ -82,8 +88,8 @@ async def get_current_user(
     except TokenError:
         raise _CREDENTIALS_EXC
 
-    # Revocation check — impossible before, since tokens carried no jti.
-    if await is_token_denied(payload.get("jti")):
+    # Revocation check: the token itself, or its whole sign-in family.
+    if await is_payload_revoked(payload):
         raise _CREDENTIALS_EXC
 
     result = await session.execute(select(User).where(User.email == payload["sub"]))
@@ -113,11 +119,34 @@ async def require_csrf(request: Request) -> None:
         raise HTTPException(status_code=403, detail="CSRF token mismatch")
 
 
+def _safe_next(next_path: Optional[str], default: str = "/jobs") -> str:
+    """
+    Accept only same-origin relative paths, so `next` can't be an open redirect.
+
+    Backslashes are rejected too: browsers normalise `/\\evil.com` to
+    `//evil.com`, a protocol-relative URL to another host.
+    """
+    if (
+        next_path
+        and next_path.startswith("/")
+        and not next_path.startswith("//")
+        and "\\" not in next_path
+        and not any(ord(c) < 0x20 for c in next_path)
+    ):
+        return next_path
+    return default
+
+
+def _mint(email: str, family: str) -> Tuple[str, str, str]:
+    """Mint an (access, refresh, csrf) triple within one token family."""
+    access, _, _ = create_access_token(email, family)
+    refresh, _, _ = create_refresh_token(email, family)
+    return access, refresh, secrets.token_urlsafe(32)
+
+
 async def _issue_session(response: Response, user: User, session: AsyncSession) -> dict:
-    """Mint tokens, set cookies, and stamp last_login_at."""
-    access, _, _ = create_access_token(user.email)
-    refresh, _, _ = create_refresh_token(user.email)
-    csrf = secrets.token_urlsafe(32)
+    """Start a new token family for a fresh sign-in, set cookies, stamp last_login_at."""
+    access, refresh, csrf = _mint(user.email, new_token_family())
     set_auth_cookies(response, access, refresh, csrf)
 
     user.last_login_at = utc_now()
@@ -195,9 +224,7 @@ def _require_google_configured() -> None:
 async def google_login(request: Request, next: str = "/jobs"):
     """Start the Google consent flow."""
     _require_google_configured()
-    # Only accept relative paths, so `next` can't be used as an open redirect.
-    safe_next = next if next.startswith("/") and not next.startswith("//") else "/jobs"
-    url = await build_authorization_url(safe_next)
+    url = await build_authorization_url(_safe_next(next))
     return RedirectResponse(url, status_code=307)
 
 
@@ -270,6 +297,59 @@ async def google_callback(
 
 # ── Session lifecycle ───────────────────────────────────────────────────
 
+class _RefreshFailed(Exception):
+    """The refresh cookie can't be exchanged; the caller must sign in again."""
+
+
+# How long a concurrent caller presenting an already-rotated refresh token
+# still receives the pair minted for it (multi-tab refresh races).
+_ROTATION_GRACE_SECONDS = 30
+
+
+async def _rotate_refresh(
+    raw_refresh: Optional[str], session: AsyncSession
+) -> Tuple[str, str, str]:
+    """
+    Exchange a refresh token for a new (access, refresh, csrf) triple.
+
+    Each refresh token is single-use. A reuse inside the grace window is a
+    concurrent tab and gets the same new pair; a reuse after it is a replayed
+    (likely stolen) token, so the whole family is revoked — logging out both
+    the thief and the victim, who then signs in again.
+    """
+    if not raw_refresh:
+        raise _RefreshFailed("No refresh token")
+    try:
+        payload = decode_token(raw_refresh, TOKEN_TYPE_REFRESH)
+    except TokenError:
+        raise _RefreshFailed("Invalid refresh token")
+    if await is_payload_revoked(payload):
+        raise _RefreshFailed("Refresh token revoked")
+
+    jti = payload["jti"]
+    # Tokens minted before families existed fall back to their own jti.
+    family = payload.get("fam") or jti
+    remaining = int(payload["exp"] - datetime.now(timezone.utc).timestamp())
+
+    if not await claim_rotation(jti, remaining):
+        cached = await await_rotation_result(jti)
+        if cached:
+            return cached
+        logger.warning("Refresh token reuse outside grace window; revoking family")
+        await revoke_family(family, settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
+        await deny_token(jti, remaining)
+        raise _RefreshFailed("Refresh token already used")
+
+    result = await session.execute(select(User).where(User.email == payload["sub"]))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise _RefreshFailed("User not found or disabled")
+
+    tokens = _mint(user.email, family)
+    await store_rotation_result(jti, tokens, _ROTATION_GRACE_SECONDS)
+    return tokens
+
+
 @router.post("/refresh")
 @limiter.limit("60/hour")
 async def refresh_session(
@@ -278,36 +358,53 @@ async def refresh_session(
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
     session: AsyncSession = Depends(get_session),
 ):
-    """
-    Rotate the refresh token and issue a new access token.
-
-    The presented refresh token is denylisted immediately, so each one is
-    single-use: replaying a stolen token after the legitimate client has
-    refreshed will fail.
-    """
-    if not refresh_token:
-        clear_auth_cookies(response)
-        raise HTTPException(status_code=401, detail="No refresh token")
+    """Rotate the refresh token and issue a new access token."""
     try:
-        payload = decode_token(refresh_token, TOKEN_TYPE_REFRESH)
-    except TokenError:
-        clear_auth_cookies(response)
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        access, refresh, csrf = await _rotate_refresh(refresh_token, session)
+    except _RefreshFailed as exc:
+        # Build the 401 directly: headers set on the injected `response` are
+        # discarded when an HTTPException is raised, so the old code's
+        # clear_auth_cookies() calls never reached the browser.
+        failed = JSONResponse(status_code=401, content={"detail": str(exc)})
+        clear_auth_cookies(failed)
+        return failed
 
-    if await is_token_denied(payload.get("jti")):
-        clear_auth_cookies(response)
-        raise HTTPException(status_code=401, detail="Refresh token already used")
+    set_auth_cookies(response, access, refresh, csrf)
+    return {"status": "ok", "csrf_token": csrf}
 
-    result = await session.execute(select(User).where(User.email == payload["sub"]))
-    user = result.scalar_one_or_none()
-    if user is None or not user.is_active:
-        clear_auth_cookies(response)
-        raise HTTPException(status_code=401, detail="User not found or disabled")
 
-    remaining = int(payload["exp"] - datetime.now(timezone.utc).timestamp())
-    await deny_token(payload["jti"], remaining)
+@router.get("/resume")
+@limiter.limit("30/minute")
+async def resume_session(
+    request: Request,
+    next: str = "/jobs",
+    refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Navigation-time refresh, used by the Next.js edge proxy.
 
-    return await _issue_session(response, user, session)
+    The access cookie lives 15 minutes and the refresh cookie is scoped to
+    /api/v1/auth, so a full page load of /jobs after an idle spell has no
+    usable credential the proxy can see — it used to bounce straight to
+    /login despite a valid 30-day refresh token. The proxy now redirects
+    here instead; this path receives the refresh cookie, rotates it, and
+    sends the browser back.
+
+    A GET that rotates tokens is CSRF-triggerable under SameSite=Lax, but the
+    only effect is rotating the victim's own session, which is harmless.
+    """
+    target = _safe_next(next)
+    try:
+        access, refresh, csrf = await _rotate_refresh(refresh_token, session)
+    except _RefreshFailed:
+        to_login = RedirectResponse(f"/login?next={quote(target)}", status_code=303)
+        clear_auth_cookies(to_login)
+        return to_login
+
+    back = RedirectResponse(target, status_code=303)
+    set_auth_cookies(back, access, refresh, csrf)
+    return back
 
 
 @router.post("/logout")
@@ -316,7 +413,7 @@ async def logout(
     access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
 ):
-    """Revoke both tokens and clear the cookies."""
+    """Revoke both tokens and the sign-in family, and clear the cookies."""
     now = datetime.now(timezone.utc).timestamp()
     for raw, kind in ((access_token, TOKEN_TYPE_ACCESS), (refresh_token, TOKEN_TYPE_REFRESH)):
         if not raw:
@@ -325,7 +422,12 @@ async def logout(
             payload = decode_token(raw, kind)
         except TokenError:
             continue
-        await deny_token(payload["jti"], int(payload["exp"] - now))
+        ttl = int(payload["exp"] - now)
+        await deny_token(payload["jti"], ttl)
+        # Revoking the family also kills any rotation result still held for
+        # the grace window, and tokens another tab may have just minted.
+        if payload.get("fam"):
+            await revoke_family(payload["fam"], settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
 
     clear_auth_cookies(response)
     return {"status": "logged_out"}

@@ -1,7 +1,6 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { useState } from "react";
 
@@ -17,10 +16,10 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      {/* AuthProvider lives in the (app) and (auth) layouts, where the
+          server can seed it; marketing pages never need the session. */}
       <ThemeProvider>
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+        {children}
       </ThemeProvider>
     </QueryClientProvider>
   );

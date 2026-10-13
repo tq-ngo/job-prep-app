@@ -5,12 +5,12 @@ import JobFeed from "./JobFeed";
 
 export default async function JobsPage() {
   let initialData: JobListResponse | undefined = undefined;
+  let initialDataUpdatedAt: number | undefined = undefined;
 
   try {
-    const apiUrl =
-      process.env.INTERNAL_API_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "http://localhost:8000";
+    // Server-side fetches need an absolute URL; the browser-facing origin
+    // is relative now, so this is always the internal address.
+    const apiUrl = process.env.INTERNAL_API_URL || "http://localhost:8000";
 
     // Forward the caller's cookies. This fetch previously went out with NO
     // credentials against an endpoint that accepted anonymous callers, so the
@@ -26,6 +26,9 @@ export default async function JobsPage() {
     });
     if (res.ok) {
       initialData = await res.json();
+      // Tells React Query how old the seeded data is, so its staleTime
+      // applies from the API response rather than from hydration.
+      initialDataUpdatedAt = Date.parse(res.headers.get("date") ?? "") || undefined;
     }
   } catch {
     // Fall back to client-side fetching; JobFeed handles an undefined prop.
@@ -39,7 +42,7 @@ export default async function JobsPage() {
         </div>
       }
     >
-      <JobFeed initialData={initialData} />
+      <JobFeed initialData={initialData} initialDataUpdatedAt={initialDataUpdatedAt} />
     </Suspense>
   );
 }

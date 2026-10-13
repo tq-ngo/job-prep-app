@@ -203,16 +203,21 @@ export default function NewsPage() {
                 <p className="font-sans text-sm text-foreground-muted leading-relaxed line-clamp-3">
                   {article.summary || "No summary available."}
                 </p>
+                {!article.enriched_at && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-foreground-subtle">
+                    <Loader2 size={11} className="animate-spin" /> AI summary pending
+                  </p>
+                )}
 
                 {/* Tags + analyzed time */}
                 <div className="flex items-center gap-2 mt-4 flex-wrap">
                   {article.tags?.map(tag => (
-                    <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-soft/50 text-foreground-muted font-mono text-[10px] uppercase tracking-wider">
+                    <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-soft/50 text-foreground-muted font-mono text-[11px] uppercase tracking-wider">
                       <Tag size={8} /> {tag}
                     </span>
                   ))}
                   {article.scraped_at && (
-                    <span className="ml-auto font-mono text-[10px] text-foreground-subtle">
+                    <span className="ml-auto font-mono text-[11px] text-foreground-subtle">
                       Analyzed {timeAgo(article.scraped_at)}
                     </span>
                   )}

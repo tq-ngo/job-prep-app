@@ -31,14 +31,16 @@ class Job(SQLModel, table=True):
     # for them.
     __table_args__ = (
         UniqueConstraint("external_id", "source", name="uq_jobs_external_id_source"),
-        # The job feed: WHERE is_active ORDER BY posted_at DESC NULLS LAST, id.
-        # Trailing `id` matches the pagination tiebreaker so offset paging is
-        # deterministic (pages can't repeat or drop rows).
+        # The job feed: WHERE is_active AND canonical_id IS NULL
+        # ORDER BY posted_at DESC NULLS LAST, id. Partial on exactly the feed
+        # predicate (the old ix_jobs_active_posted left canonical_id IS NULL
+        # as a heap filter). Trailing `id` matches the pagination tiebreaker
+        # so offset paging is deterministic.
         Index(
-            "ix_jobs_active_posted",
-            "is_active",
+            "ix_jobs_feed",
             text("posted_at DESC NULLS LAST"),
             "id",
+            postgresql_where=text("is_active AND canonical_id IS NULL"),
         ),
         # Backs the scrape_status='raw' claim query in process_raw_jobs_batch.
         Index(
@@ -92,12 +94,23 @@ class Job(SQLModel, table=True):
     )
     title: str
     company: str
+    # FAANG+ / Quant / Others, computed at ingest (scraping/categorize.py).
+    category: Optional[str] = Field(default=None, max_length=16, index=True)
+    # Registrable domain when the apply link is on the company's own site.
+    company_domain: Optional[str] = Field(default=None, max_length=255)
     location: Optional[str] = None
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
     salary_currency: Optional[str] = Field(default="USD", max_length=3)
+    # "hour" or "year". Internship pay is usually hourly; annualizing $50/hr
+    # into "$104,000" would misrepresent it.
+    salary_period: Optional[str] = Field(default=None, max_length=8)
     apply_url: str
     description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # Which extraction strategy produced `description` (greenhouse, lever,
+    # ashby, workday, smartrecruiters, linkedin, jsonld, readability), so
+    # per-source yield can be measured.
+    description_source: Optional[str] = Field(default=None, max_length=32)
     skills: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     seniority_level: Optional[str] = None
     employment_type: Optional[str] = None
@@ -105,11 +118,21 @@ class Job(SQLModel, table=True):
     terms: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     embedding: Optional[List[float]] = Field(default=None, sa_column=Column(Vector(768)))
     posted_at: Optional[datetime] = None
+    # Last time a crawl saw this posting (refreshed even when nothing changed).
     scraped_at: datetime = Field(default_factory=utc_now)
+    # Immutable insertion time. Cross-source linking picks the canonical row
+    # by this, not scraped_at, which now moves on every crawl and would make
+    # the canonical choice flip-flop.
+    first_seen_at: datetime = Field(default_factory=utc_now)
+    # When process_raw_jobs_batch claimed the row (raw -> queued). The stuck-
+    # job reaper keys on this; it used scraped_at, which requeued any old job
+    # within minutes of it being claimed.
+    queued_at: Optional[datetime] = None
     enriched_at: Optional[datetime] = None
-    # Set when jd_extractor successfully populated `description`. Lets the
-    # backfill task target rows that predate JD extraction, and distinguishes
-    # "never attempted" from "attempted and unavailable".
+    # When jd_extractor last ATTEMPTED this posting's description (set whether
+    # or not it succeeded). Distinguishes "never attempted" from "attempted
+    # and unavailable", and bounds retries of unreachable postings
+    # (scraping/db_sync.py JD_RETRY_AFTER). The backfill task targets NULLs.
     description_fetched_at: Optional[datetime] = None
     is_active: bool = Field(default=True)
     scrape_status: str = Field(default="raw")

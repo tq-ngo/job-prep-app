@@ -223,6 +223,6 @@ class BFSNewsCrawler:
         }
     
     async def _save_article(self, article_data: dict, session: AsyncSession):
-        """Save article to PostgreSQL with rich metadata and AI summarization."""
-        from app.scraping.news_parser import process_and_save_article
-        await process_and_save_article(article_data["url"], article_data.get("html", "") or article_data.get("content_raw", ""), session)
+        """Save article to PostgreSQL and queue its (rate-limited) AI summary."""
+        from app.tasks.news_tasks import save_article_and_queue_summary
+        await save_article_and_queue_summary(article_data["url"], article_data.get("html", "") or article_data.get("content_raw", ""), session)

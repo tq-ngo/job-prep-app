@@ -24,7 +24,8 @@ redis[hiredis]==6.4.0
 
 # Task queue
 celery[redis]==5.6.3
-flower==2.2.0
+# flower removed: it runs from the upstream mher/flower image in
+# docker-compose.override.yml instead of shipping in every app container.
 asgiref==3.12.1
 
 # HTTP scraping
@@ -45,10 +46,12 @@ readability-lxml==0.9       # generic main-content extraction for non-ATS hosts
 google-genai==2.26.0
 
 # Auth & Security
-python-jose[cryptography]==3.5.0
+PyJWT[crypto]==2.15.1
 bcrypt==5.0.0
 email-validator==2.3.0
-google-auth==2.59.1         # Google id_token verification against Google JWKS
+google-auth[requests]==2.59.1  # id_token verification; the [requests] extra is what
+                              # google.auth.transport.requests imports (was only
+                              # present transitively via google-genai)
 httpx==0.28.1               # OAuth token exchange
 
 # Rate limiting (login/register brute-force, scrape-trigger abuse)

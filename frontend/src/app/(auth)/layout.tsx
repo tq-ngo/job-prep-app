@@ -1,3 +1,5 @@
+import { AuthProvider } from "@/context/AuthContext";
+
 /**
  * Auth routes render as a plain server layout.
  *
@@ -6,7 +8,10 @@
  * form, and the real page only appeared after hydration and a round trip to
  * /auth/me. Redirects are now handled at the edge by src/proxy.ts, which runs
  * before any rendering, so the guard is both redundant and harmful here.
+ *
+ * proxy.ts only lets a visitor reach these pages without a valid session,
+ * so the user is seeded as signed-out and nothing is fetched until login.
  */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return <AuthProvider initialUser={null}>{children}</AuthProvider>;
 }

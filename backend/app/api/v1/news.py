@@ -18,7 +18,13 @@ async def list_news(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    stmt = select(NewsArticle).order_by(NewsArticle.published_at.desc()).limit(50)
+    # NULLS LAST: Postgres sorts NULLs FIRST under DESC, which pinned every
+    # undated article above all dated ones.
+    stmt = (
+        select(NewsArticle)
+        .order_by(NewsArticle.published_at.desc().nulls_last(), NewsArticle.scraped_at.desc())
+        .limit(50)
+    )
     result = await session.execute(stmt)
     return result.scalars().all()
 

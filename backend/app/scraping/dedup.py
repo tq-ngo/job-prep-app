@@ -1,8 +1,11 @@
+import asyncio
 import re
 import hashlib
+import time
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from cachetools import LRUCache
 
 from app.models.url_seen import UrlSeen
 from app.core.redis import create_worker_redis
@@ -13,25 +16,43 @@ class JobDeduplicator:
     Handles URL canonicalization and composite SHA-256 fingerprint generation
     to eliminate duplicate listings across job platforms.
 
-    Also provides 2-layer dedup helpers (Redis + DB) used by the BFS
-    news crawler.  The 3-layer job dedup lives in db_sync.py.
+    Also provides the 3-layer URL dedup (LRU -> Redis -> url_seen) used by
+    the news crawlers. The 3-layer job dedup lives in db_sync.py.
     """
     
     # Common tracking parameters used by recruitment platforms
     TRACKING_PARAMS = {
         "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-        "gh_jid", "trkid", "sc_channel", "rb_clickid", "ref", "source"
+        "gh_jid", "trkid", "sc_channel", "rb_clickid", "ref", "source",
+        # LinkedIn appends these to every link, so the same story arrived
+        # under many URLs and was stored once per variant.
+        "trk", "trackingid", "refid", "lipi", "midtoken", "midsig", "trkemail",
     }
 
+    # Redis ZSET of url sha256 -> epoch seconds. Was a plain SET with no TTL
+    # at all, so it grew without bound.
+    URL_SEEN_ZSET = "seen:urls"
+    URL_SEEN_TTL_SECONDS = 180 * 24 * 3600
+
     def __init__(self):
-        # Lazily initialized — single Redis client reused across calls.
-        self._redis = None
+        # One Redis client per event loop. Celery runs each task through
+        # async_to_sync on a FRESH loop; a single cached client stayed bound
+        # to the first task's (closed) loop and failed in every later task.
+        self._redis_by_loop: dict = {}
+        # Layer 1: per-process LRU of URL hashes confirmed seen.
+        self._seen_urls: LRUCache = LRUCache(maxsize=10_000)
 
     def _get_redis(self):
-        """Return the shared Redis client, creating it on first use."""
-        if self._redis is None:
-            self._redis = create_worker_redis()
-        return self._redis
+        """Return this event loop's Redis client, creating it on first use."""
+        loop_id = id(asyncio.get_running_loop())
+        client = self._redis_by_loop.get(loop_id)
+        if client is None:
+            if len(self._redis_by_loop) > 8:
+                # Bounded like gemini_client: old loops are already closed,
+                # so their clients are only dropped, not awaited.
+                self._redis_by_loop.clear()
+            client = self._redis_by_loop[loop_id] = create_worker_redis()
+        return client
 
     @classmethod
     def canonicalize_url(cls, url: str) -> str:
@@ -94,23 +115,27 @@ class JobDeduplicator:
 
     async def is_seen(self, url: str, session: AsyncSession) -> bool:
         """
-        2-layer check used by the BFS news crawler:
-          Layer 1: Redis Set  (fast, shared across workers)
-          Layer 2: PostgreSQL url_seen table  (durable, survives Redis eviction)
+        Sequential 3-layer check used by the news crawlers:
+          Layer 1: in-process LRU     (no network)
+          Layer 2: Redis ZSET         (shared across workers, per-entry TTL)
+          Layer 3: url_seen table     (durable, survives Redis eviction)
+        A lower-layer hit hydrates the layers above it.
         """
         url_sha = self.url_hash(url)
-        redis = self._get_redis()
-
-        # Layer 1 — Redis
-        if await redis.sismember("url_seen_set", url_sha):
+        if url_sha in self._seen_urls:
             return True
 
-        # Layer 2 — Postgres
+        redis = self._get_redis()
+        score = await redis.zscore(self.URL_SEEN_ZSET, url_sha)
+        if score is not None and float(score) >= time.time() - self.URL_SEEN_TTL_SECONDS:
+            self._seen_urls[url_sha] = True
+            return True
+
         stmt = select(UrlSeen).where(UrlSeen.url_sha256 == url_sha)
         result = await session.execute(stmt)
         if result.scalar_one_or_none() is not None:
-            # Hydrate Redis so the next check short-circuits
-            await redis.sadd("url_seen_set", url_sha)
+            await redis.zadd(self.URL_SEEN_ZSET, {url_sha: time.time()})
+            self._seen_urls[url_sha] = True
             return True
 
         return False
@@ -125,8 +150,12 @@ class JobDeduplicator:
         canonical = self.canonicalize_url(url)
         redis = self._get_redis()
 
-        # Redis
-        await redis.sadd("url_seen_set", url_sha)
+        now = time.time()
+        pipe = redis.pipeline()
+        pipe.zadd(self.URL_SEEN_ZSET, {url_sha: now})
+        pipe.zremrangebyscore(self.URL_SEEN_ZSET, "-inf", now - self.URL_SEEN_TTL_SECONDS)
+        await pipe.execute()
+        self._seen_urls[url_sha] = True
 
         # Postgres — idempotent (PK = url_sha256)
         existing = await session.get(UrlSeen, url_sha)

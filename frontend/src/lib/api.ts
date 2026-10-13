@@ -1,7 +1,10 @@
 import axios from "axios";
+import { API_BASE, googleLoginUrl } from "./urls";
+
+export { API_BASE };
 
 const apiClient = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
+  baseURL: API_BASE,
   headers: { "Content-Type": "application/json" },
   // Send the HttpOnly auth cookies on every request. Tokens are no longer
   // held in localStorage, where any XSS could read them.
@@ -97,6 +100,9 @@ export interface Job {
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string | null;
+  /** "hour" | "year"; internship pay is usually hourly. */
+  salary_period?: "hour" | "year" | null;
+  category?: string | null;
   is_remote: boolean | null;
   posted_at: string | null;
   scraped_at: string;
@@ -108,12 +114,30 @@ export interface Job {
   terms?: string[] | null;
 }
 
+/** Payload of a live `job` SSE event (see backend app/core/events.py). */
+export interface JobEvent {
+  kind: "created" | "enriched";
+  id: string;
+  title: string;
+  company: string;
+  location: string | null;
+  skills: string[];
+  apply_url: string;
+  source: string;
+  is_remote: boolean | null;
+}
+
+/** A feed row: the list endpoint omits `description` (fetched per job). */
+export type JobSummary = Omit<Job, "description">;
+
 export interface JobListResponse {
-  items: Job[];
+  items: JobSummary[];
   total: number;
   page: number;
   page_size: number;
   pages: number;
+  /** True when `total` hit the server's display cap (render as "500+"). */
+  capped?: boolean;
 }
 
 export const jobsApi = {
@@ -141,7 +165,12 @@ export const jobsApi = {
 };
 
 export const tasksApi = {
-  getStatus: async (taskId: string): Promise<{ status: string; result: any; error: string | null; meta?: any }> => {
+  getStatus: async (taskId: string): Promise<{
+    status: string;
+    result: unknown;
+    error: string | null;
+    meta?: { percent: number; message: string };
+  }> => {
     const { data } = await apiClient.get(`/api/v1/tasks/${taskId}`);
     return data;
   },
@@ -171,10 +200,13 @@ export const authApi = {
   logout: async () => {
     await apiClient.post("/api/v1/auth/logout");
   },
-  googleLoginUrl: (next = "/jobs") => {
-    const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    return `${base}/api/v1/auth/google/login?next=${encodeURIComponent(next)}`;
+  /** Rotate the session cookies. Rejects when the session is gone. */
+  refresh: async () => {
+    await apiClient.post("/api/v1/auth/refresh");
   },
+  /** True when a session probably exists (the readable CSRF cookie is set). */
+  hasSessionHint: () => Boolean(readCookie("csrf_token")),
+  googleLoginUrl,
   register: async (email: string, password: string) => {
     const { data } = await apiClient.post<User>("/api/v1/auth/register", { email, password });
     return data;
@@ -199,6 +231,8 @@ export interface NewsArticle {
   summary: string | null;
   categories: string[] | null;
   tags: string[] | null;
+  /** Null while the AI summary is queued; `summary` is the page's own blurb. */
+  enriched_at: string | null;
 }
 
 export const newsApi = {

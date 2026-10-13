@@ -1,14 +1,15 @@
 import asyncio
 import logging
 import re
-from typing import Optional, List
-from bs4 import BeautifulSoup
-from pydantic import BaseModel, Field
+from typing import Optional, Type, TypeVar
+from pydantic import BaseModel
 from google import genai
 from google.genai import types
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 # The Gemini client must NOT be created at import time.
 #
@@ -90,6 +91,7 @@ _CONFIG_FAULT_MARKERS = (
     "was not found",
     "is not supported",
     "api key not valid",
+    "no api key",           # google-genai raises this when GEMINI_API_KEY is empty
     "api_key_invalid",
     "permission denied",
     "permission_denied",
@@ -213,66 +215,46 @@ async def generate_text(
         )
     return text
 
-# Enforced Output Schema via Pydantic
-class ExtractedJobSchema(BaseModel):
-    company_name: str = Field(description="The hiring company name")
-    job_title: str = Field(description="Official job title")
-    location: str = Field(description="Job location, e.g., 'Seattle, WA' or 'Remote'")
-    is_remote: bool = Field(description="True if explicitly specified as remote")
-    salary_min: Optional[int] = Field(default=None, description="Minimum annual compensation in USD")
-    salary_max: Optional[int] = Field(default=None, description="Maximum annual compensation in USD")
-    required_skills: List[str] = Field(description="List of primary technical skills/languages mentioned")
-
-class StructuredGeminiExtractor:
+async def generate_structured(
+    prompt: str,
+    schema: Type[SchemaT],
+    system_instruction: str = "",
+    temperature: float = 0.0,
+    max_tokens: int = 2048,
+) -> SchemaT:
     """
-    Pre-processes HTML to reduce token usage and uses Gemini's
-    Structured Outputs API for strict JSON parsing with google-genai SDK v1.
+    Call Gemini with a response schema and return the validated model.
+
+    Same error taxonomy as generate_text (config / transient / truncated).
+    Thinking is disabled: extraction gains nothing from it, and thinking
+    tokens share the max_output_tokens budget with the JSON.
+
+    Raises pydantic.ValidationError if the model returns JSON that doesn't
+    fit the schema — a per-item content problem, which callers may handle.
     """
-    def __init__(self):
-        self.client = _get_client()
-
-    @staticmethod
-    def clean_html_body(raw_html: str) -> str:
-        """
-        Strips script, style, nav, header, and footer tags from raw HTML
-        to reduce token consumption by 60-80%.
-        """
-        soup = BeautifulSoup(raw_html, "html.parser")
-        
-        # Remove non-content tags
-        for element in soup(["script", "style", "nav", "header", "footer", "noscript", "svg"]):
-            element.decompose()
-            
-        # Extract readable text layout
-        text = soup.get_text(separator="\n")
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        return "\n".join(lines)[:12000] # Cap character length for safety
-
-    async def extract_job_details(self, raw_html: str) -> Optional[ExtractedJobSchema]:
-        """
-        Sends cleaned text context to Gemini and returns structured job data.
-        """
-        cleaned_text = self.clean_html_body(raw_html)
-        
-        prompt = (
-            "Analyze the following job description text and extract structured job attributes. "
-            "If a salary range is specified as hourly, convert it to an estimated annual base pay.\n\n"
-            f"Job Description:\n{cleaned_text}"
+    try:
+        response = await _get_client().aio.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                response_mime_type="application/json",
+                response_schema=schema,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
+    except Exception as exc:
+        raise _classify(exc) from exc
 
-        try:
-            # Request structured JSON output using Pydantic schema in google-genai v1
-            response = await self.client.aio.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ExtractedJobSchema,
-                    temperature=0.1
-                )
-            )
-            return response.parsed
-
-        except Exception as e:
-            logger.error(f"Failed structured extraction via Gemini API: {e}")
-            return None
+    candidate = (response.candidates or [None])[0]
+    finish_reason = getattr(candidate, "finish_reason", None)
+    if finish_reason is not None and str(finish_reason).endswith("MAX_TOKENS"):
+        raise GeminiTruncatedError(f"Structured response hit max_output_tokens={max_tokens}")
+    if isinstance(response.parsed, schema):
+        return response.parsed
+    text = response.text or ""
+    if not text.strip():
+        raise GeminiTruncatedError(f"Gemini returned empty text (finish_reason={finish_reason}).")
+    return schema.model_validate_json(text)

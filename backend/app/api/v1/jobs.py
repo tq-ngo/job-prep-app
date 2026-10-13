@@ -56,11 +56,10 @@ async def list_jobs(
     # a duplicate to the first row it saw rather than discarding it, so every
     # row is still queryable but the feed shows each role once.
     #
-    # defer(Job.embedding) keeps the 768-float pgvector column out of the
-    # result set — ~3KB per row x 30 rows fetched and then thrown away by
-    # JobRead on every single page request.
+    # defer() keeps the 768-float embedding (~3KB/row) and the description
+    # (up to 40k chars/row) out of the result set: JobListItem shows neither.
     base_filters = [Job.is_active == True, Job.canonical_id.is_(None)]
-    query = select(Job).options(defer(Job.embedding)).where(*base_filters)
+    query = select(Job).options(defer(Job.embedding), defer(Job.description)).where(*base_filters)
     count_query = select(func.count(Job.id)).where(*base_filters)
     
     if source:
@@ -76,35 +75,22 @@ async def list_jobs(
         count_query = count_query.where(Job.salary_min >= min_salary)
     
     if q:
-        search_filter = or_(Job.title.ilike(f"%{q}%"), Job.company.ilike(f"%{q}%"))
+        # Escape LIKE wildcards: a bare "_" or "%" in the search box used to
+        # match everything.
+        term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        search_filter = or_(
+            Job.title.ilike(f"%{term}%", escape="\\"),
+            Job.company.ilike(f"%{term}%", escape="\\"),
+        )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
 
     if category:
-        faang = ["meta", "apple", "amazon", "netflix", "google", "microsoft", "nvidia", "tesla", "tiktok", "bytedance"]
-        faang_filter = or_(*[Job.company.ilike(f"%{c}%") for c in faang])
-        
-        quant_companies = [
-            "jane street", "citadel", "two sigma", "hrt", "hudson river trading", 
-            "optiver", "jump trading", "akuna", "drw", "imc", "tower research", 
-            "point72", "deshaw", "de shaw", "renaissance", "susquehanna", "sig"
-        ]
-        quant_roles = ["quant", "quantitative", "algo", "trading", "hft"]
-        quant_filter = or_(
-            *[Job.company.ilike(f"%{c}%") for c in quant_companies],
-            *[Job.title.ilike(f"%{r}%") for r in quant_roles]
-        )
-
-        if category == "FAANG+":
-            query = query.where(faang_filter)
-            count_query = count_query.where(faang_filter)
-        elif category == "Quant":
-            query = query.where(quant_filter)
-            count_query = count_query.where(quant_filter)
-        elif category == "Others":
-            others_filter = ~or_(faang_filter, quant_filter)
-            query = query.where(others_filter)
-            count_query = count_query.where(others_filter)
+        # Indexed column computed at ingest (scraping/categorize.py). This
+        # used to be 30+ OR'd substring ILIKEs per request, where '%meta%'
+        # matched Metabase and '%sig%' matched any "Design" role.
+        query = query.where(Job.category == category)
+        count_query = count_query.where(Job.category == category)
 
 
     MAX_UI_JOBS = 500  # All jobs are stored in DB; UI displays at most 500
@@ -129,6 +115,7 @@ async def list_jobs(
 
     # Clamp display total to 500 — DB still holds all records
     total = min(raw_total, MAX_UI_JOBS)
+    capped = raw_total > MAX_UI_JOBS
     pages = (total + page_size - 1) // page_size if total > 0 else 1
 
     if offset >= total:
@@ -138,6 +125,7 @@ async def list_jobs(
             page=page,
             page_size=page_size,
             pages=pages,
+            capped=capped,
         )
 
     # Order by date posted (latest on top), apply pagination.
@@ -167,6 +155,7 @@ async def list_jobs(
         page=page,
         page_size=page_size,
         pages=pages,
+        capped=capped,
     )
 
 

@@ -33,7 +33,13 @@ class JobCreate(BaseModel):
         """
         return as_utc(v)
 
-class JobRead(BaseModel):
+class JobListItem(BaseModel):
+    """
+    A feed row. Deliberately has no `description`: list responses used to
+    carry the full JD (up to 40k chars) for all 30 rows — approaching 1 MB a
+    page, embedded a second time in the RSC payload — to show a table that
+    never displays it. The drawer fetches JobRead by id instead.
+    """
     id: uuid.UUID
     external_id: str
     source: str
@@ -42,10 +48,11 @@ class JobRead(BaseModel):
     company: str
     location: Optional[str] = None
     apply_url: str
-    description: Optional[str] = None
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
     salary_currency: Optional[str] = "USD"
+    salary_period: Optional[str] = None  # "hour" | "year"
+    category: Optional[str] = None
     skills: Optional[List[str]] = None
     seniority_level: Optional[str] = None
     employment_type: Optional[str] = None
@@ -57,9 +64,18 @@ class JobRead(BaseModel):
     is_active: bool
     model_config = {"from_attributes": True}  # Allow construction from ORM objects
 
+
+class JobRead(JobListItem):
+    """Full job, including the sanitized Markdown description."""
+    description: Optional[str] = None
+
+
 class JobListResponse(BaseModel):
-    items: List[JobRead]
+    items: List[JobListItem]
     total: int
     page: int
     page_size: int
     pages: int
+    # True when `total` was clamped to the UI cap, so the UI can show "500+"
+    # instead of claiming exactly 500 roles exist.
+    capped: bool = False

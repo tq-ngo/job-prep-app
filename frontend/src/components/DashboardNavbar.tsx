@@ -9,7 +9,7 @@ import { useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 
 export default function DashboardNavbar() {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, isLoading, logout, refreshUser } = useAuth();
   const pathname = usePathname();
   const [isEditingSkills, setIsEditingSkills] = useState(false);
   const [skillInput, setSkillInput] = useState("");
@@ -63,7 +63,7 @@ export default function DashboardNavbar() {
 
   return (
     <header className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-md border-b border-slate-soft transition-colors duration-200">
-      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-12 flex items-center justify-between gap-4">
         
         {/* Brand Logo & Main Nav */}
         <div className="flex items-center gap-6">
@@ -99,14 +99,14 @@ export default function DashboardNavbar() {
         {/* Center: Tracked Skills Pills (Compact View) */}
         {user && (
           <div className="hidden lg:flex items-center gap-2 max-w-md overflow-hidden">
-            <span className="font-mono text-[10px] text-foreground-subtle uppercase tracking-wider shrink-0 flex items-center gap-1">
+            <span className="font-mono text-[11px] text-foreground-subtle uppercase tracking-wider shrink-0 flex items-center gap-1">
               <Sparkles size={11} className="text-spruce-green" /> Skills:
             </span>
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
               {(user.skills || []).slice(0, 5).map((skill) => (
                 <span
                   key={skill}
-                  className="group inline-flex items-center gap-1 px-2 py-0.5 rounded bg-neutral-soft border border-slate-soft text-spruce-green font-mono text-[10px] uppercase tracking-wider shrink-0"
+                  className="group inline-flex items-center gap-1 px-2 py-0.5 rounded bg-neutral-soft border border-slate-soft text-spruce-green font-mono text-[11px] uppercase tracking-wider shrink-0"
                 >
                   {skill}
                   {isEditingSkills && (
@@ -120,7 +120,7 @@ export default function DashboardNavbar() {
                 </span>
               ))}
               {(user.skills || []).length > 5 && (
-                <span className="font-mono text-[10px] text-foreground-subtle shrink-0">
+                <span className="font-mono text-[11px] text-foreground-subtle shrink-0">
                   +{(user.skills || []).length - 5}
                 </span>
               )}
@@ -132,13 +132,13 @@ export default function DashboardNavbar() {
                     onChange={(e) => setSkillInput(e.target.value)}
                     onKeyDown={handleSkillKeyDown}
                     placeholder="New skill..."
-                    className="w-24 bg-background border border-slate-soft rounded px-1.5 py-0.5 text-[10px] text-slate-ink focus:outline-none focus:ring-1 focus:ring-spruce-green font-mono"
+                    className="w-24 bg-background border border-slate-soft rounded px-1.5 py-0.5 text-[11px] text-slate-ink focus:outline-none focus:ring-1 focus:ring-spruce-green font-mono"
                     autoFocus
                   />
                   <button
                     onClick={handleAddSkill}
                     disabled={!skillInput.trim() || isSaving}
-                    className="p-1 bg-spruce-green hover:bg-spruce-green-hover text-warm-ivory rounded text-[10px]"
+                    className="p-1 bg-spruce-green hover:bg-spruce-green-hover text-warm-ivory rounded text-[11px]"
                   >
                     {isSaving ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
                   </button>
@@ -152,7 +152,7 @@ export default function DashboardNavbar() {
               ) : (
                 <button
                   onClick={() => setIsEditingSkills(true)}
-                  className="font-mono text-[10px] text-foreground-subtle hover:text-spruce-green border border-dashed border-slate-soft hover:border-spruce-green/50 rounded px-1.5 py-0.5 shrink-0 transition-colors"
+                  className="font-mono text-[11px] text-foreground-subtle hover:text-spruce-green border border-dashed border-slate-soft hover:border-spruce-green/50 rounded px-1.5 py-0.5 shrink-0 transition-colors"
                 >
                   + Edit
                 </button>
@@ -165,7 +165,11 @@ export default function DashboardNavbar() {
         <div className="flex items-center gap-3">
           <ThemeToggle />
 
-          {user ? (
+          {isLoading ? (
+            // Session unknown (server couldn't resolve it): a neutral
+            // placeholder, never a "Sign In" button that then flips.
+            <div className="w-40 h-6 rounded bg-slate-soft/40 animate-pulse" aria-hidden="true" />
+          ) : user ? (
             <div className="flex items-center gap-3 pl-2 border-l border-slate-soft">
               <span
                 className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-[160px]"
@@ -227,7 +231,7 @@ export default function DashboardNavbar() {
                 {(user.skills || []).map((skill) => (
                   <span
                     key={skill}
-                    className="px-2 py-0.5 rounded bg-neutral-soft border border-slate-soft text-spruce-green font-mono text-[10px] uppercase"
+                    className="px-2 py-0.5 rounded bg-neutral-soft border border-slate-soft text-spruce-green font-mono text-[11px] uppercase"
                   >
                     {skill}
                   </span>

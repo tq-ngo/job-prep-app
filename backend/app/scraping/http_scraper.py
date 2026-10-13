@@ -34,12 +34,17 @@ class TLSImpersonateScraper:
         self, 
         url: str, 
         max_retries: int = 3, 
-        base_backoff: float = 2.0
+        base_backoff: float = 2.0,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Optional[str]:
         """
         Fetches a target URL with TLS impersonation, automatic retries,
         exponential backoff, and randomized jitter.
+
+        `headers` are merged over the browser defaults (e.g. a JSON Accept
+        header for ATS APIs that content-negotiate).
         """
+        request_headers = {**self.default_headers, **(headers or {})}
         proxies = {"http": self.proxy_url, "https": self.proxy_url} if self.proxy_url else None
 
         # Re-validate at FETCH time, not just at request time: DNS can
@@ -57,7 +62,7 @@ class TLSImpersonateScraper:
                 response = await asyncio.to_thread(
                     requests.get,
                     url,
-                    headers=self.default_headers,
+                    headers=request_headers,
                     impersonate="chrome120", # Exact TLS Cipher Suite & HTTP/2 frame spoofing
                     proxies=proxies,
                     timeout=15,

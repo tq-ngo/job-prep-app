@@ -79,7 +79,7 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
           <button 
             type="submit" 
             disabled={isLoading}
-            className="w-full bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-slate-ink/50 text-warm-ivory py-3 rounded font-medium transition-colors text-sm"
+            className="w-full bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-foreground-subtle disabled:cursor-not-allowed text-warm-ivory py-3 rounded font-medium transition-colors text-sm"
           >
             {isLoading ? "Signing in..." : "Sign In"}
           </button>

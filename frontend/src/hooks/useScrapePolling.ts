@@ -9,8 +9,12 @@ export function useScrapePolling(
   // Refs to avoid re-triggering the effect when callbacks change
   const onCompleteRef = useRef(onComplete);
   const onProgressRef = useRef(onProgress);
-  onCompleteRef.current = onComplete;
-  onProgressRef.current = onProgress;
+  // Synced in an effect: writing refs during render is unsafe under
+  // concurrent rendering (a discarded render would leave a stale callback).
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+    onProgressRef.current = onProgress;
+  }, [onComplete, onProgress]);
 
   useEffect(() => {
     if (!taskId) return;

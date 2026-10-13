@@ -7,6 +7,7 @@ from app.core.database import get_session
 from app.models.job import Job
 from app.models.users import User
 from app.schemas.job import JobListResponse
+from sqlalchemy.orm import defer
 from app.ai.embedder import generate_embedding
 from app.api.v1.auth import get_current_user
 
@@ -39,6 +40,8 @@ async def semantic_search(
     # Smallest distance = most semantically similar.
     stmt = (
         select(Job)
+        # JobListItem shows neither column; don't ship them out of Postgres.
+        .options(defer(Job.embedding), defer(Job.description))
         .where(Job.is_active == True)
         .where(Job.canonical_id.is_(None))  # Collapse cross-source duplicates to canonical entity
         .where(Job.embedding != None)  # Only search jobs that have AI embeddings
