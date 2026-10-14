@@ -48,7 +48,8 @@ class LinkedInScraper:
                 percent = int((page_num / max_pages) * 100)
                 await progress_callback(percent, f"Scraping LinkedIn page {page_num + 1}/{max_pages}")
 
-            html_content = await self.http_scraper.fetch_page(guest_api_url)
+            req_headers = {"Cookie": f"li_at={li_at_cookie}"} if li_at_cookie else None
+            html_content = await self.http_scraper.fetch_page(guest_api_url, headers=req_headers)
             if not html_content or not html_content.strip():
                 logger.info(f"No more job results returned at offset {offset}")
                 break

@@ -13,13 +13,17 @@ Security properties implemented here:
                       audience and expiry (google-auth does all of it)
   - email_verified  : unverified Google emails are rejected, otherwise anyone
                       could claim an address they don't control
+  - nonce (OIDC)    : random per-request value stored with the state and
+                      echoed inside the signed id_token, so an id_token
+                      minted for some other authorization request can't be
+                      replayed into this callback
 """
 import base64
 import hashlib
 import json
 import logging
 import secrets
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
 
 import httpx
@@ -54,6 +58,7 @@ async def build_authorization_url(next_path: str = "/jobs") -> str:
     exactly once; Redis DEL on read makes replay impossible.
     """
     state = _b64url(secrets.token_bytes(32))
+    nonce = _b64url(secrets.token_bytes(32))
     code_verifier = _b64url(secrets.token_bytes(64))
     code_challenge = _b64url(hashlib.sha256(code_verifier.encode()).digest())
 
@@ -61,7 +66,7 @@ async def build_authorization_url(next_path: str = "/jobs") -> str:
     await redis.setex(
         f"{_STATE_PREFIX}{state}",
         _STATE_TTL_SECONDS,
-        json.dumps({"code_verifier": code_verifier, "next": next_path}),
+        json.dumps({"code_verifier": code_verifier, "next": next_path, "nonce": nonce}),
     )
 
     params = {
@@ -70,6 +75,7 @@ async def build_authorization_url(next_path: str = "/jobs") -> str:
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
+        "nonce": nonce,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "access_type": "online",
@@ -115,13 +121,17 @@ async def exchange_code(code: str, code_verifier: str) -> Dict[str, Any]:
     return resp.json()
 
 
-def verify_id_token(raw_id_token: str) -> Dict[str, Any]:
+def verify_id_token(raw_id_token: str, expected_nonce: Optional[str] = None) -> Dict[str, Any]:
     """
     Verify Google's id_token and return its claims.
 
     google-auth fetches Google's JWKS and validates the signature, `iss`,
     `aud` and `exp`. Verifying locally (rather than calling a tokeninfo
     endpoint) avoids an extra network hop on every login.
+
+    `expected_nonce` is the value stored with the state. It is optional only
+    so that a sign-in already in flight when this check shipped (its state
+    record predates the nonce) still completes; every new flow stores one.
     """
     try:
         claims = google_id_token.verify_oauth2_token(
@@ -134,6 +144,10 @@ def verify_id_token(raw_id_token: str) -> Dict[str, Any]:
 
     if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
         raise OAuthError("Unexpected id_token issuer")
+    if expected_nonce is not None and not secrets.compare_digest(
+        str(claims.get("nonce") or ""), expected_nonce
+    ):
+        raise OAuthError("id_token nonce mismatch")
     if not claims.get("email"):
         raise OAuthError("id_token contains no email")
     if not claims.get("email_verified"):

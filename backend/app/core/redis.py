@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import redis.asyncio as aioredis
 from app.config import settings
 
@@ -14,6 +15,24 @@ def create_worker_redis() -> aioredis.Redis:
         decode_responses=True,
     )
     return aioredis.Redis(connection_pool=pool)
+
+
+@asynccontextmanager
+async def worker_redis_ctx():
+    """
+    Async context manager for Celery workers.
+    Ensures Redis client and its connection pool are closed cleanly.
+    """
+    client = create_worker_redis()
+    try:
+        yield client
+    finally:
+        try:
+            await client.aclose(close_connection_pool=True)
+        except TypeError:
+            await client.aclose()
+            if hasattr(client, "connection_pool"):
+                await client.connection_pool.disconnect()
 
 
 # ── FastAPI global pool (single event loop, safe) ────────────────────────

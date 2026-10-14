@@ -5,6 +5,8 @@ import uuid
 
 from app.core.datetime_utils import as_utc
 
+from urllib.parse import urlparse
+
 class JobCreate(BaseModel):
     external_id: str
     source: str
@@ -20,6 +22,14 @@ class JobCreate(BaseModel):
     is_remote: Optional[bool] = None
     posted_at: Optional[datetime] = None
     terms: Optional[List[str]] = None
+
+    @field_validator("apply_url")
+    @classmethod
+    def _validate_apply_url(cls, v: str) -> str:
+        parsed = urlparse(v.strip())
+        if parsed.scheme.lower() not in ("http", "https"):
+            raise ValueError(f"apply_url must use http or https scheme, got {parsed.scheme!r}")
+        return v.strip()
 
     @field_validator("posted_at")
     @classmethod

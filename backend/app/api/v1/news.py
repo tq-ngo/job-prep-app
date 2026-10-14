@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from typing import List
 
 from app.core.database import get_session
+from app.core.rate_limit import limiter
 from app.models.news import NewsArticle
 from app.models.users import User
 from app.schemas.news import NewsRead
 from app.tasks.news_tasks import crawl_news_site, scrape_linkedin_news
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, require_csrf
 from app.core.url_guard import UnsafeUrlError, validate_crawl_url
 
 router = APIRouter()
@@ -29,9 +32,12 @@ async def list_news(
     return result.scalars().all()
 
 @router.post("/scrape")
+@limiter.limit("10/minute")
 async def trigger_news_scrape(
+    request: Request,
     url: str = Query(..., max_length=2048),
     current_user: User = Depends(get_current_user),
+    _: None = Depends(require_csrf),
 ):
     """
     Queue a crawl of a user-supplied URL.
@@ -42,7 +48,8 @@ async def trigger_news_scrape(
     Postgres/Redis, or the unauthenticated Flower dashboard.
     """
     try:
-        safe_url = validate_crawl_url(url)
+        # Resolves DNS synchronously; keep it off the event loop.
+        safe_url = await asyncio.to_thread(validate_crawl_url, url)
     except UnsafeUrlError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -50,7 +57,12 @@ async def trigger_news_scrape(
     return {"status": "accepted", "task_id": task.id, "message": f"Crawling {safe_url}"}
 
 @router.post("/scrape/linkedin")
-async def trigger_linkedin_news(current_user: User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def trigger_linkedin_news(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
     """Trigger an on-demand LinkedIn News crawl"""
     task = scrape_linkedin_news.delay()
     return {"status": "accepted", "task_id": task.id, "message": "Fetching LinkedIn daily news"}

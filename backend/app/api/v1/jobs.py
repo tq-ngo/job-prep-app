@@ -1,15 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
 from typing import Optional
 
 from app.core.database import get_session
+from app.core.rate_limit import limiter
 from app.models.job import Job
 from app.models.users import User
 from app.schemas.job import JobRead, JobListResponse
 from app.tasks.job_tasks import scrape_github, scrape_linkedin
 from app.core.redis import get_redis_pool
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, require_csrf
 from sqlalchemy import or_
 from sqlalchemy.orm import defer
 import hashlib
@@ -160,7 +161,13 @@ async def list_jobs(
 
 
 @router.post("/scrape/{source}", status_code=202)
-async def trigger_scrape(source: str, current_user: User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def trigger_scrape(
+    request: Request,
+    source: str,
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(require_csrf),
+):
     """
     Trigger a background scrape job. Idempotency is handled inside each
     task via Redis NX locks — the API simply dispatches and

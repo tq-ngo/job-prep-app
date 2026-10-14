@@ -11,6 +11,7 @@ denylist. Previously the payload held only {sub, exp}: no jti meant tokens
 were structurally unrevocable for their full 7-day life, and there was no
 refresh endpoint, logout, or denylist at all.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 import uuid
@@ -37,6 +38,13 @@ _ISSUER = "job-prep-app"
 _AUDIENCE = "job-prep-app:api"
 
 
+# bcrypt only reads the first 72 bytes of its input (bcrypt>=5 raises on
+# longer input instead of truncating). Registration rejects longer passwords
+# so nothing is silently ignored; verify still truncates so hashes created
+# before that check keep working.
+MAX_PASSWORD_BYTES = 72
+
+
 class TokenError(Exception):
     """Raised when a token is malformed, expired, or of the wrong type."""
 
@@ -47,7 +55,7 @@ def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool
         return False
     try:
         return bcrypt.checkpw(
-            plain_password.encode("utf-8")[:72],
+            plain_password.encode("utf-8")[:MAX_PASSWORD_BYTES],
             hashed_password.encode("utf-8"),
         )
     except Exception:
@@ -57,9 +65,21 @@ def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool
 def get_password_hash(password: str) -> str:
     """Hash a plaintext password with bcrypt (12 rounds)."""
     return bcrypt.hashpw(
-        password.encode("utf-8")[:72],
+        password.encode("utf-8")[:MAX_PASSWORD_BYTES],
         bcrypt.gensalt(rounds=12),
     ).decode("utf-8")
+
+
+# bcrypt at 12 rounds is ~250ms of pure CPU. Called inline from an async route
+# it blocks the event loop for that long, stalling every other request and
+# SSE stream on the worker. These run it on a thread instead (bcrypt releases
+# the GIL while hashing).
+async def verify_password_async(plain_password: str, hashed_password: Optional[str]) -> bool:
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
+
+
+async def get_password_hash_async(password: str) -> str:
+    return await asyncio.to_thread(get_password_hash, password)
 
 
 def new_token_family() -> str:

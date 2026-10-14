@@ -1,7 +1,9 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import DashboardNavbar from "@/components/DashboardNavbar";
 import { AuthProvider } from "@/context/AuthContext";
 import type { User } from "@/lib/api";
+import { PATHNAME_HEADER, SESSION_INVALID_REASON } from "@/proxy";
 
 /**
  * Resolve the signed-in user on the server so the first paint is correct.
@@ -28,6 +30,12 @@ async function getInitialUser(): Promise<User | null | undefined> {
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const initialUser = await getInitialUser();
+  if (initialUser === null) {
+    const headerList = await headers();
+    const pathname = headerList.get(PATHNAME_HEADER) || "/jobs";
+    redirect(`/login?next=${encodeURIComponent(pathname)}&reason=${SESSION_INVALID_REASON}`);
+  }
+
   return (
     <AuthProvider initialUser={initialUser}>
       <div className="min-h-screen flex flex-col bg-background">

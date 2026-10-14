@@ -6,11 +6,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Dict, Any
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field
 from sqlmodel import select
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.news import NewsArticle
 from app.ai.gemini_client import (
-    generate_text,
+    generate_structured,
     GeminiConfigError,
     GeminiTransientError,
     GeminiTruncatedError,
@@ -79,15 +82,26 @@ def extractive_summary(title: str, content: str) -> Tuple[str, List[str], List[s
     return fallback_summary or "Article content analyzed.", list(set(fallback_cats))[:4], list(set(fallback_tags))[:4]
 
 
+class ArticleSummary(BaseModel):
+    summary: str = Field(
+        description="A concise, professional 2-sentence executive summary followed by 2-3 structured key takeaway bullets."
+    )
+    categories: List[str] = Field(
+        default_factory=list,
+        description="Array of 2 to 4 relevant category tags (e.g. AI, Startups, Enterprise, Cloud)."
+    )
+    tags: List[str] = Field(
+        default_factory=list,
+        description="Array of 2 to 4 relevant technology or skill tags mentioned."
+    )
+
+
 async def summarize_with_ai(
     title: str, content: str, fallback_on_transient: bool = True
 ) -> Tuple[str, List[str], List[str]]:
     """
-    Use Gemini AI to summarize news article and assign categories and skill/tech tags.
-
-    With fallback_on_transient=False a 429/503 propagates as
-    GeminiTransientError, so a Celery task can retry later instead of
-    settling for the extractive summary.
+    Use Gemini AI to summarize news article and assign categories and skill/tech tags
+    using structured schema validation.
     """
     if not content or len(content) < 50:
         return "No sufficient content to summarize.", ["News"], ["Tech"]
@@ -96,30 +110,18 @@ async def summarize_with_ai(
 Article Title: {title}
 Article Content (excerpt):
 {content[:3500]}
-
-Please provide:
-1. A concise, professional 2-sentence executive summary of this technology/industry news, followed by 2-3 structured key takeaway bullets.
-2. An array of 2 to 4 relevant category tags (e.g., ["AI", "Startups", "Enterprise", "Cybersecurity", "Cloud"]).
-3. An array of 2 to 4 relevant technology or skill tags mentioned (e.g., ["PyTorch", "Kubernetes", "CUDA", "TypeScript"]).
-
-Return ONLY valid JSON in this format:
-{{"summary": "...", "categories": ["..."], "tags": ["..."]}}
 """
     try:
-        response_text = await generate_text(
+        data = await generate_structured(
             prompt=prompt,
-            system_instruction="You are an expert technical news analyst. Output strict JSON only.",
+            schema=ArticleSummary,
+            system_instruction="You are an expert technical news analyst.",
             temperature=0.2,
-            max_tokens=1024
+            max_tokens=1024,
         )
-        clean = response_text.strip()
-        clean = re.sub(r'^```json\s*', '', clean)
-        clean = re.sub(r'\s*```$', '', clean)
-        
-        data = json.loads(clean)
-        summary = str(data.get("summary", "")).strip()
-        categories = [str(c).strip() for c in data.get("categories", []) if c]
-        tags = [str(t).strip() for t in data.get("tags", []) if t]
+        summary = str(data.summary).strip()
+        categories = [str(c).strip() for c in data.categories if str(c).strip()]
+        tags = [str(t).strip() for t in data.tags if str(t).strip()]
         if summary and categories:
             return summary, categories[:4], tags[:4]
     except (GeminiConfigError, GeminiTruncatedError):
@@ -132,8 +134,8 @@ Return ONLY valid JSON in this format:
             raise
         logger.warning(f"Gemini transient error for {title!r}, using extractive fallback: {e}")
     except Exception as e:
-        # Genuine per-article failure (malformed JSON, safety block, timeout):
-        # the extractive fallback below is the correct response.
+        # Genuine per-article failure (validation error, timeout):
+        # extractive fallback is the correct response.
         logger.warning(f"AI summarization failed for {title!r}, using extractive fallback: {e}")
 
     return extractive_summary(title, content)
@@ -256,34 +258,40 @@ async def process_and_save_article(url: str, html: str, session: AsyncSession) -
         return existing
 
     meta = extract_article_metadata(canonical, html)
+    now = utc_now()
 
-    if existing:
-        existing.title = meta["title"]
-        existing.author = meta["author"]
-        existing.content_clean = meta["content_clean"]
-        existing.published_at = existing.published_at or meta["published_at"]
-        if not existing.summary:
-            existing.summary = meta["meta_desc"]
-        existing.scraped_at = utc_now()
-        session.add(existing)
-        await session.commit()
-        await session.refresh(existing)
-        logger.info(f"Updated existing news article: {existing.title}")
-        return existing
+    values = {
+        "url": canonical,
+        "url_sha256": url_sha256,
+        "title": meta["title"],
+        "author": meta["author"],
+        "published_at": meta["published_at"],
+        "content_clean": meta["content_clean"],
+        "content_raw": meta["content_clean"],
+        "summary": meta["meta_desc"],
+        "source_domain": meta["source_domain"],
+        "scraped_at": now,
+    }
 
-    article = NewsArticle(
-        url=canonical,
-        url_sha256=url_sha256,
-        title=meta["title"],
-        author=meta["author"],
-        published_at=meta["published_at"],
-        content_clean=meta["content_clean"],
-        content_raw=meta["content_clean"],
-        summary=meta["meta_desc"],
-        source_domain=meta["source_domain"],
+    # Atomic ON CONFLICT DO UPDATE eliminates IntegrityError race under concurrent crawls
+    stmt = (
+        insert(NewsArticle)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=["url"],
+            set_={
+                "title": values["title"],
+                "author": values["author"],
+                "content_clean": values["content_clean"],
+                "published_at": func.coalesce(NewsArticle.published_at, values["published_at"]),
+                "summary": func.coalesce(NewsArticle.summary, values["summary"]),
+                "scraped_at": values["scraped_at"],
+            },
+        )
+        .returning(NewsArticle)
     )
-    session.add(article)
+    result = await session.execute(stmt)
+    article = result.scalar_one()
     await session.commit()
-    await session.refresh(article)
-    logger.info(f"Saved new news article: {article.title}")
+    logger.info(f"Upserted news article: {article.title}")
     return article

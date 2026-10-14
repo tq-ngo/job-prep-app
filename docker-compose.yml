@@ -10,7 +10,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -24,7 +24,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -40,7 +40,7 @@ services:
     volumes:
       - ./backend:/app
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,12 +49,6 @@ services:
     # Migrations run here (single owner) before uvicorn starts. Celery
     # services deliberately do NOT migrate, to avoid concurrent upgrades.
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   celery-worker:
     build:
@@ -84,16 +78,14 @@ services:
     command: celery -A app.tasks.celery_app beat --loglevel=info
 
   celery-flower:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: mher/flower:2.0
     container_name: job-prep-flower
-    env_file: .env
-    volumes:
-      - ./backend:/app
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:-admin:jobprep2026}
     ports:
-      - "5555:5555"
-    command: celery -A app.tasks.celery_app flower --port=5555 --basic_auth=${FLOWER_BASIC_AUTH:-admin:jobprep2026}
+      - "127.0.0.1:5555:5555"
+    command: celery --broker=${CELERY_BROKER_URL} flower --port=5555 --basic_auth=${FLOWER_BASIC_AUTH:-admin:jobprep2026}
     depends_on:
       - celery-worker
 
@@ -103,17 +95,16 @@ services:
       dockerfile: Dockerfile
       args:
         # Inlined into the client bundle at BUILD time (see frontend/Dockerfile).
-        # Override per environment, e.g.:
-        #   NEXT_PUBLIC_API_URL=https://api.example.com docker compose build frontend
-        # P1.3 will move this to same-origin "" (browser -> nginx /api/ -> backend)
-        # so SameSite=Lax auth cookies work without SameSite=None.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        # Empty = same-origin (relative /api/... behind nginx), the supported setup
+        # so SameSite=Lax auth cookies work without cross-site issues.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     container_name: job-prep-frontend
     environment:
       # Server-side only (RSC / route handlers), resolved on the compose network.
       - INTERNAL_API_URL=http://backend:8000
+      - JWT_SECRET=${SECRET_KEY}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
       interval: 5s

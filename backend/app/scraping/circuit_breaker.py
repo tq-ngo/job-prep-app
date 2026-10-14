@@ -1,3 +1,4 @@
+import asyncio
 import time
 import logging
 from enum import Enum
@@ -53,16 +54,24 @@ class CircuitBreaker:
     """
     
     def __init__(self):
-        # Lazily initialized — single Redis client reused across all calls.
-        # This replaces the old pattern of calling create_worker_redis()
-        # inside every method, which leaked a new ConnectionPool each time.
-        self._redis = None
+        # One Redis client per event loop. Celery runs tasks through
+        # async_to_sync on a fresh loop per task; a single cached client
+        # bound to the first task's loop fails with "Event loop is closed"
+        # in subsequent runs.
+        self._redis_by_loop: dict = {}
     
     def _get_redis(self):
-        """Return the shared Redis client, creating it on first use."""
-        if self._redis is None:
-            self._redis = create_worker_redis()
-        return self._redis
+        """Return this event loop's Redis client, creating it on first use."""
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = 0
+        client = self._redis_by_loop.get(loop_id)
+        if client is None:
+            if len(self._redis_by_loop) > 8:
+                self._redis_by_loop.clear()
+            client = self._redis_by_loop[loop_id] = create_worker_redis()
+        return client
     
     async def get_status(self, domain: str) -> CircuitStatus:
         """Fetch current circuit state from Redis."""

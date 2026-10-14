@@ -347,19 +347,43 @@ class DatabaseSyncService:
                 """
                 WITH ranked AS (
                     SELECT id,
+                           source,
+                           apply_url,
                            FIRST_VALUE(id) OVER (
                                PARTITION BY canonical_hash
                                ORDER BY is_active DESC, first_seen_at, id
-                           ) AS canonical
+                           ) AS canonical_id_candidate,
+                           FIRST_VALUE(source) OVER (
+                               PARTITION BY canonical_hash
+                               ORDER BY is_active DESC, first_seen_at, id
+                           ) AS canonical_source,
+                           FIRST_VALUE(apply_url) OVER (
+                               PARTITION BY canonical_hash
+                               ORDER BY is_active DESC, first_seen_at, id
+                           ) AS canonical_apply_url,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY canonical_hash, source
+                               ORDER BY is_active DESC, first_seen_at, id
+                           ) AS source_rank
                     FROM jobs
                     WHERE canonical_hash = ANY(:hashes)
+                ),
+                resolved AS (
+                    SELECT id,
+                           CASE
+                               WHEN id = canonical_id_candidate THEN NULL
+                               WHEN source = canonical_source THEN
+                                   CASE WHEN apply_url = canonical_apply_url THEN canonical_id_candidate ELSE NULL END
+                               WHEN source_rank = 1 THEN canonical_id_candidate
+                               ELSE NULL
+                           END AS new_canonical_id
+                    FROM ranked
                 )
                 UPDATE jobs j
-                SET canonical_id = CASE WHEN r.id = r.canonical THEN NULL ELSE r.canonical END
-                FROM ranked r
+                SET canonical_id = r.new_canonical_id
+                FROM resolved r
                 WHERE j.id = r.id
-                  AND j.canonical_id IS DISTINCT FROM
-                      (CASE WHEN r.id = r.canonical THEN NULL ELSE r.canonical END)
+                  AND j.canonical_id IS DISTINCT FROM r.new_canonical_id
                 """
             ),
             {"hashes": sorted(hashes)},

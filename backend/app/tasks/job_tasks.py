@@ -74,6 +74,7 @@ async def _scrape_github(self, task_id: str = None):
     lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=SCRAPE_LOCK_TTL_SECONDS)
     if not lock_acquired:
         logger.info(f"[{task_id}] GitHub scrape already running — skipping (lock held)")
+        await redis.aclose()
         return {"status": "skipped", "reason": "lock_held"}
     
     try:
@@ -144,6 +145,7 @@ async def _scrape_github(self, task_id: str = None):
         # API-triggered run, unblocking it prematurely.
         if lock_acquired:
             await redis.delete(lock_key)
+        await redis.aclose()
 
 
 @celery_app.task(
@@ -171,6 +173,7 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=SCRAPE_LOCK_TTL_SECONDS)
     if not lock_acquired:
         logger.info(f"[{task_id}] LinkedIn scrape already running — skipping (lock held)")
+        await redis.aclose()
         return {"status": "skipped", "reason": "lock_held"}
 
     # Optional: fetch from DB/Redis instead of env
@@ -240,6 +243,7 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
         # all subsequent manual refreshes from the UI.
         if lock_acquired:
             await redis.delete(lock_key)
+        await redis.aclose()
 
 
 @celery_app.task(

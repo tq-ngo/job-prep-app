@@ -61,13 +61,16 @@ apiClient.interceptors.response.use(
       original._retried = true;
       try {
         // Collapse concurrent 401s into a single refresh call.
-        refreshPromise =
-          refreshPromise || apiClient.post("/api/v1/auth/refresh");
+        if (!refreshPromise) {
+          refreshPromise = apiClient
+            .post("/api/v1/auth/refresh")
+            .finally(() => {
+              refreshPromise = null;
+            });
+        }
         await refreshPromise;
-        refreshPromise = null;
         return apiClient(original);
       } catch {
-        refreshPromise = null;
         // Never redirect if this was an identity check (/auth/me) or if we are already
         // on a public or auth route (/login, /register, /).
         if (!isMeCall && typeof window !== "undefined") {

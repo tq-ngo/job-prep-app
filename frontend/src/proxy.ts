@@ -38,9 +38,41 @@ const RESUME_GUARD_SECONDS = 15
 // /resume round trip.
 const SESSION_HINT_COOKIE = 'csrf_token'
 
+// Set by (app)/layout.tsx when the API rejects a token that verified here
+// (revoked, user disabled). The auth-page bounce below must not send such a
+// caller back to /jobs, or layout -> /login -> proxy -> /jobs loops forever.
+export const SESSION_INVALID_REASON = 'session_invalid'
+
+// Lets the server layout build a `next=` for its own /login redirect.
+export const PATHNAME_HEADER = 'x-app-pathname'
+
 const encoder = new TextEncoder()
 let keyPromise: Promise<CryptoKey> | null = null
 let warnedNoSecret = false
+
+/**
+ * Same value as the backend's SECRET_KEY. docker-compose passes it as
+ * JWT_SECRET; SECRET_KEY is accepted too so a shared env file works as-is.
+ */
+function signingSecret(): string | undefined {
+  return process.env.JWT_SECRET || process.env.SECRET_KEY || undefined
+}
+
+/**
+ * Background router prefetches (<Link> in the viewport or on hover). These
+ * must never trigger /resume: it ROTATES the refresh token, so merely
+ * rendering a link to /jobs on the landing page would rotate the session in
+ * the background, and the redirect would be cached as the link's target.
+ */
+function isPrefetch(request: NextRequest): boolean {
+  const h = request.headers
+  return (
+    h.has('next-router-prefetch') ||
+    h.has('next-router-segment-prefetch') ||
+    h.get('purpose') === 'prefetch' ||
+    (h.get('sec-purpose') ?? '').includes('prefetch')
+  )
+}
 
 function getKey(secret: string): Promise<CryptoKey> {
   keyPromise ??= crypto.subtle.importKey(
@@ -78,7 +110,7 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
     const header = decodeJson(h)
     if (header.alg !== 'HS256') return false // pin alg: rejects "none" etc.
 
-    const secret = process.env.JWT_SECRET
+    const secret = signingSecret()
     if (secret) {
       const ok = await crypto.subtle.verify(
         'HMAC',
@@ -87,11 +119,22 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
         encoder.encode(`${h}.${p}`),
       )
       if (!ok) return false
-    } else if (!warnedNoSecret) {
-      // Fail open to the API's own check rather than locking everyone out
-      // (or looping): the backend still rejects forged tokens on every call.
-      warnedNoSecret = true
-      console.error('proxy: JWT_SECRET is unset; access tokens are NOT signature-verified at the edge')
+    } else if (process.env.NODE_ENV === 'development') {
+      // `next dev` only: keep local development usable without the secret.
+      // (app)/layout.tsx still checks every request against the API.
+      if (!warnedNoSecret) {
+        warnedNoSecret = true
+        console.warn('proxy: JWT_SECRET is unset; skipping edge signature check (dev only)')
+      }
+    } else {
+      // Fail CLOSED. Failing open here accepted any unsigned token with
+      // plausible claims, and docker-compose never passed the secret, so
+      // edge verification was silently off in the shipped deployment.
+      if (!warnedNoSecret) {
+        warnedNoSecret = true
+        console.error('proxy: JWT_SECRET is unset; rejecting all sessions at the edge until it is configured')
+      }
+      return false
     }
 
     const payload = decodeJson(p)
@@ -132,6 +175,13 @@ export async function proxy(request: NextRequest) {
       return redirectToLogin(request, next)
     }
 
+    if (isPrefetch(request)) {
+      // Decline without rotating anything. A non-RSC response makes the
+      // router fall back to a real navigation on click, which then comes
+      // through here as a normal request and resumes properly.
+      return new NextResponse(null, { status: 204 })
+    }
+
     const url = request.nextUrl.clone()
     url.pathname = '/api/v1/auth/resume'
     url.search = `?next=${encodeURIComponent(next)}`
@@ -145,15 +195,31 @@ export async function proxy(request: NextRequest) {
     return res
   }
 
-  // Already signed in with a valid session? Don't show the login form.
   if (isAuthPage && hasSession) {
+    if (request.nextUrl.searchParams.get('reason') === SESSION_INVALID_REASON) {
+      // The token verified here but the API rejected it. Show the form and
+      // drop the dead access token, so the next protected navigation goes
+      // through /resume (or straight to /login) instead of looping.
+      const res = NextResponse.next()
+      res.cookies.delete('access_token')
+      res.cookies.delete(RESUME_GUARD_COOKIE)
+      return res
+    }
+    // Already signed in with a valid session? Don't show the login form.
     const url = request.nextUrl.clone()
     url.pathname = '/jobs'
     url.search = ''
     return NextResponse.redirect(url)
   }
 
-  const res = NextResponse.next()
+  let res: NextResponse
+  if (isProtected) {
+    const headers = new Headers(request.headers)
+    headers.set(PATHNAME_HEADER, pathname + search)
+    res = NextResponse.next({ request: { headers } })
+  } else {
+    res = NextResponse.next()
+  }
   if (hasSession && request.cookies.has(RESUME_GUARD_COOKIE)) {
     res.cookies.delete(RESUME_GUARD_COOKIE)
   }

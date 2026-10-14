@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -7,6 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -43,11 +45,12 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     get_password_hash,
+    get_password_hash_async,
     new_token_family,
-    verify_password,
+    verify_password_async,
 )
 from app.models.users import User
-from app.schemas.user import UserCreate, UserRead, UserUpdate
+from app.schemas.user import UserCreate, UserRead, UserUpdate, normalize_email
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +108,20 @@ async def require_csrf(request: Request) -> None:
 
     SameSite=Lax already blocks cross-site POSTs in modern browsers; this is
     the second layer, and it matters because CORS runs with
-    allow_credentials=True.  Skipped for bearer-token callers, which are not
-    subject to CSRF (the browser won't attach an Authorization header on its
-    own).
+    allow_credentials=True.
+
+    Skipped only for pure bearer-token callers, which are not subject to CSRF
+    (the browser won't attach an Authorization header on its own). It used
+    to skip whenever ANY Authorization header was present — but
+    get_current_user prefers the cookie, so a request carrying the victim's
+    cookie plus a junk `Authorization: Bearer x` authenticated as the victim
+    while bypassing this check. If an auth cookie is present, the request is
+    cookie-authenticated and must pass the check.
     """
-    if request.headers.get("authorization"):
+    has_auth_cookie = bool(
+        request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
+    )
+    if not has_auth_cookie and request.headers.get("authorization"):
         return
     cookie_token = request.cookies.get(CSRF_COOKIE)
     header_token = request.headers.get(CSRF_HEADER)
@@ -117,6 +129,25 @@ async def require_csrf(request: Request) -> None:
         raise HTTPException(status_code=403, detail="CSRF token missing")
     if not secrets.compare_digest(cookie_token, header_token):
         raise HTTPException(status_code=403, detail="CSRF token mismatch")
+
+
+async def _find_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
+    """
+    Case-insensitive lookup for sign-in paths (login, register, Google link).
+
+    New rows are stored lowercased, but rows created before normalization may
+    be mixed-case; comparing on lower() matches both without a data
+    migration. Ordered so that a legacy case-variant duplicate resolves
+    deterministically to the oldest account. (Token lookups keep the exact
+    match on `sub`, which is always the stored value.)
+    """
+    result = await session.execute(
+        select(User)
+        .where(func.lower(User.email) == normalize_email(email))
+        .order_by(User.id)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 def _safe_next(next_path: Optional[str], default: str = "/jobs") -> str:
@@ -166,13 +197,12 @@ async def register(
     user_in: UserCreate,
     session: AsyncSession = Depends(get_session),
 ):
-    existing = await session.execute(select(User).where(User.email == user_in.email))
-    if existing.scalar_one_or_none():
+    if await _find_user_by_email(session, user_in.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        email=user_in.email,
-        hashed_password=get_password_hash(user_in.password),
+        email=user_in.email,  # already normalized by UserCreate
+        hashed_password=await get_password_hash_async(user_in.password),
         skills=[],
     )
     session.add(user)
@@ -189,13 +219,12 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(select(User).where(User.email == form_data.username))
-    user = result.scalar_one_or_none()
+    user = await _find_user_by_email(session, form_data.username)
 
     # Always run bcrypt, even with no matching user: returning early otherwise
     # made response latency a reliable oracle for which emails are registered.
     hashed = user.hashed_password if user and user.hashed_password else _DUMMY_HASH
-    pwd_ok = verify_password(form_data.password, hashed)
+    pwd_ok = await verify_password_async(form_data.password, hashed)
 
     # The raw email is deliberately not logged (was at INFO on every attempt).
     if not user or not user.hashed_password or not pwd_ok or not user.is_active:
@@ -254,12 +283,16 @@ async def google_callback(
         raw_id_token = tokens.get("id_token")
         if not raw_id_token:
             raise OAuthError("Token response contained no id_token")
-        claims = verify_id_token(raw_id_token)
+        # google-auth verifies synchronously and may fetch Google's JWKS over
+        # the network; keep that off the event loop.
+        claims = await asyncio.to_thread(
+            verify_id_token, raw_id_token, stored.get("nonce")
+        )
     except OAuthError as exc:
         logger.warning("Google OAuth failed: %s", exc)
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=oauth_failed")
 
-    email = claims["email"].lower()
+    email = normalize_email(claims["email"])
     google_sub = claims["sub"]
 
     # Look up by google_sub first: a Google account's email can change, but
@@ -269,9 +302,7 @@ async def google_callback(
     ).scalar_one_or_none()
 
     if user is None:
-        user = (
-            await session.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        user = await _find_user_by_email(session, email)
         if user is not None:
             # Link Google to the existing local account. Safe only because
             # verify_id_token already required email_verified.
@@ -357,6 +388,7 @@ async def refresh_session(
     response: Response,
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_csrf),
 ):
     """Rotate the refresh token and issue a new access token."""
     try:
@@ -412,6 +444,7 @@ async def logout(
     response: Response,
     access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
+    _: None = Depends(require_csrf),
 ):
     """Revoke both tokens and the sign-in family, and clear the cookies."""
     now = datetime.now(timezone.utc).timestamp()

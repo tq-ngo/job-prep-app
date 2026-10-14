@@ -6,6 +6,9 @@ from typing import AsyncIterator, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import asyncio
 
+from urllib.parse import urlparse
+
+from app.scraping.dedup import JobDeduplicator
 from app.scraping.http_scraper import TLSImpersonateScraper
 from app.schemas.job import JobCreate
 from app.core.datetime_utils import utc_now
@@ -132,8 +135,15 @@ async def _parse_readme(url: str, include_inactive: bool = False) -> Dict[str, A
                     if md_match:
                         apply_url = md_match.group(1)
                 
+                if apply_url:
+                    parsed_scheme = urlparse(apply_url).scheme.lower()
+                    if parsed_scheme in ("http", "https"):
+                        apply_url = JobDeduplicator.canonicalize_url(apply_url)
+                    else:
+                        apply_url = ""
+
                 if not apply_url:
-                    # If it's active but we couldn't parse the URL, skip it.
+                    # If it's active but we couldn't parse a valid URL, skip it.
                     # If it's inactive, we might not have a URL anyway.
                     if active:
                         continue
