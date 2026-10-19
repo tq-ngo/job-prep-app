@@ -45,3 +45,6 @@ celerybeat-schedule.db
 htmlcov/
 .coverage
 coverage/
+
+# Claude
+CLAUDE.md
