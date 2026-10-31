@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy, SESSION_INVALID_REASON } from "@/proxy";
 
@@ -23,14 +23,13 @@ async function makeToken(payload: Record<string, unknown>, secret = TEST_SECRET,
 }
 
 describe("Edge Route Proxy (src/proxy.ts)", () => {
-  const origEnv = process.env;
-
   beforeEach(() => {
-    process.env = { ...origEnv, JWT_SECRET: TEST_SECRET, NODE_ENV: "production" };
+    vi.stubEnv("JWT_SECRET", TEST_SECRET);
+    vi.stubEnv("NODE_ENV", "production");
   });
 
   afterEach(() => {
-    process.env = origEnv;
+    vi.unstubAllEnvs();
   });
 
   it("passes through valid access token on protected route and injects pathname header", async () => {
@@ -166,7 +165,7 @@ describe("Edge Route Proxy (src/proxy.ts)", () => {
   it("fails closed in production if JWT_SECRET is unset", async () => {
     delete process.env.JWT_SECRET;
     delete process.env.SECRET_KEY;
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
 
     const now = Math.floor(Date.now() / 1000);
     const token = await makeToken({

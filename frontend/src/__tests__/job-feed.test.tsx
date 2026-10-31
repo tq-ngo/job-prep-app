@@ -129,6 +129,11 @@ describe("JobFeed Component (src/app/(app)/jobs/JobFeed.tsx)", () => {
         id: "j-3",
         title: "Security Intern",
         company: "Cloudflare",
+        location: "Austin, TX",
+        skills: ["Rust"],
+        apply_url: "https://cloudflare.com",
+        source: "github",
+        is_remote: false,
       });
     });
 
@@ -140,6 +145,11 @@ describe("JobFeed Component (src/app/(app)/jobs/JobFeed.tsx)", () => {
         id: "j-4",
         title: "Data Intern",
         company: "Snowflake",
+        location: null,
+        skills: ["SQL"],
+        apply_url: "https://snowflake.com",
+        source: "linkedin",
+        is_remote: true,
       });
     });
 
