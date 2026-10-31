@@ -1,7 +1,7 @@
 import axios from "axios";
 import { API_BASE, googleLoginUrl } from "./urls";
 
-export { API_BASE };
+export { API_BASE, apiClient };
 
 const apiClient = axios.create({
   baseURL: API_BASE,

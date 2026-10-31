@@ -61,16 +61,18 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Email</label>
+            <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">Email</label>
             <input 
+              id="email"
               type="email" value={email} onChange={e => setEmail(e.target.value)} 
               className="w-full bg-background border border-slate-soft rounded px-4 py-3 text-slate-ink focus:outline-none focus:ring-1 focus:ring-spruce-green text-sm transition-all" 
               required 
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Password</label>
+            <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1.5">Password</label>
             <input 
+              id="password"
               type="password" value={password} onChange={e => setPassword(e.target.value)} 
               className="w-full bg-background border border-slate-soft rounded px-4 py-3 text-slate-ink focus:outline-none focus:ring-1 focus:ring-spruce-green text-sm transition-all" 
               required 

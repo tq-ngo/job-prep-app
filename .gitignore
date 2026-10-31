@@ -46,5 +46,5 @@ htmlcov/
 .coverage
 coverage/
 
-# Claude
-CLAUDE.md
+# AGENTS
+AGENTS.md
