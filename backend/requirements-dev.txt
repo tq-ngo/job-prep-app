@@ -1,0 +1,9 @@
+# Testing & development dependencies for JobPrep backend
+-r requirements.txt
+pytest==9.2.0
+pytest-asyncio==1.4.1
+pytest-mock==3.17.0
+fakeredis[aioredis]==2.40.0
+respx==0.23.1
+aiosqlite==0.21.0
+
