@@ -53,4 +53,10 @@ USER nextjs
 
 EXPOSE 3000
 
+# Node's built-in fetch, so the check doesn't depend on busybox tools.
+# Any HTTP response counts as up; the marketing page is static (ISR) and
+# answers without the backend.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.status < 500 ? 0 : 1), () => process.exit(1))"]
+
 CMD ["node", "server.js"]

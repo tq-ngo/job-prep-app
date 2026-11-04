@@ -1,0 +1,54 @@
+# Local development layer, merged automatically by `docker compose up`.
+# Adds what production must not have: host ports on loopback for local
+# tools, the source tree bind-mounted with auto-reload, and Flower.
+# Production: `docker compose -f docker-compose.yml up -d` skips this file.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  backend:
+    volumes:
+      - ./backend:/app
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --reload"
+
+  celery-worker:
+    volumes:
+      - ./backend:/app
+
+  celery-beat:
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  celery-flower:
+    # Upstream image: flower isn't in backend/requirements.txt, so it
+    # doesn't ship in every app container.
+    image: mher/flower:2.0
+    container_name: job-prep-flower
+    restart: unless-stopped
+    networks: [app]
+    # Read from the environment rather than passed as --broker / --basic_auth
+    # flags, which put the Redis password and Flower credentials in the
+    # process list and `docker inspect` output. No default credential: the
+    # old fallback admin:jobprep2026 was published in this repo.
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?set FLOWER_BASIC_AUTH in .env (user:password)}
+      FLOWER_PORT: "5555"
+    command: celery flower
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      celery-worker:
+        condition: service_healthy

@@ -29,4 +29,17 @@ jobs:
       - uses: actions/checkout@v7
       # Compose's env_file and ${VAR} interpolation both read .env.
       - run: cp .env.example .env
+      - name: Validate compose (dev = base + override, and production)
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml config --quiet
+      - name: Validate nginx config
+        # Upstream hosts only need to resolve; nginx -t doesn't connect.
+        run: >
+          docker run --rm
+          --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1
+          -e SERVER_NAME=localhost -e 'NGINX_ENVSUBST_FILTER=^SERVER_NAME$'
+          -v "$PWD/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+          -v "$PWD/infra/nginx/templates:/etc/nginx/templates:ro"
+          nginx:alpine nginx -t
       - run: docker compose build backend frontend
