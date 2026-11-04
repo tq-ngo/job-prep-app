@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from typing import Optional, Type, TypeVar
 from pydantic import BaseModel
 from google import genai
@@ -51,6 +52,48 @@ class GeminiTransientError(RuntimeError):
     def __init__(self, message: str, retry_after: Optional[int] = None):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class GeminiThrottled(GeminiTransientError):
+    """
+    Raised by acquire_gemini_slots when the shared per-minute budget is spent.
+    No call was made, so the caller can simply wait `retry_after` seconds.
+    """
+
+
+_SLOTS_PREFIX = "gemini:slots:"
+_SLOT_WINDOW_SECONDS = 60
+
+
+async def acquire_gemini_slots(redis, n: int = 1) -> None:
+    """
+    Reserve `n` Gemini calls from the project-wide per-minute budget
+    (settings.GEMINI_REQUESTS_PER_MINUTE), or raise GeminiThrottled.
+
+    A fixed one-minute window keyed by minute number: INCRBY, and give the
+    reservation back if it overshot. Two racing callers can both overshoot
+    and both be refused even though one would have fit; under-using the
+    quota is the safe direction.
+    """
+    limit = settings.GEMINI_REQUESTS_PER_MINUTE
+    if limit <= 0:
+        return
+    if n > limit:
+        raise GeminiConfigError(
+            f"One operation needs {n} Gemini calls but GEMINI_REQUESTS_PER_MINUTE={limit}"
+        )
+    now = time.time()
+    key = f"{_SLOTS_PREFIX}{int(now // _SLOT_WINDOW_SECONDS)}"
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.incrby(key, n)
+        pipe.expire(key, _SLOT_WINDOW_SECONDS * 2)
+        used, _ = await pipe.execute()
+    if int(used) > limit:
+        await redis.decrby(key, n)
+        retry_after = int(_SLOT_WINDOW_SECONDS - now % _SLOT_WINDOW_SECONDS) + 1
+        raise GeminiThrottled(
+            f"Gemini budget of {limit}/min spent", retry_after=retry_after
+        )
 
 
 class GeminiTruncatedError(RuntimeError):

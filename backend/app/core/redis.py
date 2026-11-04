@@ -8,13 +8,17 @@ def create_worker_redis() -> aioredis.Redis:
     """
     Creates an isolated Redis client for Celery workers.
     Each call returns a fresh client not tied to any prior event loop.
+
+    Built with from_url so the client OWNS its pool: plain `aclose()` then
+    closes the pool too. It used to wrap an explicitly passed pool, which
+    aclose() leaves open, so every caller that closed its client the
+    obvious way leaked the pool's socket until garbage collection.
     """
-    pool = aioredis.ConnectionPool.from_url(
+    return aioredis.Redis.from_url(
         settings.REDIS_URL,
         max_connections=10,
         decode_responses=True,
     )
-    return aioredis.Redis(connection_pool=pool)
 
 
 @asynccontextmanager

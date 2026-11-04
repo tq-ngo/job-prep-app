@@ -88,7 +88,14 @@ async def mock_db_session() -> AsyncGenerator[AsyncSession, None]:
             for idx in table.indexes
             if not any(
                 term in str(idx.name or "")
-                for term in ["trgm", "ix_jobs_feed", "ix_jobs_scrape_status"]
+                for term in [
+                    "trgm",
+                    "hnsw",
+                    "ix_jobs_feed",
+                    "ix_jobs_scrape_status",
+                    "ix_jobs_queued",
+                    "ix_news_articles_published_at",
+                ]
             )
         }
 

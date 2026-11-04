@@ -4,9 +4,15 @@ import uuid
 
 from app.config import settings
 from app.tasks.celery_app import celery_app
+from app.tasks.runtime import HARD_LIMIT_GRACE, run_async
 
 logger = logging.getLogger(__name__)
 
+# A BFS crawl fetches up to 6 pages; LinkedIn News up to 16 (overview plus
+# stories), each with retries and backoff.
+NEWS_CRAWL_TIMEOUT = 600
+LINKEDIN_NEWS_TIMEOUT = 900
+# Outlives the hard limit, so a killed run's lock can't expire mid-run.
 NEWS_LOCK_TTL_SECONDS = 1800
 MAX_LINKEDIN_STORIES = 15
 
@@ -27,10 +33,13 @@ async def save_article_and_queue_summary(url: str, html: str, session):
     return article
 
 
-@celery_app.task(name="app.tasks.news_tasks.crawl_news_site", bind=True)
+@celery_app.task(
+    name="app.tasks.news_tasks.crawl_news_site",
+    bind=True,
+    time_limit=NEWS_CRAWL_TIMEOUT + HARD_LIMIT_GRACE,
+)
 def crawl_news_site(self, url: str):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_crawl_news_site)(self, url)
+    return run_async(_crawl_news_site, self, url, timeout=NEWS_CRAWL_TIMEOUT)
 
 async def _crawl_news_site(self, url: str):
     logger.info(f"Crawling news site: {url}")
@@ -64,23 +73,28 @@ async def _crawl_news_site(self, url: str):
         return {"status": "failed", "message": "Could not parse or save article"}
 
 
-@celery_app.task(name="app.tasks.news_tasks.scrape_linkedin_news", bind=True)
+@celery_app.task(
+    name="app.tasks.news_tasks.scrape_linkedin_news",
+    bind=True,
+    time_limit=LINKEDIN_NEWS_TIMEOUT + HARD_LIMIT_GRACE,
+)
 def scrape_linkedin_news(self):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_scrape_linkedin_news)(self)
+    return run_async(_scrape_linkedin_news, self, timeout=LINKEDIN_NEWS_TIMEOUT)
 
 async def _scrape_linkedin_news(self):
     logger.info("Crawling LinkedIn Daily News Rundown")
 
     from bs4 import BeautifulSoup
     from app.core.database import create_worker_session_ctx
+    from app.core.locks import acquire_lock, release_lock
     from app.core.redis import create_worker_redis
     from app.scraping.http_scraper import TLSImpersonateScraper
     from app.scraping.news_parser import article_url_hash, find_article, is_fresh
 
     redis = create_worker_redis()
     lock_key = "scrape_lock:linkedin_news"
-    if not await redis.set(lock_key, "locked", nx=True, ex=NEWS_LOCK_TTL_SECONDS):
+    lock_token = await acquire_lock(redis, lock_key, NEWS_LOCK_TTL_SECONDS)
+    if not lock_token:
         await redis.aclose()
         return {"status": "skipped", "reason": "lock_held"}
 
@@ -126,7 +140,7 @@ async def _scrape_linkedin_news(self):
         logger.info(f"LinkedIn News crawl complete: {stats}")
         return stats
     finally:
-        await redis.delete(lock_key)
+        await release_lock(redis, lock_key, lock_token)
         await redis.aclose()
 
 
@@ -139,13 +153,13 @@ async def _scrape_linkedin_news(self):
     rate_limit=settings.GEMINI_RATE_LIMIT,
 )
 def summarize_article(self, article_id: str):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_summarize_article)(self, article_id)
+    return run_async(_summarize_article, self, article_id)
 
 async def _summarize_article(self, article_id: str):
-    from app.ai.gemini_client import GeminiTransientError
+    from app.ai.gemini_client import GeminiThrottled, GeminiTransientError, acquire_gemini_slots
     from app.core.database import create_worker_session_ctx
     from app.core.datetime_utils import utc_now
+    from app.core.redis import worker_redis_ctx
     from app.models.news import NewsArticle
     from app.scraping.news_parser import extractive_summary, summarize_with_ai
 
@@ -157,9 +171,21 @@ async def _summarize_article(self, article_id: str):
         title = article.title or ""
         content = article.content_clean or article.summary or ""
         try:
+            # Same project-wide budget as job enrichment; summaries used to
+            # draw on a separate per-task Celery limit and together they
+            # exceeded the quota.
+            async with worker_redis_ctx() as redis:
+                await acquire_gemini_slots(redis)
             summary, categories, tags = await summarize_with_ai(
                 title, content, fallback_on_transient=False
             )
+        except GeminiThrottled as exc:
+            # No call was made. Re-enqueue a fresh task for when the window
+            # resets, instead of spending a retry and eventually degrading to
+            # the extractive fallback just because the queue was busy. Safe
+            # to repeat: a summarized article is skipped above.
+            summarize_article.apply_async((article_id,), countdown=exc.retry_after or 60)
+            return "throttled"
         except GeminiTransientError as exc:
             if self.request.retries < self.max_retries:
                 countdown = (exc.retry_after or 30) + random.randint(2, 10)

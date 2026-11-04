@@ -15,7 +15,7 @@ from app.models.users import User
 from app.schemas.job import JobListResponse
 from sqlalchemy.orm import defer
 from app.ai.embedder import generate_embedding
-from app.ai.gemini_client import GeminiTransientError
+from app.ai.gemini_client import GeminiTransientError, acquire_gemini_slots
 from app.api.v1.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ async def _query_embedding(query_text: str) -> list[float]:
     cached = await redis.get(key)
     if cached:
         return json.loads(cached)
+    await acquire_gemini_slots(redis)
     embedding = await generate_embedding(normalized, task_type="RETRIEVAL_QUERY")
     await redis.setex(key, _EMBED_CACHE_TTL, json.dumps(list(embedding)))
     return embedding

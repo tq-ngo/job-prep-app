@@ -2,7 +2,7 @@ from datetime import datetime
 from app.core.datetime_utils import utc_now
 from typing import Optional, List
 from sqlmodel import Field, SQLModel, Column
-from sqlalchemy import Text, JSON
+from sqlalchemy import Index, Text, JSON, text
 from pgvector.sqlalchemy import Vector
 import uuid
 
@@ -12,6 +12,10 @@ class NewsArticle(SQLModel, table=True):
     A scraped news article. Similar structure to Job but for news content.
     """
     __tablename__ = "news_articles"
+    __table_args__ = (
+        # The news feed's ORDER BY published_at DESC NULLS LAST.
+        Index("ix_news_articles_published_at", text("published_at DESC NULLS LAST")),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     url: str = Field(unique=True, index=True)
     url_sha256: str = Field(max_length=64, index=True)
