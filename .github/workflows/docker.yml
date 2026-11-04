@@ -1,0 +1,32 @@
+name: Docker build
+
+on:
+  push:
+    branches: [main]
+    paths: &docker_paths
+      - "**/Dockerfile"
+      - "**/.dockerignore"
+      - "docker-compose*.yml"
+      - "backend/requirements*.txt"
+      - "frontend/package*.json"
+      - "infra/**"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths: *docker_paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compose build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Compose's env_file and ${VAR} interpolation both read .env.
+      - run: cp .env.example .env
+      - run: docker compose build backend frontend
