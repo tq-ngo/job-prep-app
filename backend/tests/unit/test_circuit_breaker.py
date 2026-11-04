@@ -50,3 +50,28 @@ async def test_circuit_breaker_transitions(fake_redis):
     assert status.state == CircuitState.CLOSED
     assert status.failure_count == 0
     assert await cb.allow_request(domain) is True
+
+
+@pytest.mark.unit
+async def test_half_open_admits_a_single_probe(fake_redis):
+    cb = CircuitBreaker()
+    cb._get_redis = lambda: fake_redis
+    domain = "flaky-ats.com"
+
+    for _ in range(FAILURE_THRESHOLD):
+        await cb.record_failure(domain)
+    await fake_redis.set(
+        f"cb:v1:{domain}:opened_at", str(time.time() - (OPEN_DURATION_SECONDS + 10))
+    )
+
+    # The first caller after the cool-down gets the probe; every other
+    # worker is refused until the probe reports back.
+    assert await cb.allow_request(domain) is True
+    assert await cb.allow_request(domain) is False
+    assert await cb.allow_request(domain) is False
+
+    # A failed probe re-opens the circuit and frees the slot for the next
+    # cool-down.
+    await cb.record_failure(domain)
+    assert (await cb.get_status(domain)).state == CircuitState.OPEN
+    assert await fake_redis.get(f"cb:v1:{domain}:probe") is None

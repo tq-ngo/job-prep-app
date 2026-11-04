@@ -1,12 +1,19 @@
 from typing import Optional, List
 from sqlmodel import Field, SQLModel, Column
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Index, text
 from datetime import datetime
 from app.core.datetime_utils import utc_now
 
 
 class User(SQLModel, table=True):
     __tablename__ = "users"
+    __table_args__ = (
+        # Case-insensitive uniqueness, and the index behind every sign-in
+        # lookup (`lower(email) = ...` in auth._find_user_by_email), which
+        # previously seq-scanned. The plain unique index on `email` alone
+        # let `Alice@x.com` and `alice@x.com` coexist.
+        Index("ux_users_email_lower", text("lower(email)"), unique=True),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)

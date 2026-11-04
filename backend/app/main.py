@@ -50,11 +50,17 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # Interactive docs and the schema map every route and parameter; useful
+    # in dev, pure reconnaissance in production. nginx's IP allowlist for
+    # /docs didn't hold under Docker Desktop (every client arrives from the
+    # bridge gateway), so production doesn't serve them at all.
+    docs_enabled = not settings.is_production
     app = FastAPI(
         title="Job Prep Platform",
         version="1.0.0",
-        docs_url="/docs",          # Swagger UI
-        redoc_url="/redoc",        # ReDoc (alternative API docs)
+        docs_url="/docs" if docs_enabled else None,          # Swagger UI
+        redoc_url="/redoc" if docs_enabled else None,        # ReDoc
+        openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
     
@@ -63,11 +69,11 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)
 
-    # CORS: Allow the frontend to call the API
-    # In production: replace "*" with your actual frontend domain
+    # CORS: Allow the frontend to call the API. Explicit origins only;
+    # Settings rejects "*" because credentials are allowed.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

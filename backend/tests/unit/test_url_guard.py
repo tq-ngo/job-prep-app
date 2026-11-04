@@ -106,3 +106,70 @@ def test_url_guard_allowed_hosts_whitelist():
                 "https://other-domain.com/job", allowed_hosts={"greenhouse.io"}
             )
 
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "address",
+    [
+        "100.100.100.200",   # CGNAT range; Alibaba Cloud metadata
+        "100.64.0.1",
+        "::ffff:127.0.0.1",  # IPv4-mapped loopback
+        "::ffff:169.254.169.254",
+        "2002:7f00:1::",     # 6to4 wrapping 127.0.0.1
+        "64:ff9b::7f00:1",   # NAT64 wrapping 127.0.0.1; is_global=True on 3.11
+        "fc00::1",           # IPv6 unique-local
+        "224.0.0.1",         # multicast
+        "0.0.0.0",
+    ],
+)
+def test_url_guard_blocks_non_global_addresses(address: str):
+    with patch(
+        "app.core.url_guard._resolve",
+        return_value=[ipaddress.ip_address(address)],
+    ):
+        with pytest.raises(UnsafeUrlError, match="resolves to non-public address"):
+            validate_crawl_url("http://sneaky.example/")
+
+
+@pytest.mark.unit
+def test_url_guard_rejects_if_any_resolved_address_is_private():
+    # One public A record must not launder a private one alongside it.
+    with patch(
+        "app.core.url_guard._resolve",
+        return_value=[
+            ipaddress.ip_address("93.184.216.34"),
+            ipaddress.ip_address("10.0.0.5"),
+        ],
+    ):
+        with pytest.raises(UnsafeUrlError):
+            validate_crawl_url("http://mixed.example/")
+
+
+@pytest.mark.unit
+def test_resolve_crawl_target_pins_vetted_addresses():
+    from app.core.url_guard import resolve_crawl_target
+
+    with patch(
+        "app.core.url_guard._resolve",
+        return_value=[
+            ipaddress.ip_address("93.184.216.34"),
+            ipaddress.ip_address("2606:2800:220:1::1"),
+        ],
+    ):
+        target = resolve_crawl_target("https://example.com/jobs/1")
+
+    assert target.host == "example.com"
+    assert target.port == 443
+    assert target.curl_resolve() == [
+        "example.com:443:[2606:2800:220:1::1],93.184.216.34"
+    ]
+
+
+@pytest.mark.unit
+def test_resolve_crawl_target_literal_ip_needs_no_pin():
+    from app.core.url_guard import resolve_crawl_target
+
+    target = resolve_crawl_target("http://93.184.216.34:8080/x")
+    assert target.port == 8080
+    assert target.curl_resolve() == []

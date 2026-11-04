@@ -7,6 +7,11 @@ is the RFC-6749 *password grant* form parser, not Google sign-in.
 Security properties implemented here:
   - `state`         : random, stored server-side in Redis, single-use -> CSRF
                       protection on the callback
+  - browser binding : a second random value set as an HttpOnly cookie on the
+                      browser that started the flow and stored with the
+                      state. Without it, a callback URL from an attacker's
+                      own flow, opened by a victim, signed the victim into
+                      the attacker's account (login CSRF).
   - PKCE (S256)     : binds the authorization code to this specific client, so
                       an intercepted code is useless
   - id_token verify : signature checked against Google's JWKS, plus issuer,
@@ -41,6 +46,10 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 _STATE_PREFIX = "oauth:state:"
 _STATE_TTL_SECONDS = 600  # 10 minutes to complete the round trip
 
+BINDING_COOKIE = "oauth_binding"
+# Sent only to the callback, never to the rest of the API.
+BINDING_COOKIE_PATH = "/api/v1/auth/google"
+
 
 class OAuthError(Exception):
     """Raised when the OAuth exchange fails or a response can't be trusted."""
@@ -50,15 +59,19 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-async def build_authorization_url(next_path: str = "/jobs") -> str:
+async def build_authorization_url(next_path: str = "/jobs") -> Tuple[str, str]:
     """
     Create the Google consent URL and stash state + PKCE verifier in Redis.
 
     State is kept server-side (not in a cookie) so the callback can verify it
     exactly once; Redis DEL on read makes replay impossible.
+
+    Returns (url, binding). The caller must set `binding` as the
+    BINDING_COOKIE on the response that redirects to Google.
     """
     state = _b64url(secrets.token_bytes(32))
     nonce = _b64url(secrets.token_bytes(32))
+    binding = _b64url(secrets.token_bytes(32))
     code_verifier = _b64url(secrets.token_bytes(64))
     code_challenge = _b64url(hashlib.sha256(code_verifier.encode()).digest())
 
@@ -66,7 +79,12 @@ async def build_authorization_url(next_path: str = "/jobs") -> str:
     await redis.setex(
         f"{_STATE_PREFIX}{state}",
         _STATE_TTL_SECONDS,
-        json.dumps({"code_verifier": code_verifier, "next": next_path, "nonce": nonce}),
+        json.dumps({
+            "code_verifier": code_verifier,
+            "next": next_path,
+            "nonce": nonce,
+            "binding": binding,
+        }),
     )
 
     params = {
@@ -81,11 +99,17 @@ async def build_authorization_url(next_path: str = "/jobs") -> str:
         "access_type": "online",
         "prompt": "select_account",
     }
-    return f"{AUTH_ENDPOINT}?{urlencode(params)}"
+    return f"{AUTH_ENDPOINT}?{urlencode(params)}", binding
 
 
-async def consume_state(state: str) -> Dict[str, Any]:
-    """Atomically fetch-and-delete the stored state. Raises if unknown."""
+async def consume_state(state: str, binding: Optional[str]) -> Dict[str, Any]:
+    """
+    Atomically fetch-and-delete the stored state, then check it belongs to
+    this browser. Raises if unknown, expired, or started elsewhere.
+
+    The state is consumed even on a binding mismatch, so a leaked callback
+    URL is dead after one try.
+    """
     if not state:
         raise OAuthError("Missing state parameter")
     redis = await get_redis_pool()
@@ -97,7 +121,11 @@ async def consume_state(state: str) -> Dict[str, Any]:
     if raw is None:
         # Unknown, expired, or already used -> treat as CSRF / replay.
         raise OAuthError("Invalid or expired state parameter")
-    return json.loads(raw)
+    stored = json.loads(raw)
+    expected = stored.get("binding")
+    if not expected or not binding or not secrets.compare_digest(binding, expected):
+        raise OAuthError("OAuth flow was not started by this browser")
+    return stored
 
 
 async def exchange_code(code: str, code_verifier: str) -> Dict[str, Any]:

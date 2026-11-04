@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 from sqlmodel import select
 from typing import List
 
@@ -12,6 +13,7 @@ from app.models.users import User
 from app.schemas.news import NewsRead
 from app.tasks.news_tasks import crawl_news_site, scrape_linkedin_news
 from app.api.v1.auth import get_current_user, require_csrf
+from app.core.task_owner import record_task_owner
 from app.core.url_guard import UnsafeUrlError, validate_crawl_url
 
 router = APIRouter()
@@ -25,6 +27,12 @@ async def list_news(
     # undated article above all dated ones.
     stmt = (
         select(NewsArticle)
+        # NewsRead shows none of these; content_raw alone can be ~50KB/row.
+        .options(
+            defer(NewsArticle.content_raw),
+            defer(NewsArticle.content_clean),
+            defer(NewsArticle.embedding),
+        )
         .order_by(NewsArticle.published_at.desc().nulls_last(), NewsArticle.scraped_at.desc())
         .limit(50)
     )
@@ -54,6 +62,7 @@ async def trigger_news_scrape(
         raise HTTPException(status_code=400, detail=str(exc))
 
     task = crawl_news_site.delay(safe_url)
+    await record_task_owner([task.id], current_user.id)
     return {"status": "accepted", "task_id": task.id, "message": f"Crawling {safe_url}"}
 
 @router.post("/scrape/linkedin")
@@ -65,4 +74,5 @@ async def trigger_linkedin_news(
 ):
     """Trigger an on-demand LinkedIn News crawl"""
     task = scrape_linkedin_news.delay()
+    await record_task_owner([task.id], current_user.id)
     return {"status": "accepted", "task_id": task.id, "message": "Fetching LinkedIn daily news"}
