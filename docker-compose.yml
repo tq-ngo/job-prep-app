@@ -1,18 +1,41 @@
+# Production-shaped stack: only nginx publishes a port, nothing is
+# bind-mounted, and every secret is required. Local development layers
+# docker-compose.override.yml on top automatically (`docker compose up`);
+# deploy with `docker compose -f docker-compose.yml up -d` to leave it out.
+
+x-logging: &logging
+  # json-file with no limits grew without bound on a long-running host.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-backend-image: &backend-image
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file: .env
+  restart: unless-stopped
+  logging: *logging
+  networks: [app]
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: job-prep-postgres
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 1g
+    networks: [app]
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "127.0.0.1:5432:5432"
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -20,27 +43,34 @@ services:
   redis:
     image: redis:7-alpine
     container_name: job-prep-redis
-    command: redis-server --appendonly yes
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 256m
+    networks: [app]
+    # Redis had no password: anything that could reach it (any container on
+    # the network, or a host-published port) could read sessions, the JWT
+    # denylist and the Celery queue. The password comes from the container
+    # environment, so it isn't written into the compose command line.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis_data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-image
     container_name: job-prep-backend
-    env_file: .env
-    volumes:
-      - ./backend:/app
-    ports:
-      - "127.0.0.1:8000:8000"
+    mem_limit: 512m
+    environment:
+      # Trust X-Forwarded-* only from nginx (fixed address below). The image
+      # used to pass --forwarded-allow-ips=*, so any caller that reached
+      # uvicorn directly could claim any client IP and scheme.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.30.0.10}
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,46 +78,40 @@ services:
         condition: service_healthy
     # Migrations run here (single owner) before uvicorn starts. Celery
     # services deliberately do NOT migrate, to avoid concurrent upgrades.
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    # Healthcheck: the image's own (Python urllib; there is no curl).
+    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
 
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-image
     container_name: job-prep-celery-worker
-    env_file: .env
-    volumes:
-      - ./backend:/app
+    mem_limit: 1g
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 -Q default,scraping,ai
+    # Replaces the image's HTTP healthcheck, which a worker can't answer.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
 
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-image
     container_name: job-prep-celery-beat
-    env_file: .env
-    volumes:
-      - ./backend:/app
+    mem_limit: 256m
     depends_on:
-      - celery-worker
-    command: celery -A app.tasks.celery_app beat --loglevel=info
-
-  celery-flower:
-    image: mher/flower:2.0
-    container_name: job-prep-flower
-    environment:
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
-      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:-admin:jobprep2026}
-    ports:
-      - "127.0.0.1:5555:5555"
-    command: celery --broker=${CELERY_BROKER_URL} flower --port=5555 --basic_auth=${FLOWER_BASIC_AUTH:-admin:jobprep2026}
-    depends_on:
-      - celery-worker
+      celery-worker:
+        condition: service_healthy
+    # /app belongs to root in the image and beat runs as appuser, so its
+    # schedule file can't live in the working directory (it only worked
+    # before because the source tree was bind-mounted over /app).
+    command: celery -A app.tasks.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    healthcheck:
+      disable: true
 
   frontend:
     build:
@@ -99,18 +123,15 @@ services:
         # so SameSite=Lax auth cookies work without cross-site issues.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     container_name: job-prep-frontend
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 512m
+    networks: [app]
     environment:
       # Server-side only (RSC / route handlers), resolved on the compose network.
       - INTERNAL_API_URL=http://backend:8000
-      - JWT_SECRET=${SECRET_KEY}
-    ports:
-      - "127.0.0.1:3000:3000"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      - JWT_SECRET=${SECRET_KEY:?set SECRET_KEY in .env}
+    # Healthcheck: defined in frontend/Dockerfile.
     depends_on:
       backend:
         condition: service_healthy
@@ -118,15 +139,42 @@ services:
   nginx:
     image: nginx:alpine
     container_name: job-prep-nginx
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 128m
+    networks:
+      app:
+        # Fixed so the backend can trust exactly this address for
+        # X-Forwarded-For (FORWARDED_ALLOW_IPS above).
+        ipv4_address: 172.30.0.10
     ports:
       - "80:80"
+    environment:
+      # Hostnames the app answers to; any other Host header gets no response.
+      # Set to your domain in production.
+      SERVER_NAME: ${SERVER_NAME:-localhost 127.0.0.1}
+      # Substitute only SERVER_NAME into the templates, never nginx's own
+      # $host / $remote_addr style variables.
+      NGINX_ENVSUBST_FILTER: "^SERVER_NAME$$"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/templates:/etc/nginx/templates:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       frontend:
         condition: service_healthy
       backend:
         condition: service_healthy
+
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   postgres_data:
