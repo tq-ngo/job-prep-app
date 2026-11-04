@@ -1,20 +1,41 @@
-from fastapi import APIRouter, Depends
+import asyncio
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException
 from app.tasks.celery_app import celery_app
 from app.models.users import User
 from app.api.v1.auth import get_current_user
+from app.core.task_owner import owns_all
 
 router = APIRouter()
+
+# A combined "all sources" scrape is 2 IDs; anything near this is abuse.
+MAX_TASK_IDS = 10
+
 
 @router.get("/{task_id}")
 async def get_task_status(task_id: str, current_user: User = Depends(get_current_user)):
     """
     Poll Celery task state by ID. Supports comma-separated task IDs for batch tracking.
     Returns standard Celery states: PENDING, STARTED, SUCCESS, FAILURE, PROGRESS
+
+    Only the user who started the task(s) may poll them; anyone else gets the
+    same 404 as for an ID that never existed.
     """
     task_ids = [tid.strip() for tid in task_id.split(",") if tid.strip()]
     if not task_ids:
         return {"task_id": task_id, "status": "FAILURE", "error": "No valid task IDs provided"}
-        
+    if len(task_ids) > MAX_TASK_IDS:
+        raise HTTPException(status_code=422, detail=f"At most {MAX_TASK_IDS} task IDs per request")
+    if not await owns_all(task_ids, current_user.id):
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # AsyncResult reads the result backend with blocking Redis calls; keep
+    # them off the event loop.
+    return await asyncio.to_thread(_task_status, task_id, task_ids)
+
+
+def _task_status(task_id: str, task_ids: List[str]) -> dict:
     if len(task_ids) == 1:
         task = celery_app.AsyncResult(task_ids[0])
         res_val = task.result if task.state == "SUCCESS" and isinstance(task.result, (dict, list, str, int, float, bool)) else (str(task.result) if task.state == "SUCCESS" else None)
@@ -31,7 +52,7 @@ async def get_task_status(task_id: str, current_user: User = Depends(get_current
     progress_metas = []
     results = []
     errors = []
-    
+
     for tid in task_ids:
         res = celery_app.AsyncResult(tid)
         states.append(res.state)
@@ -73,4 +94,3 @@ async def get_task_status(task_id: str, current_user: User = Depends(get_current
         "error": None,
         "meta": {"percent": 10, "message": f"Running {len(task_ids)} scrapers..."}
     }
-

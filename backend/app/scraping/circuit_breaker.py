@@ -27,6 +27,8 @@ class CircuitStatus:
 FAILURE_THRESHOLD = 5
 # How long (seconds) to keep circuit OPEN before testing
 OPEN_DURATION_SECONDS = 90
+# How long a HALF_OPEN probe holds the single test slot
+PROBE_TTL_SECONDS = 60
 # Redis key prefix
 CB_PREFIX = "cb:v1"
 
@@ -113,18 +115,29 @@ class CircuitBreaker:
                 # Transition to HALF_OPEN to allow one test request
                 await self._set_state(domain, CircuitState.HALF_OPEN)
                 logger.info(f"Circuit HALF_OPEN for {domain} — testing")
-                return True
+                return await self._claim_probe(domain)
             else:
                 remaining = OPEN_DURATION_SECONDS - elapsed
                 logger.info(f"Circuit OPEN for {domain} — {remaining:.0f}s remaining")
                 return False
-        
+
         if status.state == CircuitState.HALF_OPEN:
-            # Only one test request allowed in HALF_OPEN
-            # use Redis lock for atomicity
-            return True
-        
+            # Only one test request allowed in HALF_OPEN. Every worker used to
+            # get True here, so a recovering host took the full backlog at once.
+            return await self._claim_probe(domain)
+
         return False
+
+    async def _claim_probe(self, domain: str) -> bool:
+        """Admit exactly one HALF_OPEN test request across all workers.
+
+        The key expires, so a probe whose worker died without reporting back
+        doesn't wedge the domain in HALF_OPEN forever.
+        """
+        redis = self._get_redis()
+        return bool(
+            await redis.set(f"{CB_PREFIX}:{domain}:probe", "1", nx=True, ex=PROBE_TTL_SECONDS)
+        )
     
     async def record_success(self, domain: str):
         """
@@ -141,6 +154,7 @@ class CircuitBreaker:
         async with redis.pipeline(transaction=True) as pipe:
             pipe.delete(f"{CB_PREFIX}:{domain}:failures")
             pipe.delete(f"{CB_PREFIX}:{domain}:opened_at")
+            pipe.delete(f"{CB_PREFIX}:{domain}:probe")
             pipe.set(f"{CB_PREFIX}:{domain}:state", CircuitState.CLOSED.value)
             await pipe.execute()
     
@@ -175,6 +189,7 @@ class CircuitBreaker:
         async with redis.pipeline(transaction=True) as pipe:
             pipe.set(f"{CB_PREFIX}:{domain}:state", CircuitState.OPEN.value)
             pipe.set(f"{CB_PREFIX}:{domain}:opened_at", str(time.time()))
+            pipe.delete(f"{CB_PREFIX}:{domain}:probe")
             pipe.expire(f"{CB_PREFIX}:{domain}:state", OPEN_DURATION_SECONDS * 20)
             await pipe.execute()
     

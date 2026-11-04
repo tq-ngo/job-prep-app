@@ -85,7 +85,31 @@ class Settings(BaseSettings):
         # (RFC 7518 §3.2), and the same key now also signs-checks at the edge.
         if self.APP_ENV == "production" and len(self.SECRET_KEY) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters in production")
+
+        # Credentialed CORS with a wildcard makes Starlette echo back any
+        # Origin, so every site on the internet could make cookie-carrying
+        # requests and read the responses.
+        if "*" in self.cors_origins:
+            raise ValueError(
+                "CORS_ORIGINS must list explicit origins; '*' is not allowed "
+                "because credentials (cookies) are enabled"
+            )
+
+        self.COOKIE_SAMESITE = self.COOKIE_SAMESITE.lower()
+        if self.COOKIE_SAMESITE not in ("lax", "strict", "none"):
+            raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none")
+        if self.COOKIE_SAMESITE == "none" and not self.COOKIE_SECURE:
+            # Browsers reject SameSite=None cookies without Secure outright.
+            raise ValueError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true")
         return self
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.APP_ENV == "production"
 
     @property
     def google_oauth_configured(self) -> bool:

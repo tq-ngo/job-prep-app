@@ -3,9 +3,9 @@ import random
 import logging
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse, urljoin
-from curl_cffi import requests
+from curl_cffi import CurlOpt, requests
 
-from app.core.url_guard import UnsafeUrlError, validate_crawl_url
+from app.core.url_guard import CrawlTarget, UnsafeUrlError, resolve_crawl_target
 from app.scraping.circuit_breaker import circuit_breaker
 
 logger = logging.getLogger(__name__)
@@ -53,46 +53,70 @@ class TLSImpersonateScraper:
 
         # Re-validate at FETCH time, not just at request time: DNS can
         # re-resolve between the API accepting a URL and the worker fetching
-        # it (DNS rebinding).
+        # it (DNS rebinding). The lookup blocks, so it runs off the loop.
         try:
-            validate_crawl_url(url)
+            target = await asyncio.to_thread(resolve_crawl_target, url)
         except UnsafeUrlError as exc:
             logger.error("Refusing to fetch unsafe URL %s: %s", url, exc)
             return None
 
-        for attempt in range(1, max_retries + 1):
-            current_url = url
-            domain = urlparse(current_url).netloc.lower()
+        # Each domain consults the breaker once per call, not once per retry:
+        # in HALF_OPEN only a single probe is admitted, so a second check
+        # from our own retry loop would be refused.
+        admitted: set = set()
 
+        async def _admit(domain: str) -> bool:
+            if domain in admitted:
+                return True
             if not await circuit_breaker.allow_request(domain):
-                logger.warning(f"Circuit breaker OPEN for {domain} — skipping fetch for {current_url}")
+                logger.warning("Circuit breaker OPEN for %s — skipping fetch", domain)
+                return False
+            admitted.add(domain)
+            return True
+
+        # The domain of the last failed attempt; charged to the breaker once
+        # when the whole call gives up. Charging every retry let one flaky
+        # posting (3 attempts) bring a whole ATS host most of the way to OPEN.
+        failed_domain: Optional[str] = None
+
+        for attempt in range(1, max_retries + 1):
+            hop: CrawlTarget = target
+            domain = urlparse(hop.url).netloc.lower()
+            if not await _admit(domain):
                 return None
 
             try:
                 redirect_count = 0
-                while redirect_count <= max_redirects:
+                while True:
+                    # Without a proxy, connect to the IPs validated above
+                    # rather than letting curl resolve the name again. A
+                    # proxy resolves names itself, so pinning can't apply.
+                    pin = hop.curl_resolve() if not proxies else []
                     response = await asyncio.to_thread(
                         requests.get,
-                        current_url,
+                        hop.url,
                         headers=request_headers,
                         impersonate="chrome120",
                         proxies=proxies,
                         timeout=15,
                         allow_redirects=False,
+                        curl_options={CurlOpt.RESOLVE: pin} if pin else None,
                     )
 
                     # Handle 3xx redirects manually to validate destination against SSRF guard
                     if response.status_code in (301, 302, 303, 307, 308):
                         loc = response.headers.get("location") or response.headers.get("Location")
                         if not loc:
-                            break
-                        next_url = urljoin(current_url, loc)
+                            # Retrying won't make a Location header appear.
+                            logger.error("Redirect without Location from %s", hop.url)
+                            return None
+                        next_url = urljoin(hop.url, loc)
                         try:
-                            validate_crawl_url(next_url)
+                            hop = await asyncio.to_thread(resolve_crawl_target, next_url)
                         except UnsafeUrlError as ssrf_err:
                             logger.error(
                                 "Redirect to unsafe URL blocked (%s -> %s): %s",
-                                current_url, next_url, ssrf_err,
+                                url, next_url, ssrf_err,
                             )
                             return None
 
@@ -101,10 +125,8 @@ class TLSImpersonateScraper:
                             logger.warning("Too many redirects (> %d) for %s", max_redirects, url)
                             return None
 
-                        current_url = next_url
-                        domain = urlparse(current_url).netloc.lower()
-                        if not await circuit_breaker.allow_request(domain):
-                            logger.warning(f"Circuit breaker OPEN for redirected domain {domain}")
+                        domain = urlparse(hop.url).netloc.lower()
+                        if not await _admit(domain):
                             return None
                         continue
 
@@ -113,18 +135,18 @@ class TLSImpersonateScraper:
                         await circuit_breaker.record_success(domain)
                         return response.text
                     elif response.status_code in (429, 503, 403):
-                        await circuit_breaker.record_failure(domain)
+                        failed_domain = domain
                         logger.warning(
-                            f"Attempt {attempt}/{max_retries}: Encountered status {response.status_code} for {current_url}. Backing off."
+                            f"Attempt {attempt}/{max_retries}: Encountered status {response.status_code} for {hop.url}. Backing off."
                         )
                         break
                     else:
-                        logger.error(f"Unrecoverable HTTP status {response.status_code} for URL: {current_url}")
+                        logger.error(f"Unrecoverable HTTP status {response.status_code} for URL: {hop.url}")
                         return None
 
             except Exception as exc:
-                await circuit_breaker.record_failure(domain)
-                logger.error(f"Attempt {attempt}/{max_retries} failed for {current_url} with error: {exc}")
+                failed_domain = domain
+                logger.error(f"Attempt {attempt}/{max_retries} failed for {hop.url} with error: {exc}")
 
             # Back off before the NEXT attempt only.
             if attempt < max_retries:
@@ -132,6 +154,8 @@ class TLSImpersonateScraper:
                 backoff_delay = (base_backoff * (2 ** (attempt - 1))) + jitter
                 await asyncio.sleep(backoff_delay)
 
+        if failed_domain:
+            await circuit_breaker.record_failure(failed_domain)
         logger.error(f"Failed to fetch {url} after {max_retries} retries.")
         return None
 

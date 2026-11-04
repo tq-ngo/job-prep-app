@@ -30,6 +30,8 @@ from app.core.auth_cookies import (
 from app.core.database import get_session
 from app.core.datetime_utils import utc_now
 from app.core.google_oauth import (
+    BINDING_COOKIE,
+    BINDING_COOKIE_PATH,
     OAuthError,
     build_authorization_url,
     consume_state,
@@ -253,8 +255,27 @@ def _require_google_configured() -> None:
 async def google_login(request: Request, next: str = "/jobs"):
     """Start the Google consent flow."""
     _require_google_configured()
-    url = await build_authorization_url(_safe_next(next))
-    return RedirectResponse(url, status_code=307)
+    url, binding = await build_authorization_url(_safe_next(next))
+    redirect = RedirectResponse(url, status_code=307)
+    redirect.set_cookie(
+        BINDING_COOKIE,
+        binding,
+        max_age=600,
+        path=BINDING_COOKIE_PATH,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        # Always Lax, even if COOKIE_SAMESITE is strict: the callback is a
+        # cross-site top-level navigation from Google, which Strict drops.
+        samesite="lax",
+    )
+    return redirect
+
+
+def _oauth_redirect(url: str, status_code: int = 307) -> RedirectResponse:
+    """A callback redirect that also clears the single-use binding cookie."""
+    redirect = RedirectResponse(url, status_code=status_code)
+    redirect.delete_cookie(BINDING_COOKIE, path=BINDING_COOKIE_PATH)
+    return redirect
 
 
 @router.get("/google/callback")
@@ -264,6 +285,7 @@ async def google_callback(
     code: Optional[str] = None,
     state: Optional[str] = None,
     error: Optional[str] = None,
+    oauth_binding: Optional[str] = Cookie(default=None, alias=BINDING_COOKIE),
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -273,10 +295,10 @@ async def google_callback(
     _require_google_configured()
 
     if error:
-        return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=access_denied")
+        return _oauth_redirect(f"{settings.FRONTEND_URL}/login?error=access_denied")
 
     try:
-        stored = await consume_state(state or "")
+        stored = await consume_state(state or "", oauth_binding)
         if not code:
             raise OAuthError("Missing authorization code")
         tokens = await exchange_code(code, stored["code_verifier"])
@@ -290,7 +312,7 @@ async def google_callback(
         )
     except OAuthError as exc:
         logger.warning("Google OAuth failed: %s", exc)
-        return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=oauth_failed")
+        return _oauth_redirect(f"{settings.FRONTEND_URL}/login?error=oauth_failed")
 
     email = normalize_email(claims["email"])
     google_sub = claims["sub"]
@@ -302,13 +324,21 @@ async def google_callback(
     ).scalar_one_or_none()
 
     if user is None:
-        user = await _find_user_by_email(session, email)
-        if user is not None:
-            # Link Google to the existing local account. Safe only because
-            # verify_id_token already required email_verified.
-            user.google_sub = google_sub
-        else:
-            user = User(email=email, google_sub=google_sub, skills=[])
+        if await _find_user_by_email(session, email) is not None:
+            # Never auto-link to an existing account. Local registration
+            # doesn't verify email ownership, so anyone could pre-register
+            # victim@gmail.com with a password; linking here handed the
+            # victim's Google sign-in to that account, password still live.
+            # The same holds for an account already linked to a different
+            # Google `sub` (e.g. a reassigned Workspace address).
+            logger.info("Google sign-in refused: email belongs to another account")
+            return _oauth_redirect(
+                f"{settings.FRONTEND_URL}/login?error=account_exists", status_code=303
+            )
+        user = User(email=email, google_sub=google_sub, skills=[])
+    elif not user.is_active:
+        # Checked before anything is written for a disabled account.
+        return _oauth_redirect(f"{settings.FRONTEND_URL}/login?error=account_disabled")
 
     user.full_name = user.full_name or claims.get("name")
     user.avatar_url = claims.get("picture") or user.avatar_url
@@ -316,10 +346,7 @@ async def google_callback(
     await session.commit()
     await session.refresh(user)
 
-    if not user.is_active:
-        return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=account_disabled")
-
-    redirect = RedirectResponse(
+    redirect = _oauth_redirect(
         f"{settings.FRONTEND_URL}{stored.get('next', '/jobs')}", status_code=303
     )
     await _issue_session(redirect, user, session)
@@ -440,7 +467,9 @@ async def resume_session(
 
 
 @router.post("/logout")
+@limiter.limit("30/minute")
 async def logout(
+    request: Request,
     response: Response,
     access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
@@ -480,7 +509,7 @@ async def update_skills(
     session: AsyncSession = Depends(get_session),
     _: None = Depends(require_csrf),
 ):
-    current_user.skills = [s.strip().lower() for s in skills_in.skills if s.strip()]
+    current_user.skills = skills_in.skills  # normalized and bounded by UserUpdate
     session.add(current_user)
     await session.commit()
     await session.refresh(current_user)

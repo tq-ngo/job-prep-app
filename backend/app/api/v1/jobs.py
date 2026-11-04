@@ -11,6 +11,7 @@ from app.schemas.job import JobRead, JobListResponse
 from app.tasks.job_tasks import scrape_github, scrape_linkedin
 from app.core.redis import get_redis_pool
 from app.api.v1.auth import get_current_user, require_csrf
+from app.core.task_owner import record_task_owner
 from sqlalchemy import or_
 from sqlalchemy.orm import defer
 import hashlib
@@ -32,11 +33,11 @@ async def list_jobs(
     # Query parameters with defaults and validation
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(default=30, ge=1, le=100, description="Items per page"),
-    source: Optional[str] = Query(default=None, description="Filter by source"),
+    source: Optional[str] = Query(default=None, max_length=32, description="Filter by source"),
     is_remote: Optional[bool] = Query(default=None),
     min_salary: Optional[int] = Query(default=None, ge=0),
-    q: Optional[str] = Query(default=None, description="Search term for title or company"),
-    category: Optional[str] = Query(default=None, description="Filter by category (FAANG+, Quant, Others)"),
+    q: Optional[str] = Query(default=None, max_length=200, description="Search term for title or company"),
+    category: Optional[str] = Query(default=None, max_length=16, description="Filter by category (FAANG+, Quant, Others)"),
     # FastAPI dependency injection: session is automatically managed
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
@@ -185,6 +186,7 @@ async def trigger_scrape(
                 "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern"
             )
             task_ids.append({"source": src_name, "task_id": task.id})
+        await record_task_owner([t["task_id"] for t in task_ids], current_user.id)
         combined_task_id = ",".join([t["task_id"] for t in task_ids])
         return {
             "status": "accepted",
@@ -203,7 +205,8 @@ async def trigger_scrape(
         task = task_map[source].delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern")
     else:
         task = task_map[source].delay()
-    
+    await record_task_owner([task.id], current_user.id)
+
     return {
         "status": "accepted",
         "task_id": task.id,

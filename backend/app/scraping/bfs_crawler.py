@@ -159,8 +159,11 @@ class BFSNewsCrawler:
         for url in links:
             parsed = urlparse(url)
             
-            # Must match allowed host
-            if not parsed.netloc.endswith(self.config.allowed_host_suffix):
+            # Must be the allowed host or a subdomain of it. A bare endswith()
+            # had no dot boundary, so `evilexample.com` matched `example.com`.
+            netloc = parsed.netloc.lower()
+            suffix = self.config.allowed_host_suffix.lower()
+            if netloc != suffix and not netloc.endswith("." + suffix):
                 continue
             
             # Must be http or https

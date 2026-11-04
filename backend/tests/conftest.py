@@ -71,6 +71,9 @@ def patch_redis_and_limiter(fake_redis, monkeypatch):
     monkeypatch.setattr("app.core.google_oauth.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.api.v1.jobs.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.api.v1.stats.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.api.v1.search.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.api.v1.sse.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.core.task_owner.get_redis_pool", _mock_get_redis_pool)
 
 
 @pytest.fixture

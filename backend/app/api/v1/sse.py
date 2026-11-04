@@ -16,16 +16,22 @@ Referer headers.
 import asyncio
 import json
 import logging
+import re
+import time
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.core.auth_cookies import ACCESS_COOKIE, is_payload_revoked
+from app.core.database import AsyncSessionLocal, get_session
 from app.core.events import JOBS_STREAM, KIND_ENRICHED, publish_job_event  # noqa: F401 (re-export)
-from app.core.redis import create_worker_redis
+from app.core.redis import create_worker_redis, get_redis_pool
 from app.core.security import TOKEN_TYPE_ACCESS, TokenError, decode_token
+from app.models.users import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,6 +41,24 @@ SSE_KEEPALIVE_SECONDS = 25
 # expiry for up to nginx's proxy_read_timeout (24h) because auth was only
 # ever validated once, at connect.
 AUTH_RECHECK_SECONDS = 60
+
+# Each stream pins a dedicated Redis connection for its whole life, so an
+# unbounded number per user was an easy way to exhaust Redis. Three covers a
+# few open tabs; useJobAlerts shares one stream per tab.
+MAX_STREAMS_PER_USER = 3
+# Live streams refresh their entry every read (<= SSE_KEEPALIVE_SECONDS), so
+# an entry this old belongs to a stream whose process died without cleanup.
+_STREAM_STALE_SECONDS = SSE_KEEPALIVE_SECONDS * 3
+_STREAMS_PREFIX = "sse:streams:"
+
+# A Redis stream entry id. Anything else made XREAD raise, which closed the
+# stream; the client reconnected with the same bad id until it gave up.
+_STREAM_ID_RE = re.compile(r"^\d{1,20}-\d{1,20}$")
+
+# Session factory for the periodic re-check, which runs after the request's
+# own dependency-scoped session has closed. A module attribute so tests can
+# point it elsewhere.
+_session_factory = AsyncSessionLocal
 
 
 def _authorize(raw_token: Optional[str]) -> dict:
@@ -46,8 +70,45 @@ def _authorize(raw_token: Optional[str]) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+async def _is_active_user(session: AsyncSession, email: str) -> bool:
+    user = (
+        await session.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
+    return user is not None and user.is_active
+
+
+async def _register_stream(redis, user_key: str, stream_id: str) -> bool:
+    """Count this stream against the user's cap; False if over it.
+
+    Add-then-count rather than count-then-add, so two simultaneous connects
+    can't both squeeze into the last slot.
+    """
+    key = _STREAMS_PREFIX + user_key
+    now = time.time()
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.zadd(key, {stream_id: now})
+        pipe.zremrangebyscore(key, "-inf", now - _STREAM_STALE_SECONDS)
+        pipe.zcard(key)
+        pipe.expire(key, _STREAM_STALE_SECONDS)
+        _, _, count, _ = await pipe.execute()
+    if count > MAX_STREAMS_PER_USER:
+        await redis.zrem(key, stream_id)
+        return False
+    return True
+
+
+def sanitize_last_event_id(raw: Optional[str]) -> Optional[str]:
+    """Return a usable stream cursor, or None to start from new events."""
+    return raw if raw and _STREAM_ID_RE.match(raw) else None
+
+
 async def job_event_generator(
-    request: Request, user_skills: set, raw_token: str, last_event_id: Optional[str]
+    request: Request,
+    user_skills: set,
+    raw_token: str,
+    last_event_id: Optional[str],
+    user_key: str,
+    stream_id: str,
 ):
     """
     Yield SSE frames from the Redis stream, resuming after `last_event_id`.
@@ -58,6 +119,7 @@ async def job_event_generator(
     the entire API stalled, not just streaming.
     """
     redis = create_worker_redis()
+    streams_key = _STREAMS_PREFIX + user_key
     # "$" = only new events. A reconnecting client sends Last-Event-ID and
     # picks up exactly where it stopped, so nothing is dropped in the gap.
     cursor = last_event_id or "$"
@@ -71,12 +133,21 @@ async def job_event_generator(
             if await request.is_disconnected():
                 break
 
+            # Heartbeat this stream's slot under the per-user cap.
+            await redis.zadd(streams_key, {stream_id: time.time()})
+            await redis.expire(streams_key, _STREAM_STALE_SECONDS)
+
             now = asyncio.get_event_loop().time()
             if now - last_auth_check > AUTH_RECHECK_SECONDS:
                 try:
                     payload = decode_token(raw_token, TOKEN_TYPE_ACCESS)
                     if await is_payload_revoked(payload):
                         raise TokenError("revoked")
+                    # A token can outlive its account: disabling a user
+                    # used to leave their streams running until expiry.
+                    async with _session_factory() as session:
+                        if not await _is_active_user(session, payload["sub"]):
+                            raise TokenError("user disabled")
                 except TokenError:
                     # Tell the client WHY before closing. EventSource can't
                     # see HTTP status codes, so without this a routine 15-min
@@ -132,17 +203,23 @@ async def job_event_generator(
     except asyncio.CancelledError:
         logger.info("SSE connection closed by client")
     finally:
+        try:
+            await redis.zrem(streams_key, stream_id)
+        except Exception:
+            pass  # the entry goes stale and is pruned on the next connect
         # The old code called unsubscribe() but never closed the connection,
-        # leaking one per client.
-        await redis.aclose()
+        # leaking one per client. Plain aclose() also left the client's own
+        # pool (and its socket) open until garbage collection.
+        await redis.aclose(close_connection_pool=True)
 
 
 @router.get("/jobs/alerts")
 async def stream_job_alerts(
     request: Request,
-    skills: str = Query("", description="Comma-separated skills to track"),
-    last_event_id: Optional[str] = Query(None, description="Resume cursor from last received event ID"),
+    skills: str = Query("", max_length=2000, description="Comma-separated skills to track"),
+    last_event_id: Optional[str] = Query(None, max_length=64, description="Resume cursor from last received event ID"),
     access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Live job feed.
@@ -154,12 +231,22 @@ async def stream_job_alerts(
     payload = _authorize(access_token)
     if await is_payload_revoked(payload):
         raise HTTPException(status_code=401, detail="Token revoked")
+    if not await _is_active_user(session, payload["sub"]):
+        raise HTTPException(status_code=401, detail="Account unavailable")
+
+    stream_id = uuid.uuid4().hex
+    if not await _register_stream(await get_redis_pool(), payload["sub"], stream_id):
+        raise HTTPException(status_code=429, detail="Too many open live-update streams")
 
     parsed_skills = {s.strip().lower() for s in skills.split(",") if s.strip()}
-    effective_last_id = request.headers.get("last-event-id") or last_event_id
+    effective_last_id = sanitize_last_event_id(
+        request.headers.get("last-event-id") or last_event_id
+    )
 
     return StreamingResponse(
-        job_event_generator(request, parsed_skills, access_token, effective_last_id),
+        job_event_generator(
+            request, parsed_skills, access_token, effective_last_id, payload["sub"], stream_id
+        ),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",   # disable nginx buffering

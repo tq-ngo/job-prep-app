@@ -47,8 +47,32 @@ class UserRead(BaseModel):
     email: EmailStr
     skills: List[str]
 
+MAX_SKILLS = 30
+MAX_SKILL_LENGTH = 40
+
+
 class UserUpdate(BaseModel):
     skills: List[str]
+
+    @field_validator("skills")
+    @classmethod
+    def normalize_skills(cls, v: List[str]) -> List[str]:
+        """Strip, lowercase and de-duplicate (keeping order), then bound.
+
+        Unbounded, one request could store megabytes of skills in the user's
+        row, and every SSE connection matches events against the list.
+        """
+        seen: dict = {}
+        for raw in v:
+            skill = raw.strip().lower()
+            if not skill:
+                continue
+            if len(skill) > MAX_SKILL_LENGTH:
+                raise ValueError(f"Each skill must be at most {MAX_SKILL_LENGTH} characters")
+            seen.setdefault(skill, None)
+        if len(seen) > MAX_SKILLS:
+            raise ValueError(f"At most {MAX_SKILLS} skills are allowed")
+        return list(seen)
 
 class Token(BaseModel):
     access_token: str

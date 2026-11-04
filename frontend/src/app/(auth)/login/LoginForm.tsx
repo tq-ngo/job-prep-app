@@ -5,10 +5,16 @@ import { authApi } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
 
-export default function LoginForm({ nextPath }: { nextPath: string }) {
+export default function LoginForm({
+  nextPath,
+  initialError = "",
+}: {
+  nextPath: string;
+  initialError?: string;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [isLoading, setIsLoading] = useState(false);
   const { completeLogin } = useAuth();
 
@@ -54,7 +60,7 @@ export default function LoginForm({ nextPath }: { nextPath: string }) {
         </div>
         
         {error && (
-          <div className="bg-amber-clay/10 border border-amber-clay/30 text-amber-clay text-sm px-4 py-3 rounded mb-6">
+          <div role="alert" className="bg-amber-clay/10 border border-amber-clay/30 text-amber-clay text-sm px-4 py-3 rounded mb-6">
             {error}
           </div>
         )}
