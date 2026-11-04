@@ -1,31 +1,39 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Lora, Fira_Code } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import Providers from "./providers";
 import { SITE_URL } from "@/lib/urls";
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
+// Self-hosted, not next/font/google: that downloads the fonts from Google
+// at BUILD time, so every build depended on fonts.googleapis.com, and CI
+// builds failed when Google throttled or refused the runner. The files in
+// ./fonts are the OFL variable fonts from github.com/google/fonts, subset
+// to Latin + Latin Extended (accented names like "Łódź" stay in-font) and
+// converted to WOFF2. Licences sit alongside them.
+
+const plusJakarta = localFont({
+  src: [{ path: "./fonts/plus-jakarta-sans-var.woff2", weight: "200 800", style: "normal" }],
   variable: "--font-jakarta",
   display: "swap",
 });
 
-const lora = Lora({
-  subsets: ["latin"],
-  variable: "--font-lora",
-  display: "swap",
+const lora = localFont({
   // The hero headline uses italic; declaring it loads the real italic face
   // instead of a synthesized slant that swaps in late.
-  style: ["normal", "italic"],
+  src: [
+    { path: "./fonts/lora-var.woff2", weight: "400 700", style: "normal" },
+    { path: "./fonts/lora-italic-var.woff2", weight: "400 700", style: "italic" },
+  ],
+  variable: "--font-lora",
+  display: "swap",
 });
 
 // Mono is only used for small labels and pills, never above the fold's
 // largest text, so it isn't worth a preload slot competing with the LCP.
-const firaCode = Fira_Code({
-  subsets: ["latin"],
+const firaCode = localFont({
+  src: [{ path: "./fonts/fira-code-var.woff2", weight: "300 700", style: "normal" }],
   variable: "--font-fira",
   display: "swap",
-  weight: ["400", "500"],
   preload: false,
 });
 
