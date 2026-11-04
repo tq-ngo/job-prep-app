@@ -62,6 +62,21 @@ class Job(SQLModel, table=True):
             postgresql_using="gin",
             postgresql_ops={"company": "gin_trgm_ops"},
         ),
+        # Semantic search orders by `embedding <=> :q` (cosine distance);
+        # without an ANN index that was a sequential scan over every vector.
+        Index(
+            "ix_jobs_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        # Backs the reaper (queued AND queued_at < cutoff) and the queue-depth
+        # count in process_raw_jobs_batch.
+        Index(
+            "ix_jobs_queued",
+            "queued_at",
+            postgresql_where=text("scrape_status = 'queued'"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

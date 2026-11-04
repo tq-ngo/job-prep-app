@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Any, Awaitable, Callable, Dict, List, Set, Tuple
 
 from cachetools import LRUCache
-from sqlalchemy import func, literal_column, select, text, tuple_, update
+from sqlalchemy import and_, case, func, literal_column, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,9 @@ _UPDATABLE_COLUMNS = (
 JD_RETRY_AFTER = timedelta(days=7)
 
 DescriptionFetcher = Callable[[List[Dict[str, Any]]], Awaitable[int]]
+
+# Arbitrary app-wide constant identifying the relink_hashes advisory lock.
+_RELINK_LOCK_KEY = 0x6A6F_6273_7265_6C6E  # "jobsreln"
 
 
 def _key(record: Dict[str, Any]) -> Key:
@@ -113,6 +116,12 @@ class DatabaseSyncService:
 
             if already_synced:
                 stats["skipped"] = await self._touch(already_synced)
+
+            # End the transaction before the network fetch. Holding it open
+            # across a batch of JD fetches (minutes, on a first crawl) left
+            # the connection "idle in transaction", with the _touch row locks
+            # held the whole time.
+            await self.session.commit()
 
             inserted_ids: List[Any] = []
             if needs_upsert:
@@ -281,6 +290,17 @@ class DatabaseSyncService:
             update_cols["description_fetched_at"] = func.coalesce(
                 stmt.excluded.description_fetched_at, Job.description_fetched_at
             )
+            # A row enriched while it had no description was marked done
+            # with no skills; when a later crawl finally fetches its JD, send
+            # it back through enrichment. Resetting a 'queued' row also voids
+            # an in-flight claim that loaded the description-less row.
+            update_cols["scrape_status"] = case(
+                (
+                    and_(Job.description.is_(None), stmt.excluded.description.isnot(None)),
+                    "raw",
+                ),
+                else_=Job.scrape_status,
+            )
         if "description_source" in all_keys:
             update_cols["description_source"] = func.coalesce(
                 stmt.excluded.description_source, Job.description_source
@@ -339,9 +359,17 @@ class DatabaseSyncService:
         is_active as well as after inserts.
 
         Does not commit. Returns the number of rows whose link changed.
+
+        Takes a transaction-scoped advisory lock first. A GitHub and a
+        LinkedIn crawl relinking overlapping hashes at the same time updated
+        the same rows in different orders and could deadlock; with the lock
+        they relink one after the other. Released at commit/rollback.
         """
         if not hashes:
             return 0
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"), {"key": _RELINK_LOCK_KEY}
+        )
         result = await self.session.execute(
             text(
                 """

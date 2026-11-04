@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # this setting. A paid plan is required for the feature to function; until
     # then the board still works, jobs just carry no skills/embeddings.
     GEMINI_RATE_LIMIT: str = Field(default="2/m")
+    # Project-wide budget of Gemini API calls per minute, shared by every
+    # caller in every process (job enrichment, news summaries, query
+    # embeddings) through a Redis counter. GEMINI_RATE_LIMIT above is a
+    # Celery rate limit, which applies per worker and per task type, so two
+    # workers or two task types each got the full allowance. Default sits
+    # under the free tier's 5/min. 0 disables the shared budget.
+    GEMINI_REQUESTS_PER_MINUTE: int = Field(default=4, ge=0)
 
     SECRET_KEY: str = Field(...)
 

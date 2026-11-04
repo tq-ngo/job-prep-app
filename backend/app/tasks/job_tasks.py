@@ -1,20 +1,31 @@
 import logging
 import random
-from datetime import datetime, timezone
-import json
+import re
+from datetime import datetime, timedelta
 import uuid
 import os
+from typing import Optional
 
 from sqlmodel import select
-from sqlalchemy import text, update
+from sqlalchemy import String, all_, bindparam, func, text, update
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.tasks.celery_app import celery_app
+from app.tasks.runtime import HARD_LIMIT_GRACE, run_async
 from app.scraping.parsers.github import parse_github_jobs
 from app.scraping.db_sync import DatabaseSyncService
 from app.scraping.jd_extractor import enrich_with_descriptions
-from app.core.database import create_worker_session, create_worker_session_ctx
-from app.core.datetime_utils import utc_now
+from app.core.database import create_worker_session_ctx
+from app.core.datetime_utils import as_utc, utc_now
+from app.core.locks import acquire_lock, release_lock
 from app.models.job import Job
+from app.ai.gemini_client import (
+    GeminiConfigError,
+    GeminiThrottled,
+    GeminiTransientError,
+    GeminiTruncatedError,
+    acquire_gemini_slots,
+)
 from app.ai.skill_extractor import extract_job_attributes
 from app.ai.embedder import generate_embedding
 from app.core.redis import create_worker_redis
@@ -25,58 +36,100 @@ from app.scraping.parsers.linkedin import LinkedInScraper
 
 logger = logging.getLogger(__name__)
 
-# Scrape locks must outlive a full crawl. A first crawl against an empty DB
-# fetches a JD for every posting (~1s each at concurrency 4), and the old
-# 600s TTL could expire mid-run and let a second crawl start alongside it.
-# soft_time_limit stops a hung crawl before its lock expires.
+# A first crawl against an empty DB fetches a JD for every posting (~1s each
+# at concurrency 4), so a crawl gets most of an hour. The lock must outlive
+# the hard limit, or a crawl killed at the limit could still be running when
+# the next one takes the lock.
+SCRAPE_TIMEOUT = 3300
 SCRAPE_LOCK_TTL_SECONDS = 3600
-SCRAPE_SOFT_TIME_LIMIT = 3300
+BACKFILL_TIMEOUT = 1500
+
+# Each enriched job costs two Gemini calls: attribute extraction + embedding.
+CALLS_PER_ENRICHMENT = 2
+# process_raw_jobs_batch keeps at most this many minutes of enrichment work
+# queued in the broker (at GEMINI_RATE_LIMIT). It used to claim 10 jobs a
+# minute against a 2/min drain, so the backlog grew until the reaper's
+# deadline put still-queued jobs back to 'raw' and they were enqueued twice.
+QUEUE_DEPTH_MINUTES = 2
+# Well past the longest a job can sit queued under the cap above, plus its
+# retries; only jobs whose worker died should still be 'queued' this long.
+STUCK_AFTER_MINUTES = 60
+# LinkedIn postings are never removed from a README the way GitHub's are, so
+# without this they stayed in the feed forever. A posting is retired once
+# the daily crawl hasn't seen it for this long.
+LINKEDIN_STALE_AFTER_DAYS = 21
 
 
-async def _publish_job_event(job: Job, skills: list) -> None:
+def _tasks_per_minute(rate: str) -> float:
+    """Parse a Celery rate limit ("2/m", "30/h", "1/s", or bare "5" = per second)."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(?:/\s*([smh]))?\s*", rate or "")
+    if not match:
+        return 1.0
+    count = float(match.group(1))
+    per = {"s": 1 / 60, "m": 1, "h": 60}[match.group(2) or "s"]
+    return count / per
+
+
+async def _publish_job_event(redis, job: Job, skills: list) -> None:
+    # Redis Stream, not pub/sub: pub/sub had no backlog, so any event
+    # published while a client was reconnecting was lost forever.
+    await publish_job_event(redis, job_event_payload(job, KIND_ENRICHED, skills))
+
+
+async def deactivate_unseen_github(
+    db_service: DatabaseSyncService, source_urls: list, seen_external_ids: list
+) -> int:
     """
-    Publish a new-job event for the SSE hub.
-
-    Factored out of two near-identical inline blocks that each created a fresh
-    Redis client and never closed it.
+    Deactivate GitHub postings from successfully crawled READMEs that this
+    crawl no longer lists, then relink their hashes. Does not commit.
     """
-    redis = create_worker_redis()
-    try:
-        # Redis Stream, not pub/sub: pub/sub had no backlog, so any event
-        # published while a client was reconnecting was lost forever.
-        await publish_job_event(redis, job_event_payload(job, KIND_ENRICHED, skills))
-    finally:
-        await redis.aclose()
+    stmt = (
+        update(Job)
+        .where(Job.source == "github")
+        .where(Job.source_url.in_(source_urls))
+        # One array parameter. notin_() sent one bind parameter per id, and
+        # asyncpg refuses statements with more than 32,767 of them.
+        .where(Job.external_id != all_(
+            bindparam("seen_ids", seen_external_ids, type_=ARRAY(String))
+        ))
+        .where(Job.is_active == True)  # noqa: E712
+        .values(is_active=False)
+        .returning(Job.canonical_hash)
+    )
+    deactivated = (await db_service.session.execute(stmt)).scalars().all()
+    # A deactivated canonical row must hand canonical status to an active
+    # duplicate, or that duplicate disappears from the feed.
+    await db_service.relink_hashes({h for h in deactivated if h})
+    return len(deactivated)
+
 
 @celery_app.task(
     name="app.tasks.job_tasks.scrape_github",
     bind=True,
     max_retries=3,
     queue="scraping",
-    soft_time_limit=SCRAPE_SOFT_TIME_LIMIT,
+    time_limit=SCRAPE_TIMEOUT + HARD_LIMIT_GRACE,
 )
 def scrape_github(self):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_scrape_github)(self, self.request.id)
+    return run_async(_scrape_github, self, self.request.id, timeout=SCRAPE_TIMEOUT)
 
 async def _scrape_github(self, task_id: str = None):
     """
     Celery task: scrape internship listings from GitHub repos
     """
     logger.info(f"[{task_id or self.request.id}] Starting Github scrape")
-    
+
     redis = create_worker_redis()
     lock_key = "scrape_lock:github"
-    scrape_start_time = datetime.now(timezone.utc)
 
     # Acquire the lock inside the async body so it applies to
     # BOTH API-triggered and Beat-triggered runs.
-    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=SCRAPE_LOCK_TTL_SECONDS)
-    if not lock_acquired:
+    lock_token = await acquire_lock(redis, lock_key, SCRAPE_LOCK_TTL_SECONDS)
+    if not lock_token:
         logger.info(f"[{task_id}] GitHub scrape already running — skipping (lock held)")
         await redis.aclose()
         return {"status": "skipped", "reason": "lock_held"}
-    
+
     try:
         total_stats = {"inserted": 0, "updated": 0, "skipped": 0, "linked": 0,
                        "descriptions": 0, "source": "github"}
@@ -106,7 +159,7 @@ async def _scrape_github(self, task_id: str = None):
                     batch.clear()
 
             await flush(batch)
-            
+
             # Mark stale jobs inactive: any GitHub job from a successfully-crawled
             # source that is NO LONGER in the current batch was removed from the
             # README and should be hidden from the UI.
@@ -117,34 +170,20 @@ async def _scrape_github(self, task_id: str = None):
             # And since dedup hits don't update scraped_at, EVERY existing job
             # was silently deactivated on re-run. Fixed by comparing external_ids.
             if successful_urls and seen_external_ids:
-                stmt = (
-                    update(Job)
-                    .where(Job.source == "github")
-                    .where(Job.source_url.in_(successful_urls))
-                    .where(Job.external_id.notin_(seen_external_ids))
-                    .where(Job.is_active == True)  # noqa: E712
-                    .values(is_active=False)
-                    .returning(Job.canonical_hash)
+                total_stats["deactivated"] = await deactivate_unseen_github(
+                    db_service, successful_urls, seen_external_ids
                 )
-                deactivated = (await session.execute(stmt)).scalars().all()
-                # A deactivated canonical row must hand canonical status to an
-                # active duplicate, or that duplicate disappears from the feed.
-                await db_service.relink_hashes({h for h in deactivated if h})
-                total_stats["deactivated"] = len(deactivated)
             await session.commit()
-            
+
         logger.info(f"GitHub complete: {total_stats}")
         return total_stats
     except Exception as exc:
         logger.error(f"GitHub scrape failed: {exc}", exc_info=True)
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
     finally:
-        # C4 FIX: Only release the lock if THIS task acquired it.
-        # Previously the finally always deleted the key — on a Beat-triggered
-        # run (no lock) this silently deleted a lock held by a concurrent
-        # API-triggered run, unblocking it prematurely.
-        if lock_acquired:
-            await redis.delete(lock_key)
+        # Releases only OUR lock: if this run outlived the TTL and another
+        # run now holds the key, its lock is left alone.
+        await release_lock(redis, lock_key, lock_token)
         await redis.aclose()
 
 
@@ -153,11 +192,10 @@ async def _scrape_github(self, task_id: str = None):
     bind=True,
     max_retries=1,
     queue="scraping",
-    soft_time_limit=SCRAPE_SOFT_TIME_LIMIT,
+    time_limit=SCRAPE_TIMEOUT + HARD_LIMIT_GRACE,
 )
 def scrape_linkedin(self, search_url: str):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_scrape_linkedin)(self, search_url, self.request.id)
+    return run_async(_scrape_linkedin, self, search_url, self.request.id, timeout=SCRAPE_TIMEOUT)
 
 async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     """
@@ -166,12 +204,11 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     logger.info(f"[{task_id or self.request.id}] Starting LinkedIn scrape for {search_url}")
     redis = create_worker_redis()
     lock_key = "scrape_lock:linkedin"
-    
-    # C5 FIX: Acquire the lock inside the async body so Beat-triggered
-    # runs are also protected. If the API handler already set the lock,
-    # we skip rather than running a duplicate scrape.
-    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=SCRAPE_LOCK_TTL_SECONDS)
-    if not lock_acquired:
+
+    # Acquire the lock inside the async body so Beat-triggered runs are also
+    # protected. If another run holds it, skip rather than run a duplicate.
+    lock_token = await acquire_lock(redis, lock_key, SCRAPE_LOCK_TTL_SECONDS)
+    if not lock_token:
         logger.info(f"[{task_id}] LinkedIn scrape already running — skipping (lock held)")
         await redis.aclose()
         return {"status": "skipped", "reason": "lock_held"}
@@ -195,7 +232,7 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
             max_pages=5,
             progress_callback=progress_tracker
         )
-        
+
         if not raw_jobs:
             logger.warning(f"[{task_id}] LinkedIn returned no jobs — possible rate limit or anti-bot block")
             return {"status": "failed", "reason": "no_jobs_returned"}
@@ -225,25 +262,53 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
                     batch.clear()
 
             await flush(batch)
-                
+
         logger.info(f"LinkedIn complete: {total_stats}")
         return total_stats
 
     except Exception as exc:
-        # C5 FIX: Previously there was no try/except here — any 403/429
-        # or network error crashed silently with no retry. Now it retries
-        # once (max_retries=1) with a 120s backoff before giving up.
+        # Retries once (max_retries=1) with a 120s backoff before giving up.
         logger.error(f"LinkedIn scrape failed: {exc}", exc_info=True)
         raise self.retry(exc=exc, countdown=120)
 
     finally:
-        # C5 FIX: Unconditionally release the lock on exit (success OR
-        # failure). Previously there was no finally block, so a failed
-        # LinkedIn scrape left the lock set for 600s (10 min), blocking
-        # all subsequent manual refreshes from the UI.
-        if lock_acquired:
-            await redis.delete(lock_key)
+        # Released on every exit, success or failure, but only if still ours.
+        await release_lock(redis, lock_key, lock_token)
         await redis.aclose()
+
+
+# ── AI enrichment ────────────────────────────────────────────────────────
+#
+# A job is enriched under a CLAIM: process_raw_jobs_batch sets
+# scrape_status='queued' and stamps queued_at, and passes that timestamp to
+# the task. The task proceeds, and writes its result, only while the row is
+# still queued under that same timestamp. If the reaper hands the row back
+# and it is claimed again, or a new description resets it to 'raw', the
+# older task finds its claim gone and does nothing — so a job is enriched
+# (and announced over SSE) once, not once per enqueued message.
+
+def _claimed(stmt, job_id: uuid.UUID, claimed_at: Optional[datetime]):
+    stmt = stmt.where(Job.id == job_id, Job.scrape_status == "queued")
+    if claimed_at is not None:
+        stmt = stmt.where(Job.queued_at == claimed_at)
+    return stmt
+
+
+def _holds_claim(job: Job, claimed_at: Optional[datetime]) -> bool:
+    if job.scrape_status != "queued":
+        return False
+    # Messages enqueued before claims carried a timestamp have none.
+    return claimed_at is None or as_utc(job.queued_at) == claimed_at
+
+
+async def _end_claim(job_id: uuid.UUID, claimed_at: Optional[datetime], status: str) -> bool:
+    """Move a still-claimed job to `status` ('raw' to retry later, 'failed')."""
+    async with create_worker_session_ctx() as session:
+        result = await session.execute(
+            _claimed(update(Job), job_id, claimed_at).values(scrape_status=status, queued_at=None)
+        )
+        await session.commit()
+        return bool(result.rowcount)
 
 
 @celery_app.task(
@@ -251,99 +316,128 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
     bind=True,
     max_retries=2,
     queue="ai",
-    # Must not exceed the Gemini quota. The free tier allows 5 requests/min
-    # for gemini-3.8-flash; dispatching at 15/m guaranteed a constant stream
-    # of 429s. Each job makes TWO calls (skills + embedding), so 2/m of
-    # headroom keeps us inside the limit. Override via GEMINI_RATE_LIMIT.
+    # A per-worker cap on top of the shared GEMINI_REQUESTS_PER_MINUTE
+    # budget enforced by acquire_gemini_slots.
     rate_limit=settings.GEMINI_RATE_LIMIT,
 )
-def enrich_job_with_ai(self, job_id: str):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_enrich_job_with_ai)(self, job_id, self.request.id)
+def enrich_job_with_ai(self, job_id: str, claim: Optional[str] = None):
+    return run_async(_enrich_job_with_ai, self, job_id, claim, self.request.id)
 
-async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
+async def _enrich_job_with_ai(self, job_id: str, claim: Optional[str] = None, task_id: str = None):
     """
     Celery task: enrich a single job with Gemini AI.
-    
-    Called after a job is saved to the database.
-    Extracts skills, generates embedding, updates the record.
+
+    Extracts skills, pay and level, generates the embedding, and writes them
+    back — all under the claim described above.
     """
     logger.info(f"[{task_id or self.request.id}] Enriching job {job_id}")
-    
+    jid = uuid.UUID(job_id)
+    claimed_at = datetime.fromisoformat(claim) if claim else None
+    redis = create_worker_redis()
+
     try:
         async with create_worker_session_ctx() as session:
-            job = await session.get(Job, uuid.UUID(job_id))
+            job = await session.get(Job, jid)
             if not job:
                 logger.error(f"Job {job_id} not found")
-                return
+                return "missing"
+            if not _holds_claim(job, claimed_at):
+                logger.info(f"Job {job_id} is no longer claimed by this task — skipping")
+                return "skipped"
 
-            if not job.description:
-                logger.info(f"Job {job_id} has no description — skipping AI")
-                job.scrape_status = "enriched"
-                job.enriched_at = utc_now()
-                session.add(job)
-                await session.commit()
-                # Publish even for jobs with no description — a small number
-                # of postings are behind JS-only boards that jd_extractor
-                # can't reach, and they should still appear on the live board.
-                await _publish_job_event(job, skills=[])
-                return
+            values = {"scrape_status": "enriched", "enriched_at": utc_now(), "queued_at": None}
+            skills: list = []
 
-            # One structured call: skills plus pay / seniority / employment.
-            attrs = await extract_job_attributes(job.title, job.description)
-            skills = attrs.skills
+            # Jobs with no description (JS-only boards jd_extractor can't
+            # reach) skip Gemini but are still marked done and announced.
+            if job.description:
+                # Reserve both calls up front, so a job never gets its
+                # attributes and then stalls on the embedding.
+                await acquire_gemini_slots(redis, CALLS_PER_ENRICHMENT)
 
-            # Generate vector embedding
-            text_for_embedding = f"{job.title} {job.company} {job.description}"
-            embedding = await generate_embedding(text_for_embedding)
+                # One structured call: skills plus pay / seniority / employment.
+                attrs = await extract_job_attributes(job.title, job.description)
+                skills = attrs.skills
+                embedding = await generate_embedding(f"{job.title} {job.company} {job.description}")
 
-            # Update the job record. Pay and level only fill gaps: a value
-            # that came from the source posting wins over the model's reading.
-            job.skills = skills
-            if job.salary_min is None and job.salary_max is None and attrs.salary_period:
-                job.salary_min = attrs.salary_min
-                job.salary_max = attrs.salary_max
-                job.salary_period = attrs.salary_period
-            job.seniority_level = job.seniority_level or attrs.seniority_level
-            job.employment_type = job.employment_type or attrs.employment_type
-            job.embedding = embedding
-            job.scrape_status = "enriched"
-            job.enriched_at = utc_now()   # existed on the model but was never set
+                values.update(skills=skills, embedding=embedding)
+                # Pay and level only fill gaps: a value that came from the
+                # source posting wins over the model's reading.
+                if job.salary_min is None and job.salary_max is None and attrs.salary_period:
+                    values.update(
+                        salary_min=attrs.salary_min,
+                        salary_max=attrs.salary_max,
+                        salary_period=attrs.salary_period,
+                    )
+                if not job.seniority_level and attrs.seniority_level:
+                    values["seniority_level"] = attrs.seniority_level
+                if not job.employment_type and attrs.employment_type:
+                    values["employment_type"] = attrs.employment_type
 
-            session.add(job)
+            # Conditional write: lands only if the claim survived the Gemini
+            # round trip.
+            written = (await session.execute(
+                _claimed(update(Job), jid, claimed_at)
+                .values(**values)
+                .returning(Job.is_active, Job.canonical_id)
+            )).first()
             await session.commit()
-            
-            logger.info(f"Job {job_id} enriched: {len(skills)} skills, embedding={len(embedding)}d")
-            
-            # Publish to SSE channel for live board updates
-            await _publish_job_event(job, skills=skills)
+
+        if written is None:
+            logger.info(f"Job {job_id} was re-claimed while enriching — result discarded")
+            return "superseded"
+
+        logger.info(f"Job {job_id} enriched: {len(skills)} skills")
+        # Only feed-visible rows are announced, matching db_sync's `created`
+        # events; duplicates and closed postings used to trigger skill alerts.
+        is_active, canonical_id = written
+        if is_active and canonical_id is None:
+            await _publish_job_event(redis, job, skills)
+        return "enriched"
+
+    except GeminiThrottled as exc:
+        # The shared budget is spent and no call was made. Hand the job back
+        # for the next batch instead of burning one of its retries.
+        await _end_claim(jid, claimed_at, "raw")
+        logger.info(f"Job {job_id} deferred: {exc}")
+        return "throttled"
+
+    except GeminiConfigError:
+        # A deployment fault (bad key, retired model), not this job's fault:
+        # fail loudly on the first attempt, and leave the job to be picked
+        # up again once the configuration is fixed.
+        await _end_claim(jid, claimed_at, "raw")
+        raise
+
+    except GeminiTruncatedError:
+        # Retrying the same input hits the same ceiling.
+        await _end_claim(jid, claimed_at, "failed")
+        raise
+
+    except GeminiTransientError as exc:
+        if self.request.retries >= self.max_retries:
+            # Out of retries on an upstream blip: requeue rather than park
+            # the job as failed for good.
+            await _end_claim(jid, claimed_at, "raw")
+            raise
+        # Honour the delay the provider asked for. A flat 30s retry against a
+        # 5 req/min free-tier quota just re-saturates it.
+        countdown = (exc.retry_after or 30) + random.randint(2, 10)  # jitter: don't sync workers
+        raise self.retry(exc=exc, countdown=countdown)
 
     except Exception as exc:
         logger.error(f"AI enrichment failed for job {job_id}: {exc}")
-
-        # Dead Letter Queue: on the final attempt, park the job as failed so
-        # it stops being re-selected by process_raw_jobs_batch.
         if self.request.retries >= self.max_retries:
-            async with create_worker_session_ctx() as session:
-                job = await session.get(Job, uuid.UUID(job_id))
-                if job:
-                    job.scrape_status = "failed"
-                    session.add(job)
-                    await session.commit()
+            # Dead letter: park as failed so it stops being re-selected.
+            await _end_claim(jid, claimed_at, "failed")
             logger.warning(f"Job {job_id} marked as failed after max retries")
             # Re-raise the ORIGINAL error. Calling self.retry() here raised
-            # MaxRetriesExceededError, which masked the real cause in Flower
-            # and in the logs.
+            # MaxRetriesExceededError, which masked the real cause.
             raise
+        raise self.retry(exc=exc, countdown=30)
 
-        # Honour the delay the provider asked for. A flat 30s retry against a
-        # 5 req/min free-tier quota just re-saturates it, turning one 429 into
-        # a self-sustaining retry storm.
-        countdown = 30
-        retry_after = getattr(exc, "retry_after", None)
-        if retry_after:
-            countdown = retry_after + random.randint(2, 10)  # jitter: don't sync workers
-        raise self.retry(exc=exc, countdown=countdown)
+    finally:
+        await redis.aclose()
 
 
 @celery_app.task(
@@ -353,28 +447,33 @@ async def _enrich_job_with_ai(self, job_id: str, task_id: str = None):
     queue="ai",
 )
 def process_raw_jobs_batch(self, batch_size: int = 10):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_process_raw_jobs_batch)(self, batch_size, self.request.id)
+    return run_async(_process_raw_jobs_batch, self, batch_size, self.request.id)
 
 async def _process_raw_jobs_batch(self, batch_size: int = 10, task_id: str = None):
     """
     Periodic task: claim 'raw' jobs and enqueue them for AI enrichment.
 
-    Jobs are CLAIMED (status raw -> queued) in the same transaction that
-    selects them, using FOR UPDATE SKIP LOCKED. Previously this selected
-    `scrape_status == 'raw' LIMIT 10` and left the status untouched: since
-    enrich_job_with_ai is async and rate-limited to 15/min, the same ten rows
-    were still 'raw' when beat fired again 60s later, so they were re-enqueued
-    every single minute until they happened to drain — duplicated Gemini spend
-    and duplicated SSE publishes for every job.
+    Jobs are CLAIMED (status raw -> queued) in the same statement that
+    selects them, using FOR UPDATE SKIP LOCKED, and each message carries its
+    claim timestamp. The number claimed tops the queue up to
+    QUEUE_DEPTH_MINUTES of work at GEMINI_RATE_LIMIT, never more.
     """
     logger.info(f"[{task_id or self.request.id}] Starting AI Enrichment Batch")
 
+    capacity = max(1, round(_tasks_per_minute(settings.GEMINI_RATE_LIMIT) * QUEUE_DEPTH_MINUTES))
+
     try:
         async with create_worker_session_ctx() as session:
+            queued = (await session.execute(
+                select(func.count()).select_from(Job).where(Job.scrape_status == "queued")
+            )).scalar_one()
+            limit = min(batch_size, capacity - queued)
+            if limit <= 0:
+                return f"Queue full ({queued} queued)"
+
             # SKIP LOCKED lets concurrent beat ticks / multiple workers claim
             # disjoint rows instead of contending on the same ones.
-            claimed = await session.execute(
+            claimed = (await session.execute(
                 text(
                     """
                     UPDATE jobs SET scrape_status = 'queued', queued_at = NOW()
@@ -385,21 +484,20 @@ async def _process_raw_jobs_batch(self, batch_size: int = 10, task_id: str = Non
                         LIMIT :limit
                         FOR UPDATE SKIP LOCKED
                     )
-                    RETURNING id
+                    RETURNING id, queued_at
                     """
                 ),
-                {"limit": batch_size},
-            )
-            job_ids = [row[0] for row in claimed]
+                {"limit": limit},
+            )).all()
             await session.commit()
 
-            if not job_ids:
+            if not claimed:
                 return "No raw jobs found"
 
-            for job_id in job_ids:
-                enrich_job_with_ai.delay(str(job_id))
+            for job_id, queued_at in claimed:
+                enrich_job_with_ai.delay(str(job_id), as_utc(queued_at).isoformat())
 
-            return f"Enqueued {len(job_ids)} jobs for enrichment"
+            return f"Enqueued {len(claimed)} jobs for enrichment"
 
     except Exception as exc:
         # Re-raise: swallowing this returned None and made failures invisible
@@ -413,18 +511,18 @@ async def _process_raw_jobs_batch(self, batch_size: int = 10, task_id: str = Non
     bind=True,
     queue="ai",
 )
-def requeue_stuck_jobs(self, stale_after_minutes: int = 30):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_requeue_stuck_jobs)(self, stale_after_minutes)
+def requeue_stuck_jobs(self, stale_after_minutes: int = STUCK_AFTER_MINUTES):
+    return run_async(_requeue_stuck_jobs, self, stale_after_minutes)
 
 
-async def _requeue_stuck_jobs(self, stale_after_minutes: int = 30):
+async def _requeue_stuck_jobs(self, stale_after_minutes: int = STUCK_AFTER_MINUTES):
     """
     Return jobs stranded in 'queued' back to 'raw'.
 
     Claiming rows means a worker that dies mid-enrichment leaves them
     'queued' forever. This reaper is the counterpart that makes the claim
-    safe.
+    safe; clearing queued_at also voids the dead task's claim, so a message
+    for it that is redelivered later does nothing.
     """
     async with create_worker_session_ctx() as session:
         result = await session.execute(
@@ -448,14 +546,50 @@ async def _requeue_stuck_jobs(self, stale_after_minutes: int = 30):
         logger.warning("Requeued %d jobs stuck in 'queued'", count)
     return f"Requeued {count}"
 
+
+@celery_app.task(
+    name="app.tasks.job_tasks.deactivate_stale_jobs",
+    bind=True,
+    queue="default",
+)
+def deactivate_stale_jobs(self, source: str = "linkedin", max_age_days: int = LINKEDIN_STALE_AFTER_DAYS):
+    return run_async(_deactivate_stale_jobs, self, source, max_age_days)
+
+
+async def _deactivate_stale_jobs(self, source: str, max_age_days: int):
+    """
+    Retire postings a crawl hasn't seen for `max_age_days`.
+
+    scraped_at is refreshed every time a crawl sees a posting (db_sync
+    _touch / upsert), so it is the "last seen" time.
+    """
+    cutoff = utc_now() - timedelta(days=max_age_days)
+    async with create_worker_session_ctx() as session:
+        deactivated = (await session.execute(
+            update(Job)
+            .where(Job.source == source)
+            .where(Job.is_active == True)  # noqa: E712
+            .where(Job.scraped_at < cutoff)
+            .values(is_active=False)
+            .returning(Job.canonical_hash)
+        )).scalars().all()
+        # As with the GitHub deactivation: an active duplicate must take
+        # over canonical status, or it vanishes from the feed too.
+        await DatabaseSyncService(session).relink_hashes({h for h in deactivated if h})
+        await session.commit()
+    if deactivated:
+        logger.info("Deactivated %d %s postings unseen for %d days", len(deactivated), source, max_age_days)
+    return f"Deactivated {len(deactivated)}"
+
+
 @celery_app.task(
     name="app.tasks.job_tasks.backfill_descriptions",
     bind=True,
     queue="scraping",
+    time_limit=BACKFILL_TIMEOUT + HARD_LIMIT_GRACE,
 )
 def backfill_descriptions(self, batch_size: int = 50):
-    from asgiref.sync import async_to_sync
-    return async_to_sync(_backfill_descriptions)(self, batch_size)
+    return run_async(_backfill_descriptions, self, batch_size, timeout=BACKFILL_TIMEOUT)
 
 
 async def _backfill_descriptions(self, batch_size: int = 50):
@@ -473,13 +607,16 @@ async def _backfill_descriptions(self, batch_size: int = 50):
     """
     async with create_worker_session_ctx() as session:
         rows = (await session.execute(
-            select(Job)
+            select(Job.id, Job.external_id, Job.source, Job.apply_url)
             .where(Job.description.is_(None))
             .where(Job.description_fetched_at.is_(None))
             .where(Job.is_active == True)  # noqa: E712
             .order_by(Job.scraped_at.desc())
             .limit(batch_size)
-        )).scalars().all()
+        )).all()
+        # End the read transaction before the network fetch; holding it open
+        # left Postgres "idle in transaction" for the whole fetch.
+        await session.commit()
 
         if not rows:
             return "Nothing to backfill"
@@ -497,15 +634,28 @@ async def _backfill_descriptions(self, batch_size: int = 50):
 
         now = utc_now()
         requeued = 0
-        for job, record in zip(rows, records):
-            job.description_fetched_at = now
+        for row, record in zip(rows, records):
+            values = {"description_fetched_at": now}
             if record.get("description"):
-                job.description = record["description"]
-                job.description_source = record.get("description_source")
                 # Force re-enrichment now that there is text to analyse.
-                job.scrape_status = "raw"
+                # Resetting to 'raw' even from 'queued' voids an in-flight
+                # claim that would otherwise mark the job enriched without
+                # ever reading this description.
+                values.update(
+                    description=record["description"],
+                    description_source=record.get("description_source"),
+                    scrape_status="raw",
+                    queued_at=None,
+                )
+            # Guarded on description IS NULL: a crawl may have filled it
+            # while we were fetching.
+            result = await session.execute(
+                update(Job)
+                .where(Job.id == row.id, Job.description.is_(None))
+                .values(**values)
+            )
+            if record.get("description") and result.rowcount:
                 requeued += 1
-            session.add(job)
         await session.commit()
 
     logger.info("Backfill: %d/%d rows gained a description", filled, len(rows))

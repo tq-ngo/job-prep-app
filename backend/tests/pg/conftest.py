@@ -10,6 +10,7 @@ import os
 from typing import AsyncGenerator
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 PG_TEST_URL = os.environ.get("PG_TEST_URL")
@@ -33,6 +34,29 @@ async def pg_engine() -> AsyncGenerator[AsyncEngine, None]:
         yield engine
     finally:
         await engine.dispose()
+
+
+@pytest.fixture
+async def worker_db(pg_engine: AsyncEngine) -> AsyncGenerator[AsyncEngine, None]:
+    """For code that opens its own sessions (Celery task bodies use
+    create_worker_session_ctx on settings.DATABASE_URL) and commits, so the
+    rollback trick in pg_session can't contain it. Requires DATABASE_URL to
+    point at the PG_TEST_URL database; empties the tables before and after.
+    """
+    from app.config import settings
+
+    if settings.DATABASE_URL != PG_TEST_URL:
+        pytest.skip("DATABASE_URL must equal PG_TEST_URL for worker-session tests")
+
+    async def _truncate():
+        async with pg_engine.begin() as conn:
+            await conn.execute(text("TRUNCATE jobs, news_articles CASCADE"))
+
+    await _truncate()
+    try:
+        yield pg_engine
+    finally:
+        await _truncate()
 
 
 @pytest.fixture
