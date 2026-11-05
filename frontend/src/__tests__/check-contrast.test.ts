@@ -1,58 +1,49 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { PAIRS, composite, evaluate, ratio } from "../../scripts/contrast-pairs.mjs";
 
-describe("WCAG 2.1 Contrast Tokens (src/app/globals.css)", () => {
-  const cssPath = path.resolve(__dirname, "../app/globals.css");
-  const css = readFileSync(cssPath, "utf8");
+const css = readFileSync(path.resolve(__dirname, "../app/globals.css"), "utf8");
 
-  function extractTokens(selector: string): Record<string, string> {
-    const block = css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-    return Object.fromEntries(
-      [...block.matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2]])
-    );
-  }
+describe("WCAG 2.1 contrast tokens (src/app/globals.css)", () => {
+  const results = evaluate(css);
 
-  const luminance = (hex: string) => {
-    const [r, g, b] = [1, 3, 5].map((i) => {
-      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
+  it.each(["light", "dark"])("every pair meets its minimum in the %s theme", (theme) => {
+    const failures = results
+      .filter((r) => r.theme === theme && !r.ok)
+      .map((r) =>
+        r.missing
+          ? `missing token --${r.missing}`
+          : `${r.fg} on ${r.bg}: ${r.ratio.toFixed(2)} < ${r.min}`,
+      );
+    expect(failures).toEqual([]);
+  });
 
-  const ratio = (a: string, b: string) => {
-    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-    return (hi + 0.05) / (lo + 0.05);
-  };
+  it("checks every pair in both themes", () => {
+    expect(results).toHaveLength(PAIRS.length * 2);
+  });
 
-  const PAIRS: [string, string, number][] = [
-    ["foreground", "background", 4.5],
-    ["foreground-heading", "background", 4.5],
-    ["foreground-muted", "background", 4.5],
-    ["foreground-subtle", "background", 4.5],
-    ["foreground-subtle", "neutral-soft", 4.5],
-    ["spruce-green", "background", 4.5],
-    ["amber-clay", "background", 4.5],
-    ["background", "spruce-green", 4.5],
-  ];
+  it("matches published WCAG reference ratios", () => {
+    expect(ratio("#000000", "#ffffff")).toBeCloseTo(21, 5);
+    expect(ratio("#777777", "#ffffff")).toBeCloseTo(4.48, 2);
+  });
 
-  const light = extractTokens(":root");
-  const dark = { ...light, ...extractTokens("\\.dark") };
+  it("composites translucent tints over the surface", () => {
+    expect(composite("#000000", 0.5, "#ffffff")).toBe("#808080");
+    expect(composite("#b45309", 0, "#faf9f5")).toBe("#faf9f5");
+  });
 
-  it.each([
-    ["light", light],
-    ["dark", dark],
-  ])("verifies all core text pairs exceed 4.5:1 ratio in %s theme", (themeName, themeTokens) => {
-    for (const [fg, bg, min] of PAIRS) {
-      expect(themeTokens[fg], `Missing token --${fg} in ${themeName}`).toBeDefined();
-      expect(themeTokens[bg], `Missing token --${bg} in ${themeName}`).toBeDefined();
-      const r = ratio(themeTokens[fg], themeTokens[bg]);
-      expect(
-        r,
-        `${themeName}: ${fg} on ${bg} (${themeTokens[fg]} on ${themeTokens[bg]}) ratio ${r.toFixed(2)} is below ${min}:1`
-      ).toBeGreaterThanOrEqual(min);
-    }
+  it("would catch a failing tint pair", () => {
+    // Plain amber-clay on its own 10% tint is the pair that used to fail.
+    const [light] = evaluate(css, [["amber-clay", "amber-clay/10", 4.5]]);
+    expect(light.ok).toBe(false);
+  });
+
+  it("keeps the dark-mode text hierarchy ordered", () => {
+    const dark = results.filter((r) => r.theme === "dark" && r.bg === "background");
+    const get = (fg: string) => dark.find((r) => r.fg === fg)!.ratio;
+    expect(get("foreground-heading")).toBeGreaterThan(get("foreground"));
+    expect(get("foreground")).toBeGreaterThan(get("foreground-muted"));
+    expect(get("foreground-muted")).toBeGreaterThan(get("foreground-subtle"));
   });
 });
-

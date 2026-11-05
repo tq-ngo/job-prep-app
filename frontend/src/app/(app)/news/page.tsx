@@ -3,8 +3,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { newsApi } from "@/lib/api";
 import { useState } from "react";
-import { ExternalLink, Radio, Loader2, RefreshCw, Clock, Tag } from "lucide-react";
+import { ExternalLink, Radio, RefreshCw, Clock, Tag, Newspaper } from "lucide-react";
 import { useScrapePolling } from "@/hooks/useScrapePolling";
+import Alert from "@/components/ui/Alert";
+import Badge from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import Card, { cardClasses } from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import Field from "@/components/ui/Field";
+import { Input } from "@/components/ui/Input";
+import Skeleton, { SkeletonGroup } from "@/components/ui/Skeleton";
+import Spinner from "@/components/ui/Spinner";
 
 function timeAgo(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -101,71 +110,56 @@ export default function NewsPage() {
               }
             </p>
           </div>
-          <button
+          <Button
+            size="sm"
             onClick={() => triggerLinkedInRefresh()}
             disabled={isBusy}
-            className="flex items-center gap-2 bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-foreground-subtle text-warm-ivory px-4 py-2 rounded font-sans font-medium transition-colors text-xs border border-transparent disabled:border-slate-soft shadow-xs"
+            loading={isRefreshing || !!refreshTaskId}
+            icon={<RefreshCw size={13} aria-hidden="true" />}
           >
-            {(isRefreshing || refreshTaskId) ? (
-              <>
-                <Loader2 size={13} className="animate-spin" /> Fetching...
-              </>
-            ) : (
-              <>
-                <RefreshCw size={13} /> Refresh News
-              </>
-            )}
-          </button>
+            {isRefreshing || refreshTaskId ? "Fetching..." : "Refresh News"}
+          </Button>
         </div>
 
         {/* Scrape new article */}
-        <div className="bg-neutral-soft border border-slate-soft rounded-lg p-5 mb-8">
-          <h3 className="text-xs font-sans font-medium text-slate-ink mb-3 flex items-center gap-2">
-            <Radio size={14} className="text-spruce-green" /> Add Article to Radar
-          </h3>
-          <form onSubmit={handleScrape} className="flex gap-2">
-            <input
-              type="url"
-              required
-              value={scrapeUrl}
-              onChange={(e) => setScrapeUrl(e.target.value)}
-              placeholder="https://techcrunch.com/article..."
-              className="flex-1 bg-background border border-slate-soft text-slate-ink px-3.5 py-2 rounded focus:outline-none focus:ring-1 focus:ring-spruce-green text-xs placeholder:text-foreground-subtle transition-all font-sans"
-            />
-            <button 
-              type="submit" 
-              disabled={isBusy}
-              className="bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-foreground-subtle text-warm-ivory px-4 py-2 rounded font-sans font-medium transition-colors text-xs border border-transparent flex items-center gap-1.5"
-            >
-              {(isPending || taskId) ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" /> Analyzing...
-                </>
-              ) : (
-                "Analyze"
-              )}
-            </button>
+        <Card as="section" tone="muted" padding="sm" className="mb-8" aria-labelledby="add-article-heading">
+          <h2 id="add-article-heading" className="text-xs font-sans font-medium text-slate-ink mb-3 flex items-center gap-2">
+            <Radio size={14} aria-hidden="true" className="text-spruce-green" /> Add Article to Radar
+          </h2>
+          <form onSubmit={handleScrape} className="flex gap-2 items-start">
+            <Field label="Article URL" labelVisible={false} className="flex-1">
+              <Input
+                size="sm"
+                type="url"
+                required
+                value={scrapeUrl}
+                onChange={(e) => setScrapeUrl(e.target.value)}
+                placeholder="https://techcrunch.com/article..."
+              />
+            </Field>
+            <Button type="submit" size="sm" disabled={isBusy} loading={isPending || !!taskId}>
+              {isPending || taskId ? "Analyzing..." : "Analyze"}
+            </Button>
           </form>
-        </div>
+        </Card>
 
         {statusMsg && (
-          <div className="bg-spruce-green/10 border border-spruce-green/30 text-spruce-green px-4 py-3 rounded mb-8 font-mono text-xs flex items-center gap-2 animate-pulse">
-            <Loader2 size={14} className="animate-spin" />
+          <Alert icon={<Spinner />} className="mb-8">
             {statusMsg}
-          </div>
+          </Alert>
         )}
 
         {/* Articles Feed */}
         {isLoading ? (
-          <div className="space-y-6">
-            {[1,2,3].map(i => (
-              <div key={i} className="h-32 bg-neutral-soft rounded border border-slate-soft animate-pulse flex flex-col justify-center px-6">
-                <div className="h-3 bg-slate-soft/70 rounded w-24 mb-4"></div>
-                <div className="h-6 bg-slate-soft rounded w-3/4 mb-3"></div>
-                <div className="h-4 bg-slate-soft/50 rounded w-full max-w-2xl"></div>
-              </div>
+          <SkeletonGroup label="Loading articles" className="space-y-6">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} tone="muted" className="h-32 flex flex-col justify-center">
+                <Skeleton className="h-3 w-24 mb-4" />
+                <Skeleton className="h-6 w-3/4 mb-3" />
+                <Skeleton className="h-4 w-full max-w-2xl" />
+              </Card>
             ))}
-          </div>
+          </SkeletonGroup>
         ) : (
           <div className="space-y-6">
             {articles?.map((article) => (
@@ -174,20 +168,20 @@ export default function NewsPage() {
                 target="_blank" 
                 rel="noreferrer"
                 key={article.id} 
-                className="block bg-background border border-slate-soft p-8 rounded hover:bg-neutral-soft transition-colors duration-200 group"
+                className={cardClasses({ padding: "lg", className: "block hover:bg-neutral-soft transition-colors duration-200 group" })}
               >
                 {/* Source domain + categories + date */}
                 <div className="flex items-center gap-3 mb-4 flex-wrap">
-                  <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-amber-clay">
+                  <span className="font-mono text-2xs font-medium uppercase tracking-wider text-amber-clay">
                     {article.source_domain}
                   </span>
                   {article.categories?.map(cat => (
-                    <span key={cat} className="font-mono text-[11px] font-medium uppercase tracking-wider text-spruce-green/70">
+                    <span key={cat} className="font-mono text-2xs font-medium uppercase tracking-wider text-spruce-green">
                       • {cat}
                     </span>
                   ))}
                   {article.published_at && (
-                    <span className="ml-auto font-mono text-[11px] text-foreground-subtle flex items-center gap-1">
+                    <span className="ml-auto font-mono text-2xs text-foreground-subtle flex items-center gap-1">
                       <Clock size={10} />
                       {new Date(article.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
@@ -195,29 +189,29 @@ export default function NewsPage() {
                 </div>
 
                 {/* Title */}
-                <h3 className="text-xl font-serif font-medium text-slate-ink group-hover:text-spruce-green transition-colors mb-3 flex items-start gap-2">
+                <h2 className="text-xl font-serif font-medium text-slate-ink group-hover:text-spruce-green transition-colors mb-3 flex items-start gap-2">
                   {article.title} <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-spruce-green" />
-                </h3>
+                </h2>
 
                 {/* Summary */}
                 <p className="font-sans text-sm text-foreground-muted leading-relaxed line-clamp-3">
                   {article.summary || "No summary available."}
                 </p>
                 {!article.enriched_at && (
-                  <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-foreground-subtle">
-                    <Loader2 size={11} className="animate-spin" /> AI summary pending
+                  <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider text-foreground-subtle">
+                    <Spinner size={11} /> AI summary pending
                   </p>
                 )}
 
                 {/* Tags + analyzed time */}
                 <div className="flex items-center gap-2 mt-4 flex-wrap">
                   {article.tags?.map(tag => (
-                    <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-soft/50 text-foreground-muted font-mono text-[11px] uppercase tracking-wider">
-                      <Tag size={8} /> {tag}
-                    </span>
+                    <Badge key={tag}>
+                      <Tag size={8} aria-hidden="true" /> {tag}
+                    </Badge>
                   ))}
                   {article.scraped_at && (
-                    <span className="ml-auto font-mono text-[11px] text-foreground-subtle">
+                    <span className="ml-auto font-mono text-2xs text-foreground-subtle">
                       Analyzed {timeAgo(article.scraped_at)}
                     </span>
                   )}
@@ -225,14 +219,15 @@ export default function NewsPage() {
               </a>
             ))}
             {(!articles || articles.length === 0) && (
-              <div className="text-center py-24">
-                <p className="font-serif text-slate-ink mb-2">
-                  Radar is empty.
-                </p>
-                <p className="font-sans text-xs text-foreground-muted">
-                  Click <strong className="text-spruce-green">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
-                </p>
-              </div>
+              <EmptyState
+                icon={<Newspaper size={22} />}
+                title="Radar is empty."
+                description={
+                  <>
+                    Click <strong className="text-spruce-green">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
+                  </>
+                }
+              />
             )}
           </div>
         )}

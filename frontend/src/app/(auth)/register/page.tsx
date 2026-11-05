@@ -4,6 +4,11 @@ import { useState } from "react";
 import { authApi } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import AuthCard from "../AuthCard";
+import Alert from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
+import Field from "@/components/ui/Field";
+import { Input } from "@/components/ui/Input";
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -40,48 +45,40 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4 font-sans">
-      <div className="w-full max-w-sm bg-neutral-soft border border-slate-soft p-8 rounded">
-        <h1 className="text-2xl font-serif font-medium text-slate-ink mb-2 text-center">Create Account</h1>
-        <p className="text-foreground-muted text-center mb-8 text-sm">Join JobPrep to track job listings</p>
-        
-        {error && (
-          <div className="bg-amber-clay/10 border border-amber-clay/30 text-amber-clay text-sm px-4 py-3 rounded mb-6">
-            {error}
-          </div>
-        )}
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-1.5">Email</label>
-            <input 
-              type="email" value={email} onChange={e => setEmail(e.target.value)} 
-              className="w-full bg-background border border-slate-soft rounded px-4 py-3 text-slate-ink focus:outline-none focus:ring-1 focus:ring-spruce-green text-sm transition-all" 
-              required 
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-1.5">Password</label>
-            <input 
-              type="password" value={password} onChange={e => setPassword(e.target.value)} 
-              className="w-full bg-background border border-slate-soft rounded px-4 py-3 text-slate-ink focus:outline-none focus:ring-1 focus:ring-spruce-green text-sm transition-all" 
-              minLength={8} required 
-            />
-          </div>
-          <button 
-            type="submit" 
-            disabled={isLoading}
-            className="w-full bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-foreground-subtle text-warm-ivory py-3 rounded font-medium transition-colors text-sm"
-          >
-            {isLoading ? "Creating account..." : "Create Account"}
-          </button>
-        </form>
-        
-        <p className="mt-6 text-center text-sm text-foreground-muted">
+    <AuthCard
+      title="Create Account"
+      subtitle="Join JobPrep to track job listings"
+      footer={
+        <>
           Already have an account?{" "}
           <Link href="/login" className="text-spruce-green hover:text-spruce-green-hover font-medium">Sign in</Link>
-        </p>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {error && (
+        <Alert variant="error" className="mb-6">
+          {error}
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Email">
+          <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </Field>
+        <Field label="Password" hint="At least 8 characters, with an uppercase letter, a lowercase letter and a digit.">
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={8}
+            required
+          />
+        </Field>
+        <Button type="submit" size="lg" block loading={isLoading}>
+          {isLoading ? "Creating account..." : "Create Account"}
+        </Button>
+      </form>
+    </AuthCard>
   );
 }

@@ -5,41 +5,67 @@
    inline script in layout.tsx), so bind the variant to that class. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Every colour pair below is checked by `npm run check:contrast`
-   (scripts/check-contrast.mjs); keep that list in sync when adding tokens. */
+/* ── Colour tokens ────────────────────────────────────────────────────────
+   Raw values live here; the @theme block below exposes them as utilities.
+   Some utility names predate the tokens and are kept to avoid churn:
+
+     utility            token                  role
+     bg-background      --background           page surface
+     bg-neutral-soft    --neutral-soft         raised surface (cards, panels)
+     text-slate-ink     --foreground-heading   headings, emphasised text
+     text-foreground    --foreground           body text
+     text-foreground-muted / -subtle           secondary / tertiary text
+     border-slate-soft  --border-soft          dividers, card edges (decorative)
+     border-border-strong --border-strong      input/select edges (3:1, WCAG 1.4.11)
+     text-warm-ivory    --background           label on a spruce-green button
+     *-spruce-green     --spruce-green         primary accent
+     *-amber-clay       --amber-clay           secondary accent (sources, warnings)
+     text-amber-clay-on-tint                   amber text on a bg-amber-clay/10 tint
+
+   Every pair that matters is checked by `npm run check:contrast`
+   (scripts/contrast-pairs.mjs, also run as a unit test). Add new pairs
+   there when adding tokens. Use these, never fractional-opacity text
+   (`text-foreground/60`), which composites toward the surface and fails. */
 
 :root {
+  color-scheme: light;
+
   --background: #faf9f5;
   --foreground: #2d2c2a;
   --foreground-heading: #141413;
+  --foreground-muted: #57544d;   /* 7.0:1 */
+  --foreground-subtle: #6b6760;  /* 5.3:1 */
   --spruce-green: #1b3b2b;
   --spruce-green-hover: #143224;
   --amber-clay: #b45309;
+  /* #b45309 is only 4.2:1 on its own 10% tint, so tinted badges and
+     alerts use this darker clay instead (5.2:1). */
+  --amber-clay-on-tint: #9a4a0a;
   --border-soft: #e6e4de;
+  --border-strong: #8a857b;      /* 3.5:1 */
+  --focus-ring: #1b3b2b;
   --neutral-soft: #fcfbfa;
-
-  /* Explicit muted tones replacing fractional-opacity text utilities.
-     `text-foreground/40` etc. composited toward the background and failed
-     WCAG AA: /60 measured 3.4:1 and /40 measured 2.2:1 against #0f1115.
-     These are fixed colours with verified ratios. */
-  --foreground-muted: #57544d;   /* ~7.0:1 on #faf9f5  (AAA body) */
-  --foreground-subtle: #6b6760;  /* ~5.1:1 on #faf9f5  (AA)       */
 }
 
-/* Warm dark palette. The previous one switched to cool slate (#0f1115 /
-   #94a3b8 / #1e293b), which broke the editorial ivory/ink look of light mode. */
+/* Warm dark palette, matching light mode's editorial ivory/ink look. */
 .dark {
-  --background: #1a1915;
-  --foreground: #c9c5bb;         /* 10.2:1 */
-  --foreground-heading: #f2efe8; /* 15.3:1 */
-  --spruce-green: #5fd39b;       /*  9.5:1 */
-  --spruce-green-hover: #4bc48a;
-  --amber-clay: #f0a03c;         /*  8.2:1 */
-  --border-soft: #2e2c27;
-  --neutral-soft: #24221e;
+  color-scheme: dark;
 
-  --foreground-muted: #d3cfc5;   /* 11.3:1 on #1a1915 (AAA) */
-  --foreground-subtle: #a8a398;  /*  7.0:1 on #1a1915 (AAA) */
+  --background: #1a1915;
+  --foreground: #d3cfc5;         /* 11.3:1 */
+  --foreground-heading: #f2efe8; /* 15.3:1 */
+  /* Muted must sit between body text and subtle. It used to be brighter
+     than --foreground, which inverted the hierarchy in dark mode. */
+  --foreground-muted: #bab5aa;   /*  8.6:1 */
+  --foreground-subtle: #a8a398;  /*  7.0:1 */
+  --spruce-green: #5fd39b;
+  --spruce-green-hover: #4bc48a;
+  --amber-clay: #f0a03c;
+  --amber-clay-on-tint: #f0a03c; /* already 6.9:1 on its tint */
+  --border-soft: #2e2c27;
+  --border-strong: #77726a;      /* 3.7:1 */
+  --focus-ring: #5fd39b;
+  --neutral-soft: #24221e;
 }
 
 @theme inline {
@@ -50,7 +76,10 @@
   --color-spruce-green: var(--spruce-green);
   --color-spruce-green-hover: var(--spruce-green-hover);
   --color-amber-clay: var(--amber-clay);
+  --color-amber-clay-on-tint: var(--amber-clay-on-tint);
   --color-slate-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
+  --color-focus-ring: var(--focus-ring);
   --color-foreground-muted: var(--foreground-muted);
   --color-foreground-subtle: var(--foreground-subtle);
   --color-neutral-soft: var(--neutral-soft);
@@ -66,6 +95,22 @@
   --animate-fadeSlideIn: fadeSlideIn 0.4s ease-out both;
 }
 
+/* ── Scale tokens ─────────────────────────────────────────────────────── */
+@theme {
+  /* `text-2xs`: the mono labels and pills (was ~60 copies of text-[11px]). */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --radius-control: 0.25rem; /* `rounded-control`: buttons, inputs, badges */
+  --radius-card: 0.5rem;     /* `rounded-card`: cards and panels */
+
+  --shadow-card: 0 1px 2px 0 rgb(20 20 19 / 0.05);
+  --shadow-pop: 0 16px 40px -12px rgb(20 20 19 / 0.25);
+
+  /* `max-w-app`: the signed-in app's content width (navbar and pages). */
+  --container-app: 1500px;
+}
+
 @keyframes fadeSlideIn {
   from {
     opacity: 0;
@@ -77,12 +122,39 @@
   }
 }
 
-body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-jakarta), system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer base {
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-jakarta), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* One visible focus indicator for every focusable element, keyboard
+     only (:focus-visible), 3:1 against both surfaces. Don't remove it with
+     `outline-none`; adjust the offset if it collides with a neighbour.
+     The resting colour is set too: `transition-colors` animates
+     outline-color, so the ring used to fade in from currentColor (ivory
+     on a green button) instead of appearing at once. */
+  *,
+  ::before,
+  ::after {
+    outline-color: var(--focus-ring);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Hide a scrollbar on a horizontally scrolling strip (pill rows). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Custom scrollbar */
@@ -101,4 +173,18 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--foreground);
+}
+
+/* Users who ask the OS for less motion get none: pulses, spins, slide-ins
+   and colour fades all finish instantly. Outside any layer so it beats
+   the utilities that set durations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
