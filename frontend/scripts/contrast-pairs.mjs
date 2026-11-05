@@ -33,6 +33,11 @@ export const PAIRS = [
   ["amber-clay-on-tint", "amber-clay/10", 4.5],
   ["foreground-heading", "border-soft/40", 4.5], // ghost button hover (bg-slate-soft/40)
 
+  // Job list rows: selected (bg-spruce-green/5) and hovered (bg-slate-soft/30)
+  ["foreground-subtle", "spruce-green/5", 4.5],
+  ["foreground-muted", "spruce-green/5", 4.5],
+  ["foreground-subtle", "border-soft/30", 4.5],
+
   // Non-text: input borders and the focus ring must be visible (3:1)
   ["border-strong", "background", 3],
   ["border-strong", "neutral-soft", 3],

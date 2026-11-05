@@ -1,27 +1,34 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { JobListResponse } from "@/lib/api";
+import { parseJobFilters, toListParams } from "@/lib/job-filters";
+import { INTERNAL_API_URL } from "@/lib/server-api";
+import { JobListSkeleton } from "@/components/jobs/JobList";
 import JobFeed from "./JobFeed";
 
-export default async function JobsPage() {
-  let initialData: JobListResponse | undefined = undefined;
-  let initialDataUpdatedAt: number | undefined = undefined;
+type SearchParams = Record<string, string | string[] | undefined>;
 
+export default async function JobsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  // Seed the page the URL asks for. This used to always fetch page 1 with no
+  // filters, so a reload of ?category=Quant&page=2 rendered the wrong rows
+  // and then fetched the right ones from the browser.
+  const params = await searchParams;
+  const filters = parseJobFilters((k) => {
+    const v = params[k];
+    return typeof v === "string" ? v : null;
+  });
+
+  let initialData: JobListResponse | undefined;
+  let initialDataUpdatedAt: number | undefined;
   try {
-    // Server-side fetches need an absolute URL; the browser-facing origin
-    // is relative now, so this is always the internal address.
-    const apiUrl = process.env.INTERNAL_API_URL || "http://localhost:8000";
-
-    // Forward the caller's cookies. This fetch previously went out with NO
-    // credentials against an endpoint that accepted anonymous callers, so the
-    // job data was embedded in the RSC payload and shipped to anyone who
-    // requested /jobs — the client-side AuthGuard only blanked the UI long
-    // after the bytes had left the server.
+    const query = new URLSearchParams(
+      Object.entries(toListParams(filters)).map(([k, v]) => [k, String(v)]),
+    );
+    // Forward the caller's cookies: the list is per-user and authenticated,
+    // so it must never be fetched anonymously or cached across users.
     const cookieHeader = (await cookies()).toString();
-
-    const res = await fetch(`${apiUrl}/api/v1/jobs/?page=1&page_size=30`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/v1/jobs/?${query}`, {
       headers: cookieHeader ? { cookie: cookieHeader } : {},
-      // Per-user data must never be cached and shared between users.
       cache: "no-store",
     });
     if (res.ok) {
@@ -35,14 +42,9 @@ export default async function JobsPage() {
   }
 
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-background text-foreground-muted flex items-center justify-center font-sans text-xs">
-          Loading jobs...
-        </div>
-      }
-    >
-      <JobFeed initialData={initialData} initialDataUpdatedAt={initialDataUpdatedAt} />
+    // useSearchParams in the feed needs a boundary.
+    <Suspense fallback={<JobListSkeleton />}>
+      <JobFeed initialData={initialData} initialDataUpdatedAt={initialDataUpdatedAt} initialFilters={filters} />
     </Suspense>
   );
 }
