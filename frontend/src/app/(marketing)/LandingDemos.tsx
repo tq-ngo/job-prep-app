@@ -15,6 +15,9 @@ import {
   CheckCircle2,
   GitBranch,
 } from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
 
 // ── Interactive Job Preview Data ─────────────────────────────────────────
 interface MockJob {
@@ -64,26 +67,27 @@ export function InteractiveLiveCard() {
       {/* Glow highlight */}
       <div className="absolute -inset-1.5 bg-gradient-to-r from-spruce-green/20 via-amber-clay/10 to-spruce-green/20 rounded-2xl blur-xl opacity-70" />
       
-      <div className="relative bg-background border border-slate-soft rounded-xl shadow-2xl overflow-hidden">
+      <div className="relative bg-background border border-slate-soft rounded-card shadow-pop overflow-hidden">
         {/* Mock Window Title Bar */}
         <div className="px-5 py-3 border-b border-slate-soft bg-neutral-soft/50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-spruce-green animate-pulse" />
-            <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-spruce-green">
+            <span className="font-mono text-2xs font-semibold uppercase tracking-wider text-spruce-green">
               Live feed preview
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => setIsPaused(!isPaused)}
-              className="p-1 rounded text-foreground-subtle hover:text-slate-ink hover:bg-slate-soft/40 transition-colors"
               title={isPaused ? "Resume preview" : "Pause preview"}
               aria-label={isPaused ? "Resume preview" : "Pause preview"}
             >
-              {isPaused ? <Play size={12} className="text-amber-clay" /> : <Pause size={12} />}
-            </button>
-            <span className="font-mono text-[11px] text-foreground-subtle px-1.5 py-0.5 rounded bg-slate-soft/40">
+              {isPaused ? <Play size={12} aria-hidden="true" className="text-amber-clay" /> : <Pause size={12} aria-hidden="true" />}
+            </Button>
+            <span className="font-mono text-2xs text-foreground-subtle px-1.5 py-0.5 rounded bg-slate-soft/40">
               Sample data
             </span>
           </div>
@@ -95,8 +99,10 @@ export function InteractiveLiveCard() {
             {(["All", "FAANG+", "Quant"] as const).map((cat) => (
               <button
                 key={cat}
+                type="button"
+                aria-pressed={filter === cat}
                 onClick={() => setFilter(cat)}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
+                className={`px-2 py-0.5 rounded text-2xs font-mono transition-colors ${
                   filter === cat
                     ? "bg-spruce-green/10 text-spruce-green font-medium"
                     : "text-foreground-subtle hover:text-slate-ink"
@@ -106,7 +112,7 @@ export function InteractiveLiveCard() {
               </button>
             ))}
           </div>
-          <span className="font-mono text-[11px] text-foreground-subtle">
+          <span className="font-mono text-2xs text-foreground-subtle">
             {filtered.length} visible
           </span>
         </div>
@@ -123,19 +129,17 @@ export function InteractiveLiveCard() {
                   <p className="text-xs font-medium text-slate-ink truncate group-hover:text-spruce-green transition-colors">
                     {job.title}
                   </p>
-                  <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-spruce-green/10 text-spruce-green shrink-0">
-                    {job.category}
-                  </span>
+                  <Badge variant="skill">{job.category}</Badge>
                 </div>
-                <p className="text-[11px] text-foreground-muted mt-0.5">
+                <p className="text-2xs text-foreground-muted mt-0.5">
                   {job.company} · {job.location}
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-amber-clay block">
+                <span className="font-mono text-2xs uppercase tracking-wider text-amber-clay block">
                   {job.source}
                 </span>
-                <span className="font-mono text-[11px] text-foreground-subtle block mt-0.5">
+                <span className="font-mono text-2xs text-foreground-subtle block mt-0.5">
                   {job.time}
                 </span>
               </div>
@@ -144,7 +148,7 @@ export function InteractiveLiveCard() {
         </div>
 
         {/* Card Footer */}
-        <div className="px-4 py-2.5 bg-neutral-soft/30 border-t border-slate-soft flex items-center justify-between text-[11px] font-mono text-foreground-subtle">
+        <div className="px-4 py-2.5 bg-neutral-soft/30 border-t border-slate-soft flex items-center justify-between text-2xs font-mono text-foreground-subtle">
           <span>Illustrative listings</span>
           <span className="text-spruce-green flex items-center gap-1">
             <CheckCircle2 size={11} /> Pushed over SSE in the app
@@ -160,27 +164,24 @@ export function BentoAIDemoCard() {
   const [analyzed, setAnalyzed] = useState(false);
 
   return (
-    <div className="rounded-xl border border-slate-soft bg-background p-6 flex flex-col justify-between hover:border-spruce-green/30 transition-all">
+    <Card interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Cpu size={18} className="text-amber-clay" />
             <h3 className="font-serif text-base font-medium text-slate-ink">AI Intelligence Engine</h3>
           </div>
-          <button
-            onClick={() => setAnalyzed(!analyzed)}
-            className="text-[11px] font-mono px-2 py-0.5 rounded border border-slate-soft hover:border-spruce-green text-foreground-muted hover:text-slate-ink transition-colors"
-          >
+          <Button variant="secondary" size="xs" onClick={() => setAnalyzed(!analyzed)}>
             {analyzed ? "Reset" : "Transform with Gemini"}
-          </button>
+          </Button>
         </div>
 
         <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
           Gemini distills raw market news into structured hiring signals and tech skill demand.
         </p>
 
-        <div className="bg-neutral-soft border border-slate-soft rounded-lg p-3 text-xs space-y-2">
-          <div className="font-mono text-[11px] text-foreground-subtle">Raw Headline:</div>
+        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 text-xs space-y-2">
+          <div className="font-mono text-2xs text-foreground-subtle">Raw Headline:</div>
           <p className="italic text-foreground-muted">
             &quot;NVIDIA accelerates datacenter AI infrastructure investments with new Blackwell platform cluster deployments.&quot;
           </p>
@@ -188,7 +189,7 @@ export function BentoAIDemoCard() {
           <div className="border-t border-slate-soft pt-2">
             {analyzed ? (
               <div className="space-y-1.5 text-xs animate-fadeSlideIn">
-                <div className="font-mono text-[11px] text-spruce-green font-semibold flex items-center gap-1">
+                <div className="font-mono text-2xs text-spruce-green font-semibold flex items-center gap-1">
                   <Sparkles size={10} /> Example takeaways:
                 </div>
                 <div className="flex items-center gap-2 text-foreground-muted">
@@ -199,14 +200,14 @@ export function BentoAIDemoCard() {
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1 pt-1">
                   {["CUDA", "Triton", "PyTorch", "RDMA"].map(skill => (
-                    <span key={skill} className="px-1.5 py-0.5 bg-spruce-green/10 text-spruce-green font-mono text-[11px] rounded">
+                    <Badge key={skill} variant="skill">
                       {skill}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between py-1 text-foreground-subtle font-mono text-[11px]">
+              <div className="flex items-center justify-between py-1 text-foreground-subtle font-mono text-2xs">
                 <span>Click &quot;Transform with Gemini&quot; to test AI parsing</span>
                 <ArrowRight size={12} className="text-spruce-green" />
               </div>
@@ -214,14 +215,14 @@ export function BentoAIDemoCard() {
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
 // ── Interactive Bento Crawler Pipeline Card ──────────────────────────────
 export function BentoPipelineCard() {
   return (
-    <div className="rounded-xl border border-slate-soft bg-background p-6 hover:border-spruce-green/30 transition-all flex flex-col justify-between">
+    <Card interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center gap-2 mb-3">
           <GitBranch size={18} className="text-spruce-green" />
@@ -232,7 +233,7 @@ export function BentoPipelineCard() {
         </p>
 
         {/* Visual Pipeline Flow */}
-        <div className="bg-neutral-soft border border-slate-soft rounded-lg p-3 space-y-2 font-mono text-[11px]">
+        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 space-y-2 font-mono text-2xs">
           <div className="flex items-center justify-between text-foreground-subtle">
             <span className="flex items-center gap-1.5 text-slate-ink">
               <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> GitHub Repos
@@ -247,7 +248,7 @@ export function BentoPipelineCard() {
           </div>
           
           {/* Deduplication Arrow */}
-          <div className="border-t border-slate-soft pt-2 text-center text-foreground-subtle flex items-center justify-center gap-1 text-[11px] uppercase tracking-wider">
+          <div className="border-t border-slate-soft pt-2 text-center text-foreground-subtle flex items-center justify-center gap-1 text-2xs uppercase tracking-wider">
             <span>↓ 3-Tier Dedup: LRU → Redis → PostgreSQL ↓</span>
           </div>
 
@@ -256,7 +257,7 @@ export function BentoPipelineCard() {
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -272,36 +273,31 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
   };
 
   return (
-    <div className="rounded-xl border border-slate-soft bg-background p-6 hover:border-spruce-green/30 transition-all flex flex-col justify-between">
+    <Card interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Radio size={18} className="text-spruce-green" />
             <h3 className="font-serif text-base font-medium text-slate-ink">Real-Time Sync (SSE)</h3>
           </div>
-          <span className="font-mono text-[11px] text-spruce-green bg-spruce-green/10 px-2 py-0.5 rounded">
-            Live Stream
-          </span>
+          <Badge variant="skill">Live Stream</Badge>
         </div>
         <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
           Server-Sent Events push new listings to your screen instantly. Redis Stream backlog preserves event state during re-connections.
         </p>
 
-        <div className="bg-neutral-soft border border-slate-soft rounded-lg p-3 text-center">
-          <p className="font-mono text-[11px] text-foreground-subtle uppercase tracking-wider mb-1">
+        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 text-center">
+          <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-1">
             {initialCount === null ? "Demo counter" : "Roles added in the last 24h"}
           </p>
           <p className={`font-serif text-3xl font-medium text-slate-ink transition-transform ${animating ? "scale-110 text-spruce-green" : ""}`}>
             {count}
           </p>
-          <button
-            onClick={triggerMockPing}
-            className="mt-3 w-full py-1.5 bg-background border border-slate-soft hover:border-spruce-green rounded font-mono text-[11px] text-slate-ink hover:text-spruce-green transition-colors cursor-pointer"
-          >
+          <Button variant="secondary" size="sm" block onClick={triggerMockPing} className="mt-3">
             + Simulate a live event (demo)
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

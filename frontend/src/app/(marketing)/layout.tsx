@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import ThemeToggle from "@/components/ThemeToggle";
+import { ButtonLink } from "@/components/ui/Button";
 import { SITE_URL } from "@/lib/urls";
 
 const TITLE = "JobPrep — Automated Tech Career Command Center";
@@ -92,15 +93,12 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <Link href="/login" className="text-xs font-medium text-foreground-muted hover:text-slate-ink transition-colors px-2 py-1">
+            <ButtonLink href="/login" variant="ghost" size="sm">
               Sign In
-            </Link>
-            <Link
-              href="/register"
-              className="text-xs font-medium bg-spruce-green hover:bg-spruce-green-hover text-warm-ivory px-3.5 py-2 rounded shadow-xs transition-colors"
-            >
+            </ButtonLink>
+            <ButtonLink href="/register" size="sm">
               Get Started
-            </Link>
+            </ButtonLink>
           </div>
         </div>
       </header>
@@ -109,7 +107,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
 
       <footer className="border-t border-slate-soft py-8 bg-neutral-soft/20 text-xs">
         <div className="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="font-mono text-[11px] text-foreground-subtle uppercase tracking-wider">
+          <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider">
             © 2026 JobPrep · Built with Next.js, FastAPI, Celery, Gemini
           </p>
           <nav aria-label="Footer" className="flex gap-4 text-foreground-muted">

@@ -9,6 +9,11 @@ import { Search, ExternalLink, RefreshCw, Briefcase } from "lucide-react";
 import { useScrapePolling } from "@/hooks/useScrapePolling";
 import { useJobAlerts } from "@/hooks/useJobAlerts";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import Badge from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import EmptyState from "@/components/ui/EmptyState";
+import { Input, Select } from "@/components/ui/Input";
+import Skeleton from "@/components/ui/Skeleton";
 
 // The drawer pulls in react-markdown + remark-gfm; load it only when a job is
 // first opened instead of on the board's critical path.
@@ -22,9 +27,6 @@ interface JobFeedProps {
   initialData?: JobListResponse;
   initialDataUpdatedAt?: number;
 }
-
-const selectClass =
-  "appearance-none bg-background border border-slate-soft hover:border-slate-soft/80 text-slate-ink text-xs font-sans rounded px-2.5 h-8 focus:outline-none focus:ring-1 focus:ring-spruce-green transition-all cursor-pointer";
 
 export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedProps) {
   const router = useRouter();
@@ -155,13 +157,13 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
       {/* One compact sticky toolbar under the h-12 navbar. This used to be
           ~230px of title, subtitle and a separate filter row. */}
       <div className="sticky top-12 z-30 bg-background/95 backdrop-blur-sm border-b border-slate-soft">
-        <div className="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center gap-2">
+        <div className="max-w-app mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center gap-2">
           <h1 className="text-base font-serif font-medium text-slate-ink tracking-tight mr-1">Job Board</h1>
-          <span className="font-mono text-[11px] text-foreground-subtle uppercase tracking-wider mr-2 whitespace-nowrap">
+          <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mr-2 whitespace-nowrap">
             {currentData ? `${currentData.total}${currentData.capped ? "+" : ""} roles` : "Loading…"}
           </span>
           <span
-            className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-foreground-subtle mr-auto"
+            className="inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider text-foreground-subtle mr-auto"
             title={sseConnected ? "Live updates connected" : "Live updates disconnected"}
           >
             <span
@@ -171,74 +173,69 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
           </span>
 
           {/* Search Bar */}
-          <div className="relative w-full sm:w-64 order-last sm:order-none">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-subtle" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search role or company…"
-              aria-label="Search role or company"
-              className="w-full pl-8 pr-2 h-8 bg-background border border-slate-soft rounded focus:outline-none focus:ring-1 focus:ring-spruce-green text-xs text-slate-ink placeholder:text-foreground-subtle font-sans"
-            />
-          </div>
+          <Input
+            size="sm"
+            type="search"
+            leadingIcon={<Search size={14} />}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search role or company…"
+            aria-label="Search role or company"
+            className="w-full sm:w-64 order-last sm:order-none"
+          />
 
-          <select
+          <Select
+            size="sm"
             aria-label="Category"
             value={category}
             onChange={(e) => { setCategory(e.target.value); resetToFirstPage(); }}
-            className={selectClass}
           >
             <option value="">All Categories</option>
             <option value="FAANG+">FAANG+</option>
             <option value="Quant">Quant</option>
             <option value="Others">Others</option>
-          </select>
+          </Select>
 
-          <select
+          <Select
+            size="sm"
             aria-label="Source"
             value={source}
             onChange={(e) => { setSource(e.target.value); resetToFirstPage(); }}
-            className={selectClass}
           >
             <option value="">All Sources</option>
             <option value="github">GitHub</option>
             <option value="linkedin">LinkedIn</option>
-          </select>
+          </Select>
 
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             aria-pressed={isRemote}
             onClick={() => { setIsRemote(!isRemote); resetToFirstPage(); }}
-            className={`text-xs font-sans font-medium rounded px-2.5 h-8 border transition-all ${
-              isRemote
-                ? "bg-amber-clay/10 border-amber-clay/40 text-amber-clay"
-                : "bg-background border-slate-soft hover:border-slate-soft/80 text-slate-ink"
-            }`}
           >
             Remote
-          </button>
+          </Button>
 
-          <button
+          <Button
+            size="sm"
             onClick={handleRefreshScrapers}
-            disabled={isScraping}
-            className="flex items-center gap-1.5 bg-spruce-green hover:bg-spruce-green-hover disabled:bg-slate-soft disabled:text-foreground-subtle disabled:cursor-not-allowed text-warm-ivory px-3 h-8 rounded font-sans font-medium transition-colors text-xs"
+            loading={isScraping}
+            icon={<RefreshCw size={12} aria-hidden="true" />}
           >
-            <RefreshCw size={12} className={isScraping ? "animate-spin" : ""} />
             {isScraping ? "Syncing…" : "Refresh"}
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Main Content Area: High-Density Table */}
-      <div className="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 py-3">
+      <div className="max-w-app mx-auto px-4 sm:px-6 lg:px-8 py-3">
 
         {pendingNew > 0 && (
           <div className="flex justify-center mb-3">
             <button
               type="button"
               onClick={showPendingJobs}
-              className="font-mono text-[11px] uppercase tracking-wider px-3 py-1.5 rounded-full bg-spruce-green text-warm-ivory shadow-sm hover:bg-spruce-green-hover transition-colors"
+              className="font-mono text-2xs uppercase tracking-wider px-3 py-1.5 rounded-full bg-spruce-green text-warm-ivory shadow-card hover:bg-spruce-green-hover transition-colors"
             >
               ↑ {pendingNew} new {pendingNew === 1 ? "job" : "jobs"}
             </button>
@@ -247,40 +244,44 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
 
         {/* Empty state */}
         {!isLoading && currentJobs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-14 h-14 rounded-lg bg-neutral-soft border border-slate-soft flex items-center justify-center mb-4">
-              <Briefcase size={22} className="text-foreground-subtle" />
-            </div>
-            <h2 className="text-lg font-serif text-slate-ink mb-1.5">No positions found</h2>
-            <p className="text-foreground-muted mb-5 max-w-sm font-sans text-xs leading-relaxed">
-              {debouncedSearch
+          <EmptyState
+            icon={<Briefcase size={22} />}
+            title="No positions found"
+            description={
+              debouncedSearch
                 ? `No job matches for "${debouncedSearch}". Try a different keyword or clear your filters.`
-                : "The board is waiting for the daily crawler or manual refresh."}
-            </p>
-            {debouncedSearch && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="px-3.5 py-1.5 bg-neutral-soft border border-slate-soft rounded text-xs text-slate-ink hover:border-spruce-green"
-              >
-                Clear Search
-              </button>
-            )}
-          </div>
+                : "The board is waiting for the daily crawler or manual refresh."
+            }
+            action={
+              debouncedSearch && (
+                <Button variant="secondary" size="sm" onClick={() => setSearchQuery("")}>
+                  Clear Search
+                </Button>
+              )
+            }
+          />
         )}
 
         {/* 6-Column Data Feed Table */}
+        {/* The skeleton rows are aria-hidden; this is what screen readers hear. */}
+        {isLoading && (
+          <p role="status" className="sr-only">
+            Loading jobs
+          </p>
+        )}
+
         {(isLoading || currentJobs.length > 0) && (
-          <div className="border border-slate-soft rounded-lg overflow-hidden bg-background shadow-xs">
+          <div className="border border-slate-soft rounded-card overflow-hidden bg-background shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-soft bg-neutral-soft/50">
-                    <th className="px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">Role</th>
-                    <th className="px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">Company</th>
-                    <th className="px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">Location</th>
-                    <th className="px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">Source</th>
-                    <th className="px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle text-right">Apply</th>
-                    <th className="px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle text-right">Posted</th>
+                    <th className="px-4 py-2 font-mono text-2xs font-semibold uppercase tracking-wider text-foreground-subtle">Role</th>
+                    <th className="px-4 py-2 font-mono text-2xs font-semibold uppercase tracking-wider text-foreground-subtle">Company</th>
+                    <th className="px-4 py-2 font-mono text-2xs font-semibold uppercase tracking-wider text-foreground-subtle">Location</th>
+                    <th className="px-4 py-2 font-mono text-2xs font-semibold uppercase tracking-wider text-foreground-subtle">Source</th>
+                    <th className="px-4 py-2 font-mono text-2xs font-semibold uppercase tracking-wider text-foreground-subtle text-right">Apply</th>
+                    <th className="px-4 py-2 font-mono text-2xs font-semibold uppercase tracking-wider text-foreground-subtle text-right">Posted</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -288,10 +289,10 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
                     Array.from({ length: 10 }).map((_, i) => (
                       <tr key={i} className="border-b border-slate-soft/50">
                         <td colSpan={6} className="px-4 py-2.5">
-                          <div className="animate-pulse flex gap-6">
-                            <div className="h-3.5 w-48 bg-slate-soft rounded" />
-                            <div className="h-3.5 w-24 bg-slate-soft/60 rounded" />
-                            <div className="h-3.5 w-32 bg-slate-soft/60 rounded" />
+                          <div className="flex gap-6">
+                            <Skeleton className="h-3.5 w-48" />
+                            <Skeleton className="h-3.5 w-24" />
+                            <Skeleton className="h-3.5 w-32" />
                           </div>
                         </td>
                       </tr>
@@ -328,9 +329,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
                             {job.location || (job.is_remote ? "Remote" : "—")}
                           </td>
                           <td className="px-4 py-2">
-                            <span className="font-mono text-[11px] text-amber-clay uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-clay/10">
-                              {job.source}
-                            </span>
+                            <Badge variant="source">{job.source}</Badge>
                           </td>
                           <td className="px-4 py-2 text-right">
                             <a
@@ -338,12 +337,12 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-sans font-medium text-spruce-green bg-spruce-green/5 border border-spruce-green/30 hover:border-spruce-green hover:bg-spruce-green/10 rounded transition-all"
+                              className="inline-flex items-center gap-1 px-2.5 py-0.5 text-2xs font-sans font-medium text-spruce-green bg-spruce-green/5 border border-spruce-green/30 hover:border-spruce-green hover:bg-spruce-green/10 rounded transition-all"
                             >
                               Apply <ExternalLink size={11} />
                             </a>
                           </td>
-                          <td className="px-4 py-2 text-right font-mono text-[11px] text-foreground-subtle whitespace-nowrap">
+                          <td className="px-4 py-2 text-right font-mono text-2xs text-foreground-subtle whitespace-nowrap">
                             {job.posted_at
                               ? new Date(job.posted_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
                               : "—"}
@@ -361,24 +360,21 @@ export default function JobFeed({ initialData, initialDataUpdatedAt }: JobFeedPr
         {/* Pagination Bar */}
         {currentData && currentData.pages > 1 && (
           <div className="flex justify-between items-center mt-4">
-            <span className="font-mono text-[11px] text-foreground-subtle uppercase tracking-wider">
+            <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider">
               Page {page} of {currentData.pages} ({currentData.total}{currentData.capped ? "+" : ""} total)
             </span>
             <div className="flex gap-2">
-              <button
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page === 1}
-                className="px-3 py-1.5 bg-background border border-slate-soft rounded disabled:text-foreground-subtle disabled:cursor-not-allowed text-xs font-medium hover:border-slate-soft/80 transition-colors text-slate-ink"
-              >
+              <Button variant="secondary" size="sm" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>
                 Prev
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setPage(Math.min(currentData.pages, page + 1))}
                 disabled={page === currentData.pages}
-                className="px-3 py-1.5 bg-background border border-slate-soft rounded disabled:text-foreground-subtle disabled:cursor-not-allowed text-xs font-medium hover:border-slate-soft/80 transition-colors text-slate-ink"
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         )}

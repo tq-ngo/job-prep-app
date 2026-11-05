@@ -5,6 +5,9 @@ import { X, ExternalLink, Sparkles } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Job } from "@/lib/api";
+import Badge from "@/components/ui/Badge";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import Skeleton, { SkeletonGroup } from "@/components/ui/Skeleton";
 
 interface JobDetailsSidebarProps {
   /** The job to show; null while a deep-linked job is still loading. */
@@ -31,7 +34,7 @@ function CompanyAvatar({ company }: { company: string }) {
   return (
     <div
       aria-hidden="true"
-      className="w-11 h-11 rounded-lg border border-slate-soft bg-gradient-to-br from-spruce-green/20 to-amber-clay/10 flex items-center justify-center shrink-0 font-serif text-base font-semibold text-spruce-green"
+      className="w-11 h-11 rounded-card border border-slate-soft bg-gradient-to-br from-spruce-green/20 to-amber-clay/10 flex items-center justify-center shrink-0 font-serif text-base font-semibold text-spruce-green"
     >
       {initials || "?"}
     </div>
@@ -156,14 +159,14 @@ export default function JobDetailsSidebar({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`fixed inset-y-0 right-0 w-full max-w-2xl bg-background shadow-2xl flex flex-col border-l border-slate-soft transition-[translate,visibility] duration-300 ease-in-out starting:translate-x-full ${
+        className={`fixed inset-y-0 right-0 w-full max-w-2xl bg-background shadow-pop flex flex-col border-l border-slate-soft transition-[translate,visibility] duration-300 ease-in-out starting:translate-x-full ${
           open ? "translate-x-0 visible" : "translate-x-full invisible"
         }`}
       >
         {/* Header */}
         <div className="px-6 py-5 border-b border-slate-soft flex justify-between items-start bg-neutral-soft/50">
           <div className="flex items-start gap-4 pr-6 min-w-0">
-            {view ? <CompanyAvatar company={view.company} /> : <div className="w-11 h-11 rounded-lg bg-slate-soft/50 animate-pulse" />}
+            {view ? <CompanyAvatar company={view.company} /> : <Skeleton className="w-11 h-11" />}
             <div className="min-w-0">
               <h2 id={titleId} className="text-xl font-serif font-medium text-slate-ink leading-tight">
                 {view?.title ?? "Loading…"}
@@ -174,36 +177,24 @@ export default function JobDetailsSidebar({
                   <span aria-hidden="true">•</span>
                   <span>{view.location || (view.is_remote ? "Remote" : "Location unspecified")}</span>
                   {view.is_remote && view.location && (
-                    <span className="px-1.5 py-0.5 rounded bg-amber-clay/10 text-amber-clay text-[11px] font-mono">
-                      Remote
-                    </span>
+                    <Badge variant="remote">Remote</Badge>
                   )}
                 </div>
               )}
             </div>
           </div>
 
-          <button
-            ref={closeRef}
-            onClick={onClose}
-            className="p-1.5 rounded hover:bg-slate-soft/50 transition-colors text-foreground-subtle hover:text-slate-ink shrink-0"
-            aria-label="Close job details"
-          >
-            <X size={18} />
-          </button>
+          <Button ref={closeRef} variant="ghost" size="icon" onClick={onClose} aria-label="Close job details">
+            <X size={18} aria-hidden="true" />
+          </Button>
         </div>
 
         {/* Content (Scrollable) */}
         {view && (
           <div className="flex-1 overflow-y-auto px-6 sm:px-8 py-6 space-y-6">
-            <a
-              href={view.apply_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 py-2.5 px-4 bg-spruce-green hover:bg-spruce-green-hover text-warm-ivory font-sans font-medium text-sm rounded shadow-sm transition-colors"
-            >
-              Apply on company site <ExternalLink size={14} />
-            </a>
+            <ButtonLink href={view.apply_url} external block>
+              Apply on company site <ExternalLink size={14} aria-hidden="true" />
+            </ButtonLink>
 
             {/* Quick Metrics Cards */}
             <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -229,7 +220,7 @@ export default function JobDetailsSidebar({
                 },
               ].map(({ label, value }) => (
                 <div key={label} className="border border-slate-soft rounded p-3 bg-neutral-soft/30">
-                  <dt className="text-[11px] font-mono text-foreground-subtle uppercase tracking-wider mb-1">{label}</dt>
+                  <dt className="text-2xs font-mono text-foreground-subtle uppercase tracking-wider mb-1">{label}</dt>
                   <dd className="text-xs font-sans font-medium text-slate-ink truncate">{value}</dd>
                 </div>
               ))}
@@ -243,11 +234,10 @@ export default function JobDetailsSidebar({
                 </h3>
                 <ul className="flex flex-wrap gap-1.5">
                   {view.skills.map((skill) => (
-                    <li
-                      key={skill}
-                      className="px-2.5 py-1 bg-spruce-green/10 text-spruce-green text-xs font-mono rounded border border-spruce-green/20 uppercase tracking-wider"
-                    >
-                      {skill}
+                    <li key={skill}>
+                      <Badge variant="skill" size="md">
+                        {skill}
+                      </Badge>
                     </li>
                   ))}
                 </ul>
@@ -262,11 +252,11 @@ export default function JobDetailsSidebar({
               </h3>
 
               {isLoadingDescription ? (
-                <div className="space-y-2.5 animate-pulse" aria-label="Loading description">
+                <SkeletonGroup label="Loading description" className="space-y-2.5">
                   {[100, 92, 96, 70, 88, 60].map((w, i) => (
-                    <div key={i} className="h-3 rounded bg-slate-soft/60" style={{ width: `${w}%` }} />
+                    <Skeleton key={i} className="h-3" style={{ width: `${w}%` }} />
                   ))}
-                </div>
+                </SkeletonGroup>
               ) : view.description ? (
                 <div className="text-slate-ink font-sans text-sm">
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
