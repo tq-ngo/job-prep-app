@@ -20,6 +20,22 @@ function createWrapper() {
   };
 }
 
+const baseItem: JobSummary = {
+  id: "job-base",
+  title: "Intern",
+  company: "Acme",
+  location: null,
+  source: "github",
+  apply_url: "https://acme.example",
+  skills: [],
+  salary_min: null,
+  salary_max: null,
+  salary_currency: "USD",
+  is_remote: false,
+  posted_at: null,
+  scraped_at: "2026-03-01T00:00:00Z",
+};
+
 describe("Jobs Hooks (src/hooks/useJobs.ts)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -78,6 +94,39 @@ describe("Jobs Hooks (src/hooks/useJobs.ts)", () => {
 
       expect(result.current.data).toEqual(initialData);
       expect(result.current.isLoading).toBe(false);
+    });
+  });
+
+  describe("useJobs paging", () => {
+    it("keeps the previous page visible while the next one loads", async () => {
+      const page = (n: number): JobListResponse => ({
+        items: [{ ...baseItem, id: `job-p${n}`, title: `Role on page ${n}` }],
+        total: 60,
+        page: n,
+        page_size: 30,
+        pages: 2,
+      });
+      let resolvePage2: (v: JobListResponse) => void = () => {};
+      vi.spyOn(jobsApi, "list")
+        .mockResolvedValueOnce(page(1))
+        .mockImplementationOnce(() => new Promise((r) => (resolvePage2 = r)));
+      const { wrapper } = createWrapper();
+
+      const { result, rerender } = renderHook(({ p }) => useJobs({ page: p }), {
+        wrapper,
+        initialProps: { p: 1 },
+      });
+      await waitFor(() => expect(result.current.data?.page).toBe(1));
+
+      rerender({ p: 2 });
+      // Still page 1's rows, flagged as placeholders; never back to loading.
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.isPlaceholderData).toBe(true);
+      expect(result.current.data?.items[0].id).toBe("job-p1");
+
+      await act(async () => resolvePage2(page(2)));
+      await waitFor(() => expect(result.current.data?.items[0].id).toBe("job-p2"));
+      expect(result.current.isPlaceholderData).toBe(false);
     });
   });
 
@@ -164,7 +213,7 @@ describe("Jobs Hooks (src/hooks/useJobs.ts)", () => {
   });
 
   describe("useTriggerScrape", () => {
-    it("invalidates jobs queries on mutation success", async () => {
+    it("returns the task id without refetching jobs (the task hasn't run yet)", async () => {
       vi.spyOn(jobsApi, "triggerScrape").mockResolvedValueOnce({
         task_id: "task-abc",
         status: "PENDING",
@@ -175,11 +224,13 @@ describe("Jobs Hooks (src/hooks/useJobs.ts)", () => {
 
       const { result } = renderHook(() => useTriggerScrape(), { wrapper });
 
+      let data: { task_id: string } | undefined;
       await act(async () => {
-        await result.current.mutateAsync("github");
+        data = await result.current.mutateAsync("github");
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["jobs"] });
+      expect(data?.task_id).toBe("task-abc");
+      expect(invalidateSpy).not.toHaveBeenCalled();
     });
   });
 });

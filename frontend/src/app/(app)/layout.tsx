@@ -4,6 +4,7 @@ import DashboardNavbar from "@/components/DashboardNavbar";
 import { AuthProvider } from "@/context/AuthContext";
 import type { User } from "@/lib/api";
 import { PATHNAME_HEADER, SESSION_INVALID_REASON } from "@/proxy";
+import { INTERNAL_API_URL } from "@/lib/server-api";
 
 /**
  * Resolve the signed-in user on the server so the first paint is correct.
@@ -13,11 +14,10 @@ import { PATHNAME_HEADER, SESSION_INVALID_REASON } from "@/proxy";
  * disabled accounts); undefined means "unknown" and the client retries.
  */
 async function getInitialUser(): Promise<User | null | undefined> {
-  const apiUrl = process.env.INTERNAL_API_URL || "http://localhost:8000";
   const cookieHeader = (await cookies()).toString();
   if (!cookieHeader) return null;
   try {
-    const res = await fetch(`${apiUrl}/api/v1/auth/me`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/v1/auth/me`, {
       headers: { cookie: cookieHeader },
       cache: "no-store",
     });

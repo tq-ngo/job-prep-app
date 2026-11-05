@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { JobListResponse, JobSummary, jobsApi } from "@/lib/api";
 
 export interface JobListParams {
@@ -25,13 +25,16 @@ export function useJobs(
     // the same page was fetched a second time from the browser.
     initialData: options.initialData,
     initialDataUpdatedAt: options.initialDataUpdatedAt,
+    // Keep showing the current page while the next page or filter loads,
+    // instead of flashing the list back to skeletons on every change.
+    placeholderData: keepPreviousData,
   });
 }
 
 export const jobQueryKey = (id: string) => ["job", id] as const;
 
 /**
- * Full job (with description) for the drawer. The feed row is shown as
+ * Full job (with description) for the detail pane. The feed row is shown as
  * placeholder data, so the header and metadata render instantly while the
  * description loads.
  */
@@ -55,12 +58,11 @@ export function usePrefetchJob() {
     });
 }
 
+/**
+ * Starts a scrape. It doesn't refresh the list: success only means the task
+ * was queued, so refetching now returned the same rows. The caller polls
+ * the task and invalidates ["jobs"] when it finishes.
+ */
 export function useTriggerScrape() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: jobsApi.triggerScrape,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-  });
+  return useMutation({ mutationFn: jobsApi.triggerScrape });
 }
