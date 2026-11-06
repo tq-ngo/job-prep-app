@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import ThemeToggle from "@/components/ThemeToggle";
+import SkipLink from "@/components/SkipLink";
+import MarketingMobileNav from "./MarketingMobileNav";
 import { ButtonLink } from "@/components/ui/Button";
 import { SITE_URL } from "@/lib/urls";
 
@@ -75,6 +77,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
+      <SkipLink />
       <header className="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-background/85 border-b border-slate-soft">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link
@@ -93,17 +96,24 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <ButtonLink href="/login" variant="ghost" size="sm">
-              Sign In
-            </ButtonLink>
+            {/* In the menu below sm, where the header has no room for it. */}
+            <span className="hidden sm:inline">
+              <ButtonLink href="/login" variant="ghost" size="sm">
+                Sign In
+              </ButtonLink>
+            </span>
             <ButtonLink href="/register" size="sm">
               Get Started
             </ButtonLink>
+            <MarketingMobileNav />
           </div>
         </div>
       </header>
 
-      <main>{children}</main>
+      {/* Skip-link target; programmatic focus only, so no ring around the page. */}
+      <main id="main" tabIndex={-1} className="focus:outline-none">
+        {children}
+      </main>
 
       <footer className="border-t border-slate-soft py-8 bg-neutral-soft/20 text-xs">
         <div className="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">

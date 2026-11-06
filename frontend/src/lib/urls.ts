@@ -18,3 +18,12 @@ export const SITE_URL = process.env.SITE_URL || "http://localhost";
 
 export const googleLoginUrl = (next = "/jobs") =>
   `${API_BASE}/api/v1/auth/google/login?next=${encodeURIComponent(next)}`;
+
+/**
+ * A post-login destination from the query string, or /jobs. Only relative
+ * paths: an absolute URL would be an open redirect. Backslashes too, since
+ * browsers treat `/\evil.com` as `//evil.com`.
+ */
+export function safeNextPath(next: string | undefined | null, fallback = "/jobs"): string {
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : fallback;
+}

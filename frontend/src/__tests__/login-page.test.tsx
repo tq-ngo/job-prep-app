@@ -6,7 +6,7 @@ vi.mock("@/context/AuthContext", () => ({
   useAuth: () => ({ completeLogin: vi.fn() }),
 }));
 
-async function renderPage(params: { next?: string; error?: string }) {
+async function renderPage(params: { next?: string; error?: string; registered?: string; reason?: string }) {
   render(await LoginPage({ searchParams: Promise.resolve(params) }));
 }
 
@@ -27,5 +27,15 @@ describe("LoginPage (src/app/(auth)/login/page.tsx)", () => {
       "href",
       expect.stringContaining("next=%2Fjobs"),
     );
+  });
+
+  it("confirms a new account", async () => {
+    await renderPage({ registered: "1" });
+    expect(screen.getByRole("status")).toHaveTextContent(/account created/i);
+  });
+
+  it("explains a session that ended", async () => {
+    await renderPage({ reason: "session_invalid" });
+    expect(screen.getByRole("status")).toHaveTextContent(/session has ended/i);
   });
 });

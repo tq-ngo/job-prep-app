@@ -1,4 +1,4 @@
-import { ArrowRight, Layers, Search, ShieldCheck } from "lucide-react";
+import { ArrowRight, GitBranch, Layers, Search, ShieldCheck } from "lucide-react";
 import { googleLoginUrl } from "@/lib/urls";
 import Badge from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
@@ -6,7 +6,6 @@ import Card from "@/components/ui/Card";
 import GoogleIcon from "@/components/ui/GoogleIcon";
 import {
   BentoAIDemoCard,
-  BentoPipelineCard,
   BentoSSECard,
   InteractiveLiveCard,
 } from "./LandingDemos";
@@ -209,5 +208,47 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
         </div>
       </section>
     </>
+  );
+}
+
+// Static content, so a server component (it used to ship as client JS).
+function BentoPipelineCard() {
+  return (
+    <Card interactive className="flex flex-col justify-between">
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <GitBranch size={18} aria-hidden="true" className="text-spruce-green" />
+          <h3 className="font-serif text-base font-medium text-slate-ink">Daily Crawler Pipeline</h3>
+        </div>
+        <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+          Scrapers crawl 4 curated GitHub repos every 6 hours and LinkedIn daily, then fetch each posting&apos;s full description, sanitized and stripped of tracking pixels.
+        </p>
+
+        {/* Visual Pipeline Flow */}
+        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 space-y-2 font-mono text-2xs">
+          <div className="flex items-center justify-between text-foreground-subtle">
+            <span className="flex items-center gap-1.5 text-slate-ink">
+              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> GitHub Repos
+            </span>
+            <span className="text-amber-clay">every 6h</span>
+          </div>
+          <div className="flex items-center justify-between text-foreground-subtle">
+            <span className="flex items-center gap-1.5 text-slate-ink">
+              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> LinkedIn Guest API
+            </span>
+            <span className="text-amber-clay">daily</span>
+          </div>
+          
+          {/* Deduplication Arrow */}
+          <div className="border-t border-slate-soft pt-2 text-center text-foreground-subtle flex items-center justify-center gap-1 text-2xs uppercase tracking-wider">
+            <span>↓ 3-Tier Dedup: LRU → Redis → PostgreSQL ↓</span>
+          </div>
+
+          <div className="p-2 rounded bg-spruce-green/10 border border-spruce-green/20 text-spruce-green text-center font-medium">
+            One canonical listing per role
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }

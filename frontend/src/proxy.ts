@@ -165,7 +165,9 @@ export async function proxy(request: NextRequest) {
   const isProtected = PROTECTED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   )
-  const isAuthPage = AUTH_PAGES.some((p) => pathname.startsWith(p))
+  // Whole segments only: a bare prefix check also matched /login-help,
+  // /registered, etc., bouncing signed-in users away from them.
+  const isAuthPage = AUTH_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 
   if (isProtected && !hasSession) {
     const next = pathname + search

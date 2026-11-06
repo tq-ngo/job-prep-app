@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react
 import { useQueryClient } from "@tanstack/react-query";
 import { Briefcase } from "lucide-react";
 import { JobEvent, JobListResponse, JobSummary } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
 import { hasActiveFilters, sameFilters, toListParams, type JobFilters } from "@/lib/job-filters";
 import { useJob, useJobs, useTriggerScrape } from "@/hooks/useJobs";
 import { useJobAlerts } from "@/hooks/useJobAlerts";
@@ -77,18 +78,28 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
   // ── Manual scrape ──────────────────────────────────────────────────────
   const triggerScrape = useTriggerScrape();
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
   const onScrapeComplete = useCallback(() => {
     setTaskId(null);
     queryClient.invalidateQueries({ queryKey: ["jobs"] });
   }, [queryClient]);
-  useScrapePolling(taskId, onScrapeComplete);
+  useScrapePolling(taskId, {
+    onSuccess: onScrapeComplete,
+    onError: (message) => {
+      setTaskId(null);
+      setScrapeError(`Refresh didn't finish. ${message}`);
+    },
+  });
 
   const handleRefresh = () => {
+    setScrapeError(null);
     triggerScrape.mutate(filters.source || "all", {
       onSuccess: (res) => {
         if (res.task_id) setTaskId(res.task_id);
         else onScrapeComplete();
       },
+      onError: (err) =>
+        setScrapeError(apiErrorMessage(err, { fallback: "Couldn't start a refresh. Try again in a moment." })),
     });
   };
   const isScraping = triggerScrape.isPending || !!taskId;
@@ -176,6 +187,20 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
               </button>
             )}
           </div>
+
+          {scrapeError && (
+            <Alert
+              variant="error"
+              className="m-4"
+              action={
+                <Button variant="ghost" size="sm" onClick={() => setScrapeError(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              {scrapeError}
+            </Alert>
+          )}
 
           {isError && (
             <Alert

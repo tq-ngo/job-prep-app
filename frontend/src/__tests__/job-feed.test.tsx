@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import JobFeed from "@/app/(app)/jobs/JobFeed";
-import { jobsApi, type Job, type JobEvent, type JobListResponse } from "@/lib/api";
+import { jobsApi, tasksApi, type Job, type JobEvent, type JobListResponse } from "@/lib/api";
 import { parseJobFilters, type JobFilters } from "@/lib/job-filters";
 
 // Next syncs useSearchParams with window.history.pushState/replaceState and
@@ -220,6 +220,28 @@ describe("JobFeed list", () => {
     expect(screen.getByText("No positions found")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Clear filters" }));
     expect(window.location.search).toBe("");
+  });
+
+  it("reports a refresh that can't start, and resets the button", async () => {
+    vi.spyOn(jobsApi, "triggerScrape").mockRejectedValue({ response: { status: 429 } });
+    renderFeed();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/too many attempts/i);
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
+
+  it("reports a refresh whose task fails, instead of spinning forever", async () => {
+    vi.spyOn(jobsApi, "triggerScrape").mockResolvedValue({ task_id: "t-1", status: "accepted" });
+    vi.spyOn(tasksApi, "getStatus").mockResolvedValue({ status: "FAILURE", result: null, error: "GitHub rate limit" });
+    renderFeed();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Refresh didn't finish. The task failed: GitHub rate limit");
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("counts live 'created' events into a new-jobs button", () => {
