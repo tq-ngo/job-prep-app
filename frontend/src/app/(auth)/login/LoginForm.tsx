@@ -1,22 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { authApi } from "@/lib/api";
-import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
-import AuthCard from "../AuthCard";
+import { authApi } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/errors";
+import { useAuth } from "@/context/AuthContext";
 import Alert from "@/components/ui/Alert";
-import { Button, ButtonLink } from "@/components/ui/Button";
+import { Button } from "@/components/ui/Button";
 import Field from "@/components/ui/Field";
-import GoogleIcon from "@/components/ui/GoogleIcon";
-import { Input } from "@/components/ui/Input";
+import { Input, PasswordInput } from "@/components/ui/Input";
+import AuthCard from "../AuthCard";
+import GoogleSignIn from "../GoogleSignIn";
 
 export default function LoginForm({
   nextPath,
   initialError = "",
+  notice = "",
 }: {
   nextPath: string;
   initialError?: string;
+  /** Informational message, e.g. after registering or a session ending. */
+  notice?: string;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,16 +33,24 @@ export default function LoginForm({
     setIsLoading(true);
     setError("");
     try {
-      // No token comes back in the body any more — the server sets HttpOnly
-      // cookies. We just need to refresh the user and navigate.
+      // The server sets HttpOnly cookies; no token comes back in the body.
       await authApi.login(email, password);
       await completeLogin(nextPath);
-    } catch {
-      setError("Invalid credentials. Please try again.");
+    } catch (err) {
+      // Every failure used to read "Invalid credentials", including being
+      // rate limited or offline, which sent people retyping a correct password.
+      setError(
+        apiErrorMessage(err, {
+          byStatus: { 401: "Incorrect email or password." },
+          fallback: "Sign-in failed. Please try again.",
+        }),
+      );
     } finally {
       setIsLoading(false);
     }
   };
+
+  const registerHref = nextPath === "/jobs" ? "/register" : `/register?next=${encodeURIComponent(nextPath)}`;
 
   return (
     <AuthCard
@@ -47,27 +59,15 @@ export default function LoginForm({
       footer={
         <>
           Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-spruce-green hover:text-spruce-green-hover font-medium">Create one</Link>
+          <Link href={registerHref} className="text-spruce-green hover:text-spruce-green-hover font-medium">
+            Create one
+          </Link>
         </>
       }
     >
-      <ButtonLink
-        href={authApi.googleLoginUrl(nextPath)}
-        native
-        variant="secondary"
-        size="lg"
-        block
-        icon={<GoogleIcon />}
-        className="mb-6"
-      >
-        Continue with Google
-      </ButtonLink>
+      {notice && !error && <Alert className="mb-6">{notice}</Alert>}
 
-      <div className="flex items-center gap-3 mb-6">
-        <span className="h-px flex-1 bg-slate-soft" />
-        <span className="text-xs text-foreground-muted">or</span>
-        <span className="h-px flex-1 bg-slate-soft" />
-      </div>
+      <GoogleSignIn nextPath={nextPath} />
 
       {error && (
         <Alert variant="error" className="mb-6">
@@ -80,13 +80,7 @@ export default function LoginForm({
           <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="Password">
-          <Input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         <Button type="submit" size="lg" block loading={isLoading}>
           {isLoading ? "Signing in..." : "Sign In"}

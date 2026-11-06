@@ -4,7 +4,8 @@
  * Interactive islands for the landing page. Everything else on the page is
  * a server component; only these need client JS.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   Sparkles,
   ArrowRight,
@@ -13,7 +14,6 @@ import {
   Play,
   Pause,
   CheckCircle2,
-  GitBranch,
 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -42,7 +42,11 @@ const MOCK_JOBS: MockJob[] = [
 
 export function InteractiveLiveCard() {
   const [filter, setFilter] = useState<"All" | "FAANG+" | "Quant">("All");
-  const [isPaused, setIsPaused] = useState(false);
+  // Auto-rotation is motion: off by default for people who ask the OS for
+  // less (WCAG 2.2.2), though they can still start it. Their own choice wins.
+  const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const [pausedByUser, setPausedByUser] = useState<boolean | null>(null);
+  const isPaused = pausedByUser ?? reduceMotion;
   const [displayedJobs, setDisplayedJobs] = useState<MockJob[]>(MOCK_JOBS.slice(0, 4));
 
   useEffect(() => {
@@ -81,7 +85,7 @@ export function InteractiveLiveCard() {
             <Button
               variant="ghost"
               size="xs"
-              onClick={() => setIsPaused(!isPaused)}
+              onClick={() => setPausedByUser(!isPaused)}
               title={isPaused ? "Resume preview" : "Pause preview"}
               aria-label={isPaused ? "Resume preview" : "Pause preview"}
             >
@@ -113,12 +117,14 @@ export function InteractiveLiveCard() {
             ))}
           </div>
           <span className="font-mono text-2xs text-foreground-subtle">
-            {filtered.length} visible
+            <span role="status">{filtered.length} visible</span>
           </span>
         </div>
 
         {/* Feed List Items */}
-        <div className="divide-y divide-slate-soft">
+        {/* Not a live region: announcing a new row every 2.8s would talk over
+            everything else. The visible count above is announced on filter. */}
+        <div className="divide-y divide-slate-soft" aria-label="Sample job feed, updating automatically" role="group">
           {filtered.map((job) => (
             <div
               key={`${job.company}-${job.title}`}
@@ -219,57 +225,21 @@ export function BentoAIDemoCard() {
   );
 }
 
-// ── Interactive Bento Crawler Pipeline Card ──────────────────────────────
-export function BentoPipelineCard() {
-  return (
-    <Card interactive className="flex flex-col justify-between">
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <GitBranch size={18} className="text-spruce-green" />
-          <h3 className="font-serif text-base font-medium text-slate-ink">Daily Crawler Pipeline</h3>
-        </div>
-        <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
-          Scrapers crawl 4 curated GitHub repos every 6 hours and LinkedIn daily, then fetch each posting&apos;s full description, sanitized and stripped of tracking pixels.
-        </p>
-
-        {/* Visual Pipeline Flow */}
-        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 space-y-2 font-mono text-2xs">
-          <div className="flex items-center justify-between text-foreground-subtle">
-            <span className="flex items-center gap-1.5 text-slate-ink">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> GitHub Repos
-            </span>
-            <span className="text-amber-clay">every 6h</span>
-          </div>
-          <div className="flex items-center justify-between text-foreground-subtle">
-            <span className="flex items-center gap-1.5 text-slate-ink">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> LinkedIn Guest API
-            </span>
-            <span className="text-amber-clay">daily</span>
-          </div>
-          
-          {/* Deduplication Arrow */}
-          <div className="border-t border-slate-soft pt-2 text-center text-foreground-subtle flex items-center justify-center gap-1 text-2xs uppercase tracking-wider">
-            <span>↓ 3-Tier Dedup: LRU → Redis → PostgreSQL ↓</span>
-          </div>
-
-          <div className="p-2 rounded bg-spruce-green/10 border border-spruce-green/20 text-spruce-green text-center font-medium">
-            One canonical listing per role
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
 
 // ── Interactive Bento Real-Time SSE Card ─────────────────────────────────
 export function BentoSSECard({ initialCount }: { initialCount: number | null }) {
-  const [count, setCount] = useState(initialCount ?? 0);
+  // The simulation counts separately: it used to add to the real "last 24h"
+  // figure, so the page's one live statistic could be inflated by clicking.
+  const [simulated, setSimulated] = useState(0);
   const [animating, setAnimating] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   const triggerMockPing = () => {
     setAnimating(true);
-    setCount(prev => prev + 1);
-    setTimeout(() => setAnimating(false), 500);
+    setSimulated((n) => n + 1);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setAnimating(false), 500);
   };
 
   return (
@@ -277,7 +247,7 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Radio size={18} className="text-spruce-green" />
+            <Radio size={18} aria-hidden="true" className="text-spruce-green" />
             <h3 className="font-serif text-base font-medium text-slate-ink">Real-Time Sync (SSE)</h3>
           </div>
           <Badge variant="skill">Live Stream</Badge>
@@ -287,11 +257,18 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
         </p>
 
         <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 text-center">
-          <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-1">
-            {initialCount === null ? "Demo counter" : "Roles added in the last 24h"}
-          </p>
-          <p className={`font-serif text-3xl font-medium text-slate-ink transition-transform ${animating ? "scale-110 text-spruce-green" : ""}`}>
-            {count}
+          {initialCount !== null && (
+            <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-3">
+              <span className="font-serif text-base normal-case tracking-normal text-slate-ink">{initialCount.toLocaleString("en-US")}</span>{" "}
+              roles added in the last 24h
+            </p>
+          )}
+          <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-1">Simulated events</p>
+          <p
+            aria-live="polite"
+            className={`font-serif text-3xl font-medium transition-transform ${animating ? "scale-110 text-spruce-green" : "text-slate-ink"}`}
+          >
+            {simulated}
           </p>
           <Button variant="secondary" size="sm" block onClick={triggerMockPing} className="mt-3">
             + Simulate a live event (demo)

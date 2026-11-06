@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import DashboardNavbar from "@/components/DashboardNavbar";
+import SkipLink from "@/components/SkipLink";
 import { AuthProvider } from "@/context/AuthContext";
 import type { User } from "@/lib/api";
 import { PATHNAME_HEADER, SESSION_INVALID_REASON } from "@/proxy";
@@ -39,8 +40,10 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   return (
     <AuthProvider initialUser={initialUser}>
       <div className="min-h-screen flex flex-col bg-background">
+        <SkipLink />
         <DashboardNavbar />
-        <main className="flex-1 w-full bg-background transition-colors duration-200">
+        {/* Skip-link target; programmatic focus only, so no ring around the page. */}
+        <main id="main" tabIndex={-1} className="flex-1 w-full bg-background transition-colors duration-200 focus:outline-none">
           {children}
         </main>
       </div>

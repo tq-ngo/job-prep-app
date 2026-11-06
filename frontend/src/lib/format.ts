@@ -1,10 +1,12 @@
 import type { JobSummary } from "@/lib/api";
 
-// Fixed locale: server and browser must format identically, or the
-// server-rendered text and the hydrated text disagree.
+// Fixed locale and time zone: server and browser must format identically,
+// or the server-rendered text and the hydrated text disagree. UTC is also
+// what the dates mean: postings are calendar dates stored as midnight UTC,
+// which a US browser's local zone turned into the previous day.
 const LOCALE = "en-US";
 
-const dateFormat = new Intl.DateTimeFormat(LOCALE, { month: "short", day: "numeric", year: "numeric" });
+const dateFormat = new Intl.DateTimeFormat(LOCALE, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 const relativeFormat = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
 
 /** "Mar 1, 2026" */

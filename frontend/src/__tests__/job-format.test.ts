@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPay, formatPostedAgo } from "@/lib/format";
+import { formatDate, formatPay, formatPostedAgo } from "@/lib/format";
 import { parseJobFilters, sameFilters, toListParams } from "@/lib/job-filters";
 
 describe("formatPay", () => {
@@ -12,6 +12,13 @@ describe("formatPay", () => {
 
   it("returns null when pay isn't listed", () => {
     expect(formatPay({ salary_min: null, salary_max: null, salary_period: null })).toBeNull();
+  });
+});
+
+describe("formatDate", () => {
+  it("shows the calendar date in UTC, whatever the viewer's zone", () => {
+    expect(formatDate("2026-03-01T00:00:00Z")).toBe("Mar 1, 2026");
+    expect(formatDate("2026-03-01T23:30:00Z")).toBe("Mar 1, 2026");
   });
 });
 

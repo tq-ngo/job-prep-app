@@ -1,7 +1,7 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { useId, useState, type ComponentProps, type ReactNode } from "react";
+import { ChevronDown, Eye, EyeOff } from "lucide-react";
 import { cn } from "./cn";
 import { useFieldControl } from "./Field";
 
@@ -83,4 +83,34 @@ export function Select({ size = "md", className, children, ...props }: SelectPro
 export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   const field = useFieldControl();
   return <textarea {...field} {...props} className={cn(control, "px-4 py-3 text-sm min-h-24", className)} />;
+}
+
+/**
+ * Password input with a show/hide toggle, so people can check what they
+ * typed (especially on phones). The toggle is a real button, outside the
+ * input's label, announced as pressed when the password is visible.
+ */
+export function PasswordInput({ size = "md", className, ...props }: Omit<InputProps, "type" | "leadingIcon">) {
+  const [visible, setVisible] = useState(false);
+  const field = useFieldControl();
+  const fallbackId = useId();
+  const inputId = props.id ?? field?.id ?? fallbackId;
+  return (
+    <div className={cn("relative", className)}>
+      <Input {...props} id={inputId} size={size} type={visible ? "text" : "password"} className={size === "sm" ? "pr-9" : "pr-12"} />
+      <button
+        type="button"
+        aria-label="Show password"
+        aria-pressed={visible}
+        aria-controls={inputId}
+        onClick={() => setVisible((v) => !v)}
+        className={cn(
+          "absolute top-1/2 -translate-y-1/2 flex items-center justify-center rounded-control text-foreground-subtle hover:text-slate-ink",
+          size === "sm" ? "right-1 h-6 w-7" : "right-1.5 h-8 w-9",
+        )}
+      >
+        {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+      </button>
+    </div>
+  );
 }

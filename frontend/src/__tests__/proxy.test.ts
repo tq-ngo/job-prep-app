@@ -141,6 +141,15 @@ describe("Edge Route Proxy (src/proxy.ts)", () => {
     expect(res.headers.get("location")).toContain("/jobs");
   });
 
+  it("treats only whole /login and /register segments as auth pages", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const token = await makeToken({ typ: "access", iss: "job-prep-app", aud: "job-prep-app:api", exp: now + 3600 });
+    for (const path of ["/login-help", "/registered"]) {
+      const res = await proxy(new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: `access_token=${token}` } }));
+      expect(res.headers.get("location"), path).toBeNull();
+    }
+  });
+
   it("clears access token on /login?reason=session_invalid instead of redirecting back to /jobs", async () => {
     const now = Math.floor(Date.now() / 1000);
     const token = await makeToken({

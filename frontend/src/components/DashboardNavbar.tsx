@@ -1,168 +1,117 @@
 "use client";
 
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Briefcase, Newspaper, LogOut, LogIn, X, Plus, Loader2, Sparkles, Menu } from "lucide-react";
+import { Briefcase, LogIn, LogOut, Menu, Newspaper, Sparkles, X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { authApi } from "@/lib/api";
-import { useState } from "react";
+import { useDismiss } from "@/hooks/useDismiss";
+import SkillsEditor from "@/components/SkillsEditor";
 import ThemeToggle from "@/components/ThemeToggle";
 import Badge from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
 import Skeleton from "@/components/ui/Skeleton";
 
+const NAV_LINKS = [
+  { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/news", label: "News", icon: Newspaper },
+];
+const PREVIEW_SKILLS = 5;
+
+/** Desktop: up to five skills, plus a popover to edit the full list. */
+function SkillsSummary() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useDismiss(open, close, containerRef, triggerRef);
+
+  const skills = user?.skills ?? [];
+  return (
+    <div ref={containerRef} className="relative hidden lg:flex items-center gap-2 min-w-0">
+      <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider shrink-0 flex items-center gap-1">
+        <Sparkles size={11} aria-hidden="true" className="text-spruce-green" /> Skills:
+      </span>
+      <ul aria-label="Tracked skills" className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+        {skills.slice(0, PREVIEW_SKILLS).map((skill) => (
+          <li key={skill}>
+            <Badge variant="skill">{skill}</Badge>
+          </li>
+        ))}
+        {skills.length > PREVIEW_SKILLS && (
+          <li className="font-mono text-2xs text-foreground-subtle shrink-0">+{skills.length - PREVIEW_SKILLS}</li>
+        )}
+      </ul>
+      <Button
+        ref={triggerRef}
+        variant="secondary"
+        size="xs"
+        aria-expanded={open}
+        aria-controls="skills-popover"
+        onClick={() => setOpen((o) => !o)}
+        className="shrink-0 font-mono"
+      >
+        {skills.length ? "Edit" : "Add skills"}
+      </Button>
+
+      {open && (
+        <div
+          id="skills-popover"
+          role="group"
+          aria-label="Edit tracked skills"
+          className="absolute left-0 top-full mt-2 w-80 rounded-card border border-slate-soft bg-background p-4 shadow-pop"
+        >
+          <SkillsEditor autoFocus />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardNavbar() {
-  const { user, isLoading, logout, refreshUser } = useAuth();
+  const { user, isLoading, logout } = useAuth();
   const pathname = usePathname();
-  const [isEditingSkills, setIsEditingSkills] = useState(false);
-  const [skillInput, setSkillInput] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const headerRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  useDismiss(menuOpen, closeMenu, headerRef, menuButtonRef);
 
-  const navLinks = [
-    { href: "/jobs", label: "Jobs", icon: Briefcase },
-    { href: "/news", label: "News", icon: Newspaper },
-  ];
-
-  const handleAddSkill = async () => {
-    if (!skillInput.trim() || !user) return;
-    const updated = [...(user.skills || []), skillInput.trim()];
-    setIsSaving(true);
-    try {
-      await authApi.updateSkills(updated);
-      await refreshUser();
-      setSkillInput("");
-    } catch {
-      // Silently fail
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleRemoveSkill = async (skill: string) => {
-    if (!user) return;
-    const updated = user.skills.filter((s) => s !== skill);
-    setIsSaving(true);
-    try {
-      await authApi.updateSkills(updated);
-      await refreshUser();
-    } catch {
-      // Silently fail
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSkillKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleAddSkill();
-    }
-    if (e.key === "Escape") {
-      setIsEditingSkills(false);
-      setSkillInput("");
-    }
-  };
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-md border-b border-slate-soft transition-colors duration-200">
+    <header ref={headerRef} className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-md border-b border-slate-soft transition-colors duration-200">
       <div className="max-w-app mx-auto px-4 sm:px-6 lg:px-8 h-12 flex items-center justify-between gap-4">
-        
-        {/* Brand Logo & Main Nav */}
-        <div className="flex items-center gap-6">
-          <Link
-            href="/"
-            className="font-serif text-xl font-medium tracking-tight text-slate-ink hover:text-spruce-green transition-colors flex items-center gap-2"
-          >
-            <span>JobPrep</span>
+        <div className="flex items-center gap-6 min-w-0">
+          <Link href="/" className="font-serif text-xl font-medium tracking-tight text-slate-ink hover:text-spruce-green transition-colors">
+            JobPrep
           </Link>
 
-          {/* Desktop Nav Links */}
-          <nav className="hidden md:flex items-center gap-1">
-            {navLinks.map(({ href, label, icon: Icon }) => {
-              const isActive = pathname.startsWith(href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    isActive
-                      ? "bg-spruce-green/10 text-spruce-green font-semibold"
-                      : "text-foreground-muted hover:text-slate-ink hover:bg-slate-soft/30"
-                  }`}
-                >
-                  <Icon size={14} className={isActive ? "text-spruce-green" : "text-foreground-subtle"} />
-                  {label}
-                </Link>
-              );
-            })}
+          <nav aria-label="Main" className="hidden md:flex items-center gap-1">
+            {NAV_LINKS.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                aria-current={isActive(href) ? "page" : undefined}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-control text-xs font-medium transition-colors",
+                  isActive(href)
+                    ? "bg-spruce-green/10 text-spruce-green font-semibold"
+                    : "text-foreground-muted hover:text-slate-ink hover:bg-slate-soft/30",
+                )}
+              >
+                <Icon size={14} aria-hidden="true" />
+                {label}
+              </Link>
+            ))}
           </nav>
+
+          {user && <SkillsSummary />}
         </div>
 
-        {/* Center: Tracked Skills Pills (Compact View) */}
-        {user && (
-          <div className="hidden lg:flex items-center gap-2 max-w-md overflow-hidden">
-            <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider shrink-0 flex items-center gap-1">
-              <Sparkles size={11} className="text-spruce-green" /> Skills:
-            </span>
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-              {(user.skills || []).slice(0, 5).map((skill) => (
-                <Badge key={skill} variant="skill">
-                  {skill}
-                  {isEditingSkills && (
-                    <button
-                      onClick={() => handleRemoveSkill(skill)}
-                      className="text-foreground-subtle hover:text-amber-clay ml-0.5"
-                    >
-                      <X size={8} />
-                    </button>
-                  )}
-                </Badge>
-              ))}
-              {(user.skills || []).length > 5 && (
-                <span className="font-mono text-2xs text-foreground-subtle shrink-0">
-                  +{(user.skills || []).length - 5}
-                </span>
-              )}
-              {isEditingSkills ? (
-                <div className="flex items-center gap-1 shrink-0">
-                  <input
-                    type="text"
-                    value={skillInput}
-                    onChange={(e) => setSkillInput(e.target.value)}
-                    onKeyDown={handleSkillKeyDown}
-                    placeholder="New skill..."
-                    className="w-24 bg-background border border-border-strong rounded-control px-1.5 py-0.5 text-2xs text-slate-ink focus-visible:outline-offset-0 font-mono"
-                    autoFocus
-                  />
-                  <button
-                    onClick={handleAddSkill}
-                    disabled={!skillInput.trim() || isSaving}
-                    className="p-1 bg-spruce-green hover:bg-spruce-green-hover text-warm-ivory rounded text-2xs"
-                  >
-                    {isSaving ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
-                  </button>
-                  <button
-                    onClick={() => setIsEditingSkills(false)}
-                    className="text-foreground-subtle hover:text-slate-ink p-1"
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setIsEditingSkills(true)}
-                  className="font-mono text-2xs text-foreground-subtle hover:text-spruce-green border border-dashed border-slate-soft hover:border-spruce-green/50 rounded px-1.5 py-0.5 shrink-0 transition-colors"
-                >
-                  + Edit
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Right Side Actions: Theme Switch + User Account */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <ThemeToggle />
 
           {isLoading ? (
@@ -170,11 +119,8 @@ export default function DashboardNavbar() {
             // placeholder, never a "Sign In" button that then flips.
             <Skeleton className="w-40 h-6" />
           ) : user ? (
-            <div className="flex items-center gap-3 pl-2 border-l border-slate-soft">
-              <span
-                className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-[160px]"
-                title={user.email}
-              >
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-soft">
+              <span className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-40" title={user.email}>
                 {user.email}
               </span>
               <Button variant="ghost" size="icon" onClick={logout} title="Sign out" aria-label="Sign out">
@@ -187,46 +133,49 @@ export default function DashboardNavbar() {
             </ButtonLink>
           )}
 
-          {/* Mobile hamburger menu toggle */}
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-1.5 text-foreground-subtle hover:text-slate-ink"
-            aria-label="Toggle mobile menu"
+          {/* Below lg, where the skills summary is hidden; it used to appear
+              only below md, so md–lg had neither skills nor a menu. */}
+          <Button
+            ref={menuButtonRef}
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            aria-label="Menu"
+            aria-expanded={menuOpen}
+            aria-controls="app-menu"
+            onClick={() => setMenuOpen((o) => !o)}
           >
-            <Menu size={18} />
-          </button>
+            {menuOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
+          </Button>
         </div>
       </div>
 
-      {/* Mobile Menu Dropdown */}
-      {mobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-soft px-4 py-3 bg-background space-y-2">
-          {navLinks.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded text-sm font-medium ${
-                pathname.startsWith(href)
-                  ? "bg-spruce-green/10 text-spruce-green"
-                  : "text-foreground-muted hover:bg-slate-soft/30"
-              }`}
-            >
-              <Icon size={16} />
-              {label}
-            </Link>
-          ))}
+      {menuOpen && (
+        <div id="app-menu" className="lg:hidden border-t border-slate-soft px-4 py-3 bg-background space-y-3">
+          <nav aria-label="Main menu" className="md:hidden space-y-1">
+            {NAV_LINKS.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                onClick={closeMenu}
+                aria-current={isActive(href) ? "page" : undefined}
+                className={cn(
+                  "flex items-center gap-2.5 px-3 py-2 rounded-control text-sm font-medium",
+                  isActive(href) ? "bg-spruce-green/10 text-spruce-green" : "text-foreground-muted hover:bg-slate-soft/30",
+                )}
+              >
+                <Icon size={16} aria-hidden="true" />
+                {label}
+              </Link>
+            ))}
+          </nav>
           {user && (
-            <div className="pt-2 border-t border-slate-soft">
-              <p className="text-xs text-foreground-subtle font-mono mb-2">Tracked Skills</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(user.skills || []).map((skill) => (
-                  <Badge key={skill} variant="skill">
-                    {skill}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+            <section aria-labelledby="menu-skills-heading" className="md:border-t-0 border-t border-slate-soft pt-3 md:pt-0">
+              <h2 id="menu-skills-heading" className="text-xs text-foreground-subtle font-mono uppercase tracking-wider mb-2">
+                Tracked skills
+              </h2>
+              <SkillsEditor />
+            </section>
           )}
         </div>
       )}

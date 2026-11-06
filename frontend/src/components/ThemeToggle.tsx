@@ -10,14 +10,15 @@ import { Button } from "@/components/ui/Button";
  * render an invisible placeholder until mount and only then pick an icon.
  */
 export default function ThemeToggle({ className = "" }: { className?: string }) {
-  const { toggleTheme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <Button
       variant="secondary"
       size="icon"
       onClick={toggleTheme}
-      aria-label="Toggle dark mode"
+      aria-label="Dark mode"
+      aria-pressed={theme === "dark"}
       title="Toggle dark mode"
       className={className}
     >
