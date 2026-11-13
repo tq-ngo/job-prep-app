@@ -3,6 +3,7 @@
 import { useTheme } from "@/context/ThemeContext";
 import { Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
 
 /**
  * Both icons are rendered and CSS (`dark:` bound to the <html> class) shows
@@ -20,7 +21,7 @@ export default function ThemeToggle({ className = "" }: { className?: string }) 
       aria-label="Dark mode"
       aria-pressed={theme === "dark"}
       title="Toggle dark mode"
-      className={className}
+      className={cn("rounded-full transition-transform active:scale-95", className)}
     >
       <Moon size={15} aria-hidden="true" className="text-slate-ink transition-transform hover:-rotate-12 dark:hidden" />
       <Sun size={15} aria-hidden="true" className="text-amber-clay transition-transform hover:rotate-45 hidden dark:block" />
