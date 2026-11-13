@@ -12,11 +12,12 @@ export type ControlSize = "sm" | "md";
 // :focus-visible ring, pulled in tight so it hugs the border.
 const control =
   "w-full bg-background border border-border-strong rounded-control text-slate-ink font-sans " +
-  "placeholder:text-foreground-subtle transition-colors focus-visible:outline-offset-0 " +
+  "placeholder:text-foreground-subtle transition-all duration-150 focus-visible:outline-offset-0 " +
+  "hover:border-slate-ink/50 focus:bg-background " +
   "aria-invalid:border-amber-clay disabled:cursor-not-allowed disabled:bg-neutral-soft disabled:text-foreground-subtle";
 
 const sizes: Record<ControlSize, string> = {
-  sm: "h-8 px-2.5 text-xs",
+  sm: "h-8 px-3 text-xs",
   md: "h-11 px-4 text-sm",
 };
 
@@ -24,16 +25,24 @@ type InputProps = Omit<ComponentProps<"input">, "size"> & {
   size?: ControlSize;
   /** Decorative icon inside the left edge (e.g. a search glass). */
   leadingIcon?: ReactNode;
+  /** Pill shape for M3 search bars. */
+  pill?: boolean;
 };
 
 /** Text input. Inside a <Field> it picks up its id, label and descriptions. */
-export function Input({ size = "md", leadingIcon, className, ...props }: InputProps) {
+export function Input({ size = "md", leadingIcon, pill, className, ...props }: InputProps) {
   const field = useFieldControl();
   const input = (
     <input
       {...field}
       {...props}
-      className={cn(control, sizes[size], leadingIcon ? (size === "sm" ? "pl-8" : "pl-10") : undefined, !leadingIcon && className)}
+      className={cn(
+        control,
+        sizes[size],
+        pill && "rounded-full",
+        leadingIcon ? (size === "sm" ? "pl-8" : "pl-10") : undefined,
+        !leadingIcon && className,
+      )}
     />
   );
   if (!leadingIcon) return input;

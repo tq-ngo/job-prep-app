@@ -32,15 +32,16 @@ export default function MarketingMobileNav() {
         aria-expanded={open}
         aria-controls="marketing-menu"
         onClick={() => setOpen((o) => !o)}
+        className="rounded-full"
       >
         {open ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
       </Button>
       {open && (
-        <nav id="marketing-menu" aria-label="Main menu" className="absolute inset-x-0 top-16 border-b border-slate-soft bg-background px-6 py-3 shadow-pop">
+        <nav id="marketing-menu" aria-label="Main menu" className="absolute inset-x-0 top-16 border-b border-slate-soft bg-neutral-soft/95 backdrop-blur-md rounded-b-2xl px-6 py-4 shadow-pop">
           <ul className="space-y-1">
             {LINKS.map(({ href, label }) => (
               <li key={href}>
-                <Link href={href} onClick={close} className="block rounded-control px-3 py-2 text-sm font-medium text-foreground-muted hover:bg-slate-soft/30 hover:text-slate-ink">
+                <Link href={href} onClick={close} className="block rounded-full px-4 py-2.5 text-sm font-medium text-foreground-muted hover:bg-surface-container hover:text-slate-ink transition-colors">
                   {label}
                 </Link>
               </li>

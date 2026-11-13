@@ -51,7 +51,7 @@ function SkillsSummary() {
         aria-expanded={open}
         aria-controls="skills-popover"
         onClick={() => setOpen((o) => !o)}
-        className="shrink-0 font-mono"
+        className="shrink-0 font-mono rounded-full"
       >
         {skills.length ? "Edit" : "Add skills"}
       </Button>
@@ -61,7 +61,7 @@ function SkillsSummary() {
           id="skills-popover"
           role="group"
           aria-label="Edit tracked skills"
-          className="absolute left-0 top-full mt-2 w-80 rounded-card border border-slate-soft bg-background p-4 shadow-pop"
+          className="absolute left-0 top-full mt-2 w-80 rounded-card border border-slate-soft bg-neutral-soft p-4 shadow-pop"
         >
           <SkillsEditor autoFocus />
         </div>
@@ -89,17 +89,17 @@ export default function DashboardNavbar() {
             JobPrep
           </Link>
 
-          <nav aria-label="Main" className="hidden md:flex items-center gap-1">
+          <nav aria-label="Main" className="hidden md:flex items-center gap-1.5">
             {NAV_LINKS.map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
                 aria-current={isActive(href) ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-control text-xs font-medium transition-colors",
+                  "flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all duration-150",
                   isActive(href)
-                    ? "bg-spruce-green/10 text-spruce-green font-semibold"
-                    : "text-foreground-muted hover:text-slate-ink hover:bg-slate-soft/30",
+                    ? "bg-spruce-green/10 text-spruce-green font-semibold shadow-xs"
+                    : "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft",
                 )}
               >
                 <Icon size={14} aria-hidden="true" />
@@ -111,7 +111,7 @@ export default function DashboardNavbar() {
           {user && <SkillsSummary />}
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
           <ThemeToggle />
 
           {isLoading ? (
@@ -119,12 +119,19 @@ export default function DashboardNavbar() {
             // placeholder, never a "Sign In" button that then flips.
             <Skeleton className="w-40 h-6" />
           ) : user ? (
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-soft">
+            <div className="flex items-center gap-2 pl-2.5 py-0.5 pr-1 border border-slate-soft rounded-full bg-neutral-soft/80">
               <span className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-40" title={user.email}>
                 {user.email}
               </span>
-              <Button variant="ghost" size="icon" onClick={logout} title="Sign out" aria-label="Sign out">
-                <LogOut size={16} aria-hidden="true" />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={logout}
+                title="Sign out"
+                aria-label="Sign out"
+                className="h-7 w-7 rounded-full text-foreground-subtle hover:text-slate-ink hover:bg-surface-container"
+              >
+                <LogOut size={14} aria-hidden="true" />
               </Button>
             </div>
           ) : (
@@ -139,7 +146,7 @@ export default function DashboardNavbar() {
             ref={menuButtonRef}
             variant="ghost"
             size="icon"
-            className="lg:hidden"
+            className="lg:hidden rounded-full"
             aria-label="Menu"
             aria-expanded={menuOpen}
             aria-controls="app-menu"
@@ -151,7 +158,7 @@ export default function DashboardNavbar() {
       </div>
 
       {menuOpen && (
-        <div id="app-menu" className="lg:hidden border-t border-slate-soft px-4 py-3 bg-background space-y-3">
+        <div id="app-menu" className="lg:hidden border-t border-slate-soft px-4 py-3 bg-neutral-soft/95 backdrop-blur-md shadow-card space-y-3">
           <nav aria-label="Main menu" className="md:hidden space-y-1">
             {NAV_LINKS.map(({ href, label, icon: Icon }) => (
               <Link
@@ -160,8 +167,8 @@ export default function DashboardNavbar() {
                 onClick={closeMenu}
                 aria-current={isActive(href) ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 rounded-control text-sm font-medium",
-                  isActive(href) ? "bg-spruce-green/10 text-spruce-green" : "text-foreground-muted hover:bg-slate-soft/30",
+                  "flex items-center gap-2.5 px-3.5 py-2 rounded-full text-sm font-medium transition-colors",
+                  isActive(href) ? "bg-spruce-green/10 text-spruce-green font-semibold" : "text-foreground-muted hover:bg-surface-container",
                 )}
               >
                 <Icon size={16} aria-hidden="true" />

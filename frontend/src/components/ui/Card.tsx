@@ -1,12 +1,16 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "./cn";
 
-export type CardTone = "default" | "muted";
+export type CardTone = "default" | "muted" | "elevated";
 export type CardPadding = "none" | "sm" | "md" | "lg";
 
 const tones: Record<CardTone, string> = {
-  default: "bg-background",
-  muted: "bg-neutral-soft",
+  // M3 Outlined Card
+  default: "bg-background border border-slate-soft",
+  // M3 Filled Card
+  muted: "bg-neutral-soft border border-slate-soft/70",
+  // M3 Elevated Card
+  elevated: "bg-neutral-soft border border-slate-soft/80 shadow-card",
 };
 
 const paddings: Record<CardPadding, string> = {
@@ -27,10 +31,10 @@ interface CardStyle {
 /** The class string, for a card that has to be another element (e.g. an <a>). */
 export function cardClasses({ tone = "default", padding = "md", interactive, className }: CardStyle = {}) {
   return cn(
-    "rounded-card border border-slate-soft",
+    "rounded-card",
     tones[tone],
     paddings[padding],
-    interactive && "transition-colors hover:border-spruce-green/30",
+    interactive && "transition-all duration-200 hover:border-spruce-green/40 hover:shadow-m3-1",
     className,
   );
 }

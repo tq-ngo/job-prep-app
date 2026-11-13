@@ -55,9 +55,9 @@ export default function JobListItem({
         onMouseEnter={() => onPrefetch(job.id)}
         onFocus={() => onPrefetch(job.id)}
         className={cn(
-          "group flex gap-3 px-4 py-3 border-l-2 transition-colors hover:bg-slate-soft/30 -outline-offset-2",
+          "group flex gap-3 px-4 py-3.5 border-l-4 transition-all duration-150 hover:bg-neutral-soft -outline-offset-2",
           selected || defaultSelected
-            ? "border-l-spruce-green bg-spruce-green/5"
+            ? "border-l-spruce-green bg-spruce-green/8 shadow-xs"
             : "border-l-transparent",
         )}
       >

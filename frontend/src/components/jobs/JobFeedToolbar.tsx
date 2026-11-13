@@ -39,6 +39,7 @@ function SearchBox({ value, onSearch }: { value: string; onSearch: (q: string) =
   return (
     <Input
       size="sm"
+      pill
       type="search"
       leadingIcon={<Search size={14} />}
       value={text}
@@ -71,12 +72,12 @@ export default function JobFeedToolbar({
 }: JobFeedToolbarProps) {
   const onSearch = useCallback((q: string) => onFilter("q", q), [onFilter]);
   return (
-    <div className={cn("sticky top-12 z-30 bg-background/95 backdrop-blur-sm border-b border-slate-soft", className)}>
+    <div className={cn("sticky top-12 z-30 bg-background/95 backdrop-blur-md border-b border-slate-soft shadow-xs", className)}>
       <div className="max-w-app mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center gap-2">
         <h1 className="text-base font-serif font-medium text-slate-ink tracking-tight mr-1">Job Board</h1>
         <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mr-2 whitespace-nowrap">{totalLabel}</span>
         <span
-          className="inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider text-foreground-subtle mr-auto"
+          className="inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-soft border border-slate-soft text-foreground-subtle mr-auto select-none"
           title={liveConnected ? "Live updates connected" : "Live updates disconnected"}
         >
           <span aria-hidden="true" className={cn("w-1.5 h-1.5 rounded-full", liveConnected ? "bg-spruce-green animate-pulse" : "bg-slate-soft")} />
@@ -85,7 +86,13 @@ export default function JobFeedToolbar({
 
         <SearchBox value={filters.q} onSearch={onSearch} />
 
-        <Select size="sm" aria-label="Category" value={filters.category} onChange={(e) => onFilter("category", e.target.value)}>
+        <Select
+          size="sm"
+          aria-label="Category"
+          value={filters.category}
+          onChange={(e) => onFilter("category", e.target.value)}
+          className="rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container"
+        >
           <option value="">All Categories</option>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
@@ -94,7 +101,13 @@ export default function JobFeedToolbar({
           ))}
         </Select>
 
-        <Select size="sm" aria-label="Source" value={filters.source} onChange={(e) => onFilter("source", e.target.value)}>
+        <Select
+          size="sm"
+          aria-label="Source"
+          value={filters.source}
+          onChange={(e) => onFilter("source", e.target.value)}
+          className="rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container"
+        >
           <option value="">All Sources</option>
           {SOURCES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -103,11 +116,23 @@ export default function JobFeedToolbar({
           ))}
         </Select>
 
-        <Button variant="secondary" size="sm" aria-pressed={filters.remote} onClick={() => onFilter("remote", filters.remote ? "" : "true")}>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="rounded-full font-mono text-2xs uppercase tracking-wider"
+          aria-pressed={filters.remote}
+          onClick={() => onFilter("remote", filters.remote ? "" : "true")}
+        >
           Remote
         </Button>
 
-        <Button size="sm" onClick={onRefresh} loading={refreshing} icon={<RefreshCw size={12} aria-hidden="true" />}>
+        <Button
+          size="sm"
+          className="rounded-full shadow-xs"
+          onClick={onRefresh}
+          loading={refreshing}
+          icon={<RefreshCw size={12} aria-hidden="true" />}
+        >
           {refreshing ? "Syncing…" : "Refresh"}
         </Button>
       </div>

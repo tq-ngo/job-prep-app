@@ -21,18 +21,23 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
       href={article.url}
       target="_blank"
       rel="noopener noreferrer"
-      className={cardClasses({ padding: "lg", className: "block hover:bg-neutral-soft transition-colors duration-200 group" })}
+      className={cardClasses({
+        tone: "muted",
+        padding: "lg",
+        interactive: true,
+        className: "block group shadow-xs hover:shadow-m3-1 transition-all duration-200",
+      })}
     >
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <span className="font-mono text-2xs font-medium uppercase tracking-wider text-amber-clay">{article.source_domain}</span>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Badge variant="source">{article.source_domain}</Badge>
         {article.categories?.map((cat) => (
-          <span key={cat} className="font-mono text-2xs font-medium uppercase tracking-wider text-spruce-green">
-            • {cat}
-          </span>
+          <Badge key={cat} variant="skill">
+            {cat}
+          </Badge>
         ))}
         {article.published_at && (
           <span className="ml-auto font-mono text-2xs text-foreground-subtle flex items-center gap-1">
-            <Clock size={10} aria-hidden="true" />
+            <Clock size={11} aria-hidden="true" />
             <time dateTime={article.published_at}>{formatDate(article.published_at)}</time>
           </span>
         )}
@@ -50,10 +55,10 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
         </p>
       )}
 
-      <div className="flex items-center gap-2 mt-4 flex-wrap">
+      <div className="flex items-center gap-1.5 mt-4 flex-wrap">
         {article.tags?.map((tag) => (
-          <Badge key={tag}>
-            <Tag size={8} aria-hidden="true" /> {tag}
+          <Badge key={tag} variant="neutral">
+            <Tag size={9} aria-hidden="true" /> {tag}
           </Badge>
         ))}
         {article.scraped_at && (

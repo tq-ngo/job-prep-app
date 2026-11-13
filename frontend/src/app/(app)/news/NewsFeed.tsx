@@ -42,6 +42,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
           </div>
           <Button
             size="sm"
+            className="rounded-full shadow-xs"
             onClick={() => linkedin.run(undefined).catch(() => {})}
             loading={linkedin.busy}
             icon={<RefreshCw size={13} aria-hidden="true" />}

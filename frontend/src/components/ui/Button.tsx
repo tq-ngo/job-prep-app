@@ -8,21 +8,26 @@ export type ButtonSize = "xs" | "sm" | "md" | "lg" | "icon";
 
 const base =
   "inline-flex items-center justify-center font-sans font-medium rounded-control whitespace-nowrap " +
-  "transition-colors cursor-pointer disabled:cursor-not-allowed aria-disabled:cursor-not-allowed";
+  "transition-all duration-150 cursor-pointer disabled:cursor-not-allowed aria-disabled:cursor-not-allowed select-none " +
+  "active:scale-[0.98] disabled:active:scale-100";
 
 const variants: Record<ButtonVariant, string> = {
+  // M3 Filled Button: high-emphasis solid container with subtle elevation
   primary:
-    "bg-spruce-green text-warm-ivory shadow-card hover:bg-spruce-green-hover " +
+    "bg-spruce-green text-warm-ivory shadow-card hover:bg-spruce-green-hover hover:shadow-m3-1 " +
     "disabled:bg-slate-soft disabled:text-foreground-subtle disabled:shadow-none",
-  // `aria-pressed` turns a secondary button into a toggle with a selected look.
+  // M3 Filled Tonal Button: medium-emphasis tonal surface container
   secondary:
-    "bg-background border border-slate-soft text-slate-ink hover:border-spruce-green/50 " +
+    "bg-neutral-soft border border-slate-soft text-slate-ink hover:bg-surface-container hover:border-spruce-green/40 " +
     "aria-pressed:bg-spruce-green/10 aria-pressed:border-spruce-green/40 aria-pressed:text-spruce-green " +
-    "disabled:text-foreground-subtle disabled:hover:border-slate-soft",
+    "disabled:text-foreground-subtle disabled:hover:border-slate-soft disabled:hover:bg-neutral-soft",
+  // M3 Text / Ghost Button: low-emphasis flat interaction
   ghost:
-    "text-foreground-muted hover:text-slate-ink hover:bg-slate-soft/40 disabled:text-foreground-subtle disabled:hover:bg-transparent",
+    "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft active:bg-surface-container " +
+    "disabled:text-foreground-subtle disabled:hover:bg-transparent",
+  // M3 Danger Tonal Button
   danger:
-    "bg-amber-clay/10 border border-amber-clay/30 text-amber-clay-on-tint hover:border-amber-clay " +
+    "bg-amber-clay/10 border border-amber-clay/30 text-amber-clay-on-tint hover:bg-amber-clay/15 hover:border-amber-clay " +
     "disabled:opacity-60",
 };
 

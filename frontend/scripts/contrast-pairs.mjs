@@ -17,12 +17,19 @@ export const PAIRS = [
   ["foreground-muted", "neutral-soft", 4.5],
   ["foreground-subtle", "neutral-soft", 4.5],
   ["foreground-heading", "neutral-soft", 4.5],
+  ["foreground-heading", "surface-container", 4.5],
+  ["foreground", "surface-container", 4.5],
+  ["foreground-muted", "surface-container", 4.5],
+  ["foreground-heading", "surface-container-high", 4.5],
+  ["foreground", "surface-container-high", 4.5],
 
   // Accents as text
   ["spruce-green", "background", 4.5],
   ["spruce-green", "neutral-soft", 4.5],
+  ["spruce-green", "surface-container", 4.5],
   ["spruce-green-hover", "background", 4.5],
   ["amber-clay", "background", 4.5],
+  ["amber-clay-on-tint", "neutral-soft", 4.5],
 
   // Primary button label, at rest and hovered
   ["background", "spruce-green", 4.5],

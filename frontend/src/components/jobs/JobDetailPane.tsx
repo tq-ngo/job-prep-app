@@ -114,7 +114,7 @@ export default function JobDetailPane({
 
   return (
     <section ref={paneRef} aria-labelledby={titleId} className={cn("flex-col min-w-0 lg:flex-1 lg:overflow-y-auto", className)}>
-      <header className="sticky top-12 lg:top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-slate-soft px-4 sm:px-6 lg:px-8 py-4">
+      <header className="sticky top-12 lg:top-0 z-10 bg-background/95 backdrop-blur-md border-b border-slate-soft px-4 sm:px-6 lg:px-8 py-4 shadow-xs">
         <div className="mb-2 lg:hidden">{backButton}</div>
         <div className="flex items-start gap-4">
           <CompanyAvatar company={job.company} size="lg" />
@@ -129,7 +129,7 @@ export default function JobDetailPane({
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
             </p>
           </div>
-          <ButtonLink href={job.apply_url} external size="sm" className="shrink-0">
+          <ButtonLink href={job.apply_url} external size="sm" className="shrink-0 rounded-full px-4 shadow-xs">
             Apply <ExternalLink size={13} aria-hidden="true" />
           </ButtonLink>
         </div>
@@ -139,7 +139,7 @@ export default function JobDetailPane({
       <div className="max-w-3xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {metrics.map(({ label, value }) => (
-            <div key={label} className="border border-slate-soft rounded-control p-3 bg-neutral-soft">
+            <div key={label} className="border border-slate-soft/80 rounded-xl p-3.5 bg-neutral-soft shadow-xs">
               <dt className="text-2xs font-mono text-foreground-subtle uppercase tracking-wider mb-1">{label}</dt>
               <dd className="text-xs font-sans font-medium text-slate-ink truncate">{value}</dd>
             </div>
@@ -170,7 +170,7 @@ export default function JobDetailPane({
           ) : description ? (
             <JobDescription markdown={description} />
           ) : (
-            <div className="py-10 text-center border border-dashed border-slate-soft rounded-card p-8">
+            <div className="py-10 text-center border border-dashed border-slate-soft rounded-2xl p-8 bg-neutral-soft/40">
               <p className="font-sans text-sm text-foreground-muted mb-3">The full description isn&apos;t available here yet.</p>
               <a
                 href={job.apply_url}

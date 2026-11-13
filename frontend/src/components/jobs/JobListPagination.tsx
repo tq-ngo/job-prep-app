@@ -21,10 +21,10 @@ export default function JobListPagination({
         {capped ? "+" : ""} total)
       </span>
       <div className="flex gap-2">
-        <Button variant="secondary" size="sm" onClick={() => onPage(page - 1)} disabled={page <= 1}>
+        <Button variant="secondary" size="sm" className="rounded-full" onClick={() => onPage(page - 1)} disabled={page <= 1}>
           Prev
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => onPage(page + 1)} disabled={page >= pages}>
+        <Button variant="secondary" size="sm" className="rounded-full" onClick={() => onPage(page + 1)} disabled={page >= pages}>
           Next
         </Button>
       </div>
