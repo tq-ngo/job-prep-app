@@ -1,45 +1,104 @@
-name: Docker build
+name: CI
 
 on:
   push:
     branches: [main]
-    paths: &docker_paths
-      - "**/Dockerfile"
-      - "**/.dockerignore"
-      - "docker-compose*.yml"
-      - "backend/requirements*.txt"
-      - "frontend/package*.json"
-      - "infra/**"
-      - ".github/workflows/docker.yml"
   pull_request:
-    paths: *docker_paths
 
 permissions:
   contents: read
 
 concurrency:
-  group: docker-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Compose build
+  backend:
+    name: Backend tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v7
-      # Compose's env_file and ${VAR} interpolation both read .env.
-      - run: cp .env.example .env
-      - name: Validate compose (dev = base + override, and production)
-        run: |
-          docker compose config --quiet
-          docker compose -f docker-compose.yml config --quiet
-      - name: Validate nginx config
-        # Upstream hosts only need to resolve; nginx -t doesn't connect.
-        run: >
-          docker run --rm
-          --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1
-          -e SERVER_NAME=localhost -e 'NGINX_ENVSUBST_FILTER=^SERVER_NAME$'
-          -v "$PWD/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
-          -v "$PWD/infra/nginx/templates:/etc/nginx/templates:ro"
-          nginx:alpine nginx -t
-      - run: docker compose build backend frontend
+      - uses: actions/setup-python@v7
+        with:
+          # Match the python:3.11-slim runtime image.
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      # Env defaults live in tests/conftest.py; Redis is faked, DB is SQLite.
+      - run: pytest -m "not pg"
+
+  backend-pg:
+    name: Migrations & Postgres tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jobprep_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d jobprep_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/jobprep_ci
+      PG_TEST_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/jobprep_ci
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      SECRET_KEY: ci-only-secret-key-that-is-at-least-32-chars
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Check models match migrations
+        run: alembic check
+      - run: pytest -m pg
+
+  frontend:
+    name: Frontend lint, types, tests & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - name: Type-check
+        run: npx tsc --noEmit
+      - run: npm test
+      - name: WCAG contrast audit
+        run: npm run check:contrast
+      - run: npm run build
