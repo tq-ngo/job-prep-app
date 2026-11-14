@@ -102,7 +102,7 @@ export default async function MarketingLayout({ children }: { children: React.Re
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link
             href="/"
-            className="font-serif text-xl font-medium tracking-tight text-slate-ink hover:text-spruce-green transition-colors"
+            className="font-serif text-xl font-medium tracking-tight text-slate-ink hover:text-tech-blue transition-colors"
           >
             JobPrep
           </Link>
@@ -154,12 +154,12 @@ export default async function MarketingLayout({ children }: { children: React.Re
             © 2026 JobPrep · Built with Next.js, FastAPI, Celery, Gemini
           </p>
           <nav aria-label="Footer" className="flex gap-4 text-foreground-muted">
-            <Link href="/jobs" className="hover:text-spruce-green transition-colors">Jobs</Link>
-            <Link href="/news" className="hover:text-spruce-green transition-colors">Radar</Link>
+            <Link href="/jobs" className="hover:text-tech-blue transition-colors">Jobs</Link>
+            <Link href="/news" className="hover:text-tech-blue transition-colors">Radar</Link>
             {!user && (
               <>
-                <Link href="/login" className="hover:text-spruce-green transition-colors">Sign In</Link>
-                <Link href="/register" className="hover:text-spruce-green transition-colors">Register</Link>
+                <Link href="/login" className="hover:text-tech-blue transition-colors">Sign In</Link>
+                <Link href="/register" className="hover:text-tech-blue transition-colors">Register</Link>
               </>
             )}
           </nav>

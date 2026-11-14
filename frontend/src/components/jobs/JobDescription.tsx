@@ -20,13 +20,13 @@ const markdownComponents: Components = {
   li: (props) => <li className="pl-0.5" {...props} />,
   strong: (props) => <strong className="font-semibold text-slate-ink" {...props} />,
   blockquote: (props) => (
-    <blockquote className="border-l-2 border-spruce-green/40 pl-3 my-3 text-foreground-muted italic" {...props} />
+    <blockquote className="border-l-2 border-tech-blue/40 pl-3 my-3 text-foreground-muted italic" {...props} />
   ),
   hr: () => <hr className="my-4 border-slate-soft" />,
   a: ({ href, ...props }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer nofollow" className="text-spruce-green underline underline-offset-2" {...props} />
+    <a href={href} target="_blank" rel="noopener noreferrer nofollow" className="text-tech-blue underline underline-offset-2" {...props} />
   ),
-  code: (props) => <code className="bg-neutral-soft px-1.5 py-0.5 rounded-control font-mono text-xs text-spruce-green" {...props} />,
+  code: (props) => <code className="bg-neutral-soft px-1.5 py-0.5 rounded-control font-mono text-xs text-tech-blue" {...props} />,
   pre: (props) => <pre className="bg-neutral-soft p-3 rounded-control overflow-x-auto text-xs mb-3" {...props} />,
   table: (props) => (
     <div className="overflow-x-auto mb-3">

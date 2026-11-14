@@ -33,7 +33,7 @@ export default function AddArticleForm() {
   return (
     <Card as="section" tone="muted" padding="sm" className="mb-8" aria-labelledby="add-article-heading">
       <h2 id="add-article-heading" className="text-xs font-sans font-medium text-slate-ink mb-3 flex items-center gap-2">
-        <Radio size={14} aria-hidden="true" className="text-spruce-green" /> Add Article to Radar
+        <Radio size={14} aria-hidden="true" className="text-tech-blue" /> Add Article to Radar
       </h2>
       <form onSubmit={handleSubmit} className="flex gap-2 items-start">
         <Field label="Article URL" labelVisible={false} className="flex-1">

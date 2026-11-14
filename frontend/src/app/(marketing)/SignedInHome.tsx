@@ -54,16 +54,16 @@ export default function SignedInHome({
       <section className="max-w-6xl mx-auto px-6 mb-16">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-spruce-green/10 border border-spruce-green/20 mb-5">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green animate-pulse" />
-              <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-tech-blue/10 border border-tech-blue/20 mb-5">
+              <span className="w-1.5 h-1.5 rounded-full bg-tech-blue animate-pulse" />
+              <span className="font-mono text-2xs uppercase tracking-widest text-tech-blue font-semibold">
                 Live Command Center · Signed in as {user.email}
               </span>
             </div>
 
             <h1 className="text-4xl sm:text-5xl font-serif font-medium text-slate-ink leading-[1.15] tracking-tight mb-4">
               Welcome back, <br />
-              <span className="text-spruce-green italic">{name}</span>.
+              <span className="text-tech-blue italic">{name}</span>.
             </h1>
 
             <p className="text-base text-foreground-muted leading-relaxed mb-6 max-w-lg">
@@ -120,7 +120,7 @@ export default function SignedInHome({
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles size={16} className="text-spruce-green" />
+                <Sparkles size={16} className="text-tech-blue" />
                 <h2 className="text-lg font-serif font-medium text-slate-ink">Your Tracked Skills</h2>
               </div>
               <p className="text-xs text-foreground-muted mt-0.5">
@@ -138,7 +138,7 @@ export default function SignedInHome({
                 <Link
                   key={skill}
                   href={`/jobs?skill=${encodeURIComponent(skill)}`}
-                  className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-spruce-green/10 text-spruce-green border border-spruce-green/20 hover:bg-spruce-green/20 transition-colors text-xs font-mono font-medium"
+                  className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-tech-blue/10 text-tech-blue border border-tech-blue/20 hover:bg-tech-blue/20 transition-colors text-xs font-mono font-medium"
                 >
                   <span>{skill}</span>
                   <ExternalLink size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
@@ -160,7 +160,7 @@ export default function SignedInHome({
       <section className="py-14 border-t border-slate-soft bg-neutral-soft/30">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center max-w-xl mx-auto mb-10">
-            <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+            <span className="font-mono text-2xs uppercase tracking-widest text-tech-blue font-semibold">
               Live Intelligence Engine
             </span>
             <h2 className="text-2xl font-serif font-medium text-slate-ink tracking-tight mt-1.5">

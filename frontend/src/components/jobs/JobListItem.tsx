@@ -59,13 +59,13 @@ export default function JobListItem({
         className={cn(
           "group flex gap-3 px-4 py-3.5 border-l-4 transition-all duration-150 hover:bg-neutral-soft -outline-offset-2",
           selected || defaultSelected
-            ? "border-l-spruce-green bg-spruce-green/8 shadow-xs"
+            ? "border-l-tech-blue bg-tech-blue/8 shadow-xs"
             : "border-l-transparent",
         )}
       >
-        <CompanyAvatar company={job.company} />
+        <CompanyAvatar company={job.company} companyDomain={job.company_domain} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-ink leading-snug line-clamp-2 group-hover:text-spruce-green transition-colors">
+          <p className="text-sm font-medium text-slate-ink leading-snug line-clamp-2 group-hover:text-tech-blue transition-colors">
             {job.title}
           </p>
           <p className="mt-0.5 text-xs text-foreground-muted truncate">{job.company}</p>
@@ -75,7 +75,15 @@ export default function JobListItem({
             {pay && <span>{pay}</span>}
             {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
             {sponsorship?.label && (
-              <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
+              <Badge
+                variant={
+                  sponsorship.status === "citizenship"
+                    ? "citizenship"
+                    : sponsorship.status === "no_sponsorship"
+                      ? "no_sponsorship"
+                      : "sponsorship"
+                }
+              >
                 {sponsorship.label}
               </Badge>
             )}
@@ -91,16 +99,13 @@ export default function JobListItem({
             </div>
           )}
 
-          <p className="mt-2 flex items-center gap-2 font-mono text-2xs text-foreground-subtle">
-            <Badge variant="source">{job.source}</Badge>
-            {job.posted_at && (
-              // Relative to now, so it can differ by a day between the server
-              // render and hydration around midnight.
+          {job.posted_at && (
+            <p className="mt-2 flex items-center font-mono text-2xs text-foreground-subtle">
               <time dateTime={job.posted_at} suppressHydrationWarning>
                 {formatPostedAgo(job.posted_at)}
               </time>
-            )}
-          </p>
+            </p>
+          )}
         </div>
       </a>
     </li>

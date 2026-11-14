@@ -54,9 +54,9 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
 
             {/* Left: Editorial Copy */}
             <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-spruce-green/10 border border-spruce-green/20 mb-6">
-                <div className="w-1.5 h-1.5 rounded-full bg-spruce-green animate-pulse" />
-                <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-tech-blue/10 border border-tech-blue/20 mb-6">
+                <div className="w-1.5 h-1.5 rounded-full bg-tech-blue animate-pulse" />
+                <span className="font-mono text-2xs uppercase tracking-widest text-tech-blue font-semibold">
                   {stats && stats.added_24h > 0
                     ? `${stats.added_24h.toLocaleString("en-US")} new roles in the last 24h`
                     : "Crawled every 6 hours from GitHub & LinkedIn"}
@@ -65,7 +65,7 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
 
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-medium text-slate-ink leading-[1.12] tracking-tight mb-6">
                 Your automated <br />
-                <span className="text-spruce-green italic">tech career</span> command center.
+                <span className="text-tech-blue italic">tech career</span> command center.
               </h1>
 
               <p className="text-base sm:text-lg text-foreground-muted leading-relaxed mb-8 max-w-lg">
@@ -120,7 +120,7 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
       <section id="features" className="py-20 border-t border-slate-soft bg-neutral-soft/30">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center max-w-xl mx-auto mb-14">
-            <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+            <span className="font-mono text-2xs uppercase tracking-widest text-tech-blue font-semibold">
               Engineered for Quality
             </span>
             <h2 className="text-3xl font-serif font-medium text-slate-ink tracking-tight mt-2">
@@ -158,7 +158,7 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
             <Card interactive className="flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <Search size={18} className="text-spruce-green" />
+                  <Search size={18} className="text-tech-blue" />
                   <h3 className="font-serif text-base font-medium text-slate-ink">Semantic Vector Search</h3>
                 </div>
                 <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
@@ -180,8 +180,8 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
                 <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
                   Google sign-in with PKCE, HttpOnly SameSite=Lax session cookies, rotating refresh tokens with reuse detection, and double-submit CSRF.
                 </p>
-                <div className="flex items-center gap-2 text-2xs font-mono text-spruce-green">
-                  <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> No tokens in localStorage
+                <div className="flex items-center gap-2 text-2xs font-mono text-tech-blue">
+                  <span className="w-1.5 h-1.5 rounded-full bg-tech-blue" /> No tokens in localStorage
                 </div>
               </div>
             </Card>

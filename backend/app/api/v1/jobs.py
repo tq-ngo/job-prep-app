@@ -43,6 +43,7 @@ def to_job_list_item(j: Job) -> JobListItem:
         source_url=j.source_url,
         title=j.title,
         company=j.company,
+        company_domain=getattr(j, "company_domain", None),
         location=j.location,
         apply_url=j.apply_url,
         salary_min=j.salary_min,
@@ -77,6 +78,7 @@ def to_job_read(j: Job) -> JobRead:
         source_url=j.source_url,
         title=j.title,
         company=j.company,
+        company_domain=getattr(j, "company_domain", None),
         location=j.location,
         description=j.description,
         apply_url=j.apply_url,
@@ -212,13 +214,37 @@ async def list_jobs(
                 ),
             )
         elif sp in ("requires_citizenship", "citizenship"):
+            spons_filter = and_(
+                ~Job.description.ilike("%without regard to%citizenship%"),
+                ~Job.description.ilike("%regardless of%citizenship%"),
+                or_(
+                    Job.title.ilike("%citizen%"),
+                    Job.title.ilike("%clearance%"),
+                    Job.title.ilike("%itar%"),
+                    Job.description.ilike("%u.s. citizen%"),
+                    Job.description.ilike("%us citizen%"),
+                    Job.description.ilike("%u.s. person%"),
+                    Job.description.ilike("%security clearance%"),
+                    Job.description.ilike("%secret clearance%"),
+                    Job.description.ilike("%top secret%"),
+                    Job.description.ilike("%dod clearance%"),
+                    Job.description.ilike("%itar%"),
+                    Job.description.ilike("%export control%"),
+                ),
+            )
+        elif sp in ("no_sponsorship", "not_sponsored", "none"):
             spons_filter = or_(
-                Job.title.ilike("%citizen%"),
-                Job.title.ilike("%clearance%"),
-                Job.title.ilike("%itar%"),
-                Job.description.ilike("%citizen%"),
-                Job.description.ilike("%clearance%"),
-                Job.description.ilike("%itar%"),
+                Job.title.ilike("%no sponsorship%"),
+                Job.description.ilike("%not sponsor%"),
+                Job.description.ilike("%will not sponsor%"),
+                Job.description.ilike("%does not sponsor%"),
+                Job.description.ilike("%no visa sponsorship%"),
+                Job.description.ilike("%without%sponsorship%"),
+                Job.description.ilike("%not require%sponsorship%"),
+                Job.description.ilike("%not eligible%student%"),
+                Job.description.ilike("%not eligible%f-1%"),
+                Job.description.ilike("%not eligible%opt%"),
+                Job.description.ilike("%not eligible%cpt%"),
             )
         else:
             spons_filter = None

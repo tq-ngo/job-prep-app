@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import { cn } from "./cn";
 
-export type BadgeVariant = "source" | "remote" | "skill" | "neutral" | "sponsorship" | "citizenship";
+export type BadgeVariant = "source" | "remote" | "skill" | "neutral" | "sponsorship" | "citizenship" | "no_sponsorship";
 
 // Every text/surface combination here is in scripts/contrast-pairs.mjs.
 const variants: Record<BadgeVariant, string> = {
@@ -9,10 +9,11 @@ const variants: Record<BadgeVariant, string> = {
   source: "bg-amber-clay/10 text-amber-clay-on-tint border border-amber-clay/20",
   remote: "bg-amber-clay/10 text-amber-clay-on-tint border border-amber-clay/20",
   // Extracted skill - M3 assist chip
-  skill: "bg-spruce-green/10 text-spruce-green border border-spruce-green/25",
+  skill: "bg-tech-blue/10 text-tech-blue border border-tech-blue/25",
   // Visa sponsorship tags
-  sponsorship: "bg-spruce-green/10 text-spruce-green border border-spruce-green/25",
+  sponsorship: "bg-tech-blue/10 text-tech-blue border border-tech-blue/25",
   citizenship: "bg-amber-clay/10 text-amber-clay-on-tint border border-amber-clay/30",
+  no_sponsorship: "bg-amber-clay/10 text-amber-clay-on-tint border border-amber-clay/30",
   // Neutral tag / filter
   neutral: "bg-neutral-soft text-slate-ink border border-slate-soft",
 };

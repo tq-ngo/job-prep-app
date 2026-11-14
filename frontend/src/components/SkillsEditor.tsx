@@ -75,7 +75,7 @@ export default function SkillsEditor({ autoFocus = false }: { autoFocus?: boolea
                   onClick={() => save(skills.filter((s) => s !== skill))}
                   disabled={saving}
                   aria-label={`Remove ${skill}`}
-                  className="-my-1 inline-flex h-6 w-6 items-center justify-center rounded-control hover:bg-spruce-green/15 disabled:cursor-not-allowed"
+                  className="-my-1 inline-flex h-6 w-6 items-center justify-center rounded-control hover:bg-tech-blue/15 disabled:cursor-not-allowed"
                 >
                   <X size={11} aria-hidden="true" />
                 </button>

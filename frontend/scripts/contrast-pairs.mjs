@@ -24,25 +24,25 @@ export const PAIRS = [
   ["foreground", "surface-container-high", 4.5],
 
   // Accents as text
-  ["spruce-green", "background", 4.5],
-  ["spruce-green", "neutral-soft", 4.5],
-  ["spruce-green", "surface-container", 4.5],
-  ["spruce-green-hover", "background", 4.5],
+  ["tech-blue", "background", 4.5],
+  ["tech-blue", "neutral-soft", 4.5],
+  ["tech-blue", "surface-container", 4.5],
+  ["tech-blue-hover", "background", 4.5],
   ["amber-clay", "background", 4.5],
   ["amber-clay-on-tint", "neutral-soft", 4.5],
 
   // Primary button label, at rest and hovered
-  ["background", "spruce-green", 4.5],
-  ["background", "spruce-green-hover", 4.5],
+  ["background", "tech-blue", 4.5],
+  ["background", "tech-blue-hover", 4.5],
 
   // Tinted badges and alerts (Badge, Alert, selected toggles)
-  ["spruce-green", "spruce-green/10", 4.5],
+  ["tech-blue", "tech-blue/10", 4.5],
   ["amber-clay-on-tint", "amber-clay/10", 4.5],
   ["foreground-heading", "border-soft/40", 4.5], // ghost button hover (bg-slate-soft/40)
 
-  // Job list rows: selected (bg-spruce-green/5) and hovered (bg-slate-soft/30)
-  ["foreground-subtle", "spruce-green/5", 4.5],
-  ["foreground-muted", "spruce-green/5", 4.5],
+  // Job list rows: selected (bg-tech-blue/5) and hovered (bg-slate-soft/30)
+  ["foreground-subtle", "tech-blue/5", 4.5],
+  ["foreground-muted", "tech-blue/5", 4.5],
   ["foreground-subtle", "border-soft/30", 4.5],
 
   // Non-text: input borders and the focus ring must be visible (3:1)

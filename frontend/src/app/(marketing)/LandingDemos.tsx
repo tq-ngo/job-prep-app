@@ -70,14 +70,14 @@ export function InteractiveLiveCard() {
   return (
     <div className="relative w-full max-w-lg mx-auto lg:mx-0">
       {/* Glow highlight */}
-      <div className="absolute -inset-1.5 bg-gradient-to-r from-spruce-green/20 via-amber-clay/10 to-spruce-green/20 rounded-2xl blur-xl opacity-70" />
+      <div className="absolute -inset-1.5 bg-gradient-to-r from-tech-blue/20 via-amber-clay/10 to-tech-blue/20 rounded-2xl blur-xl opacity-70" />
       
       <div className="relative bg-background border border-slate-soft rounded-card shadow-pop overflow-hidden">
         {/* Mock Window Title Bar */}
         <div className="px-5 py-3 border-b border-slate-soft bg-neutral-soft/50 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-spruce-green animate-pulse" />
-            <span className="font-mono text-2xs font-semibold uppercase tracking-wider text-spruce-green">
+            <div className="w-2.5 h-2.5 rounded-full bg-tech-blue animate-pulse" />
+            <span className="font-mono text-2xs font-semibold uppercase tracking-wider text-tech-blue">
               Live feed preview
             </span>
           </div>
@@ -109,7 +109,7 @@ export function InteractiveLiveCard() {
                 onClick={() => setFilter(cat)}
                 className={`px-2 py-0.5 rounded text-2xs font-mono transition-colors ${
                   filter === cat
-                    ? "bg-spruce-green/10 text-spruce-green font-medium"
+                    ? "bg-tech-blue/10 text-tech-blue font-medium"
                     : "text-foreground-subtle hover:text-slate-ink"
                 }`}
               >
@@ -133,7 +133,7 @@ export function InteractiveLiveCard() {
             >
               <div className="min-w-0 flex-1 pr-3">
                 <div className="flex items-center gap-2">
-                  <p className="text-xs font-medium text-slate-ink truncate group-hover:text-spruce-green transition-colors">
+                  <p className="text-xs font-medium text-slate-ink truncate group-hover:text-tech-blue transition-colors">
                     {job.title}
                   </p>
                   <Badge variant="skill">{job.category}</Badge>
@@ -157,7 +157,7 @@ export function InteractiveLiveCard() {
         {/* Card Footer */}
         <div className="px-4 py-2.5 bg-neutral-soft/30 border-t border-slate-soft flex items-center justify-between text-2xs font-mono text-foreground-subtle">
           <span>Illustrative listings</span>
-          <span className="text-spruce-green flex items-center gap-1">
+          <span className="text-tech-blue flex items-center gap-1">
             <CheckCircle2 size={11} /> Pushed over SSE in the app
           </span>
         </div>
@@ -196,14 +196,14 @@ export function BentoAIDemoCard() {
           <div className="border-t border-slate-soft pt-2">
             {analyzed ? (
               <div className="space-y-1.5 text-xs animate-fadeSlideIn">
-                <div className="font-mono text-2xs text-spruce-green font-semibold flex items-center gap-1">
+                <div className="font-mono text-2xs text-tech-blue font-semibold flex items-center gap-1">
                   <Sparkles size={10} /> Example takeaways:
                 </div>
                 <div className="flex items-center gap-2 text-foreground-muted">
-                  <span className="text-spruce-green">→</span> Hiring Sentiment: <strong className="text-spruce-green">Bullish (SWE/ML)</strong>
+                  <span className="text-tech-blue">→</span> Hiring Sentiment: <strong className="text-tech-blue">Bullish (SWE/ML)</strong>
                 </div>
                 <div className="flex items-center gap-2 text-foreground-muted">
-                  <span className="text-spruce-green">→</span> Impact: High infrastructure scale
+                  <span className="text-tech-blue">→</span> Impact: High infrastructure scale
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1 pt-1">
                   {["CUDA", "Triton", "PyTorch", "RDMA"].map(skill => (
@@ -216,7 +216,7 @@ export function BentoAIDemoCard() {
             ) : (
               <div className="flex items-center justify-between py-1 text-foreground-subtle font-mono text-2xs">
                 <span>Click &quot;Transform with Gemini&quot; to test AI parsing</span>
-                <ArrowRight size={12} className="text-spruce-green" />
+                <ArrowRight size={12} className="text-tech-blue" />
               </div>
             )}
           </div>
@@ -248,7 +248,7 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Radio size={18} aria-hidden="true" className="text-spruce-green" />
+            <Radio size={18} aria-hidden="true" className="text-tech-blue" />
             <h3 className="font-serif text-base font-medium text-slate-ink">Real-Time Sync (SSE)</h3>
           </div>
           <Badge variant="skill">Live Stream</Badge>
@@ -267,7 +267,7 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
           <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-1">Simulated events</p>
           <p
             aria-live="polite"
-            className={`font-serif text-3xl font-medium transition-transform ${animating ? "scale-110 text-spruce-green" : "text-slate-ink"}`}
+            className={`font-serif text-3xl font-medium transition-transform ${animating ? "scale-110 text-tech-blue" : "text-slate-ink"}`}
           >
             {simulated}
           </p>
@@ -286,7 +286,7 @@ export function BentoPipelineCard() {
     <Card interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <GitBranch size={18} aria-hidden="true" className="text-spruce-green" />
+          <GitBranch size={18} aria-hidden="true" className="text-tech-blue" />
           <h3 className="font-serif text-base font-medium text-slate-ink">Daily Crawler Pipeline</h3>
         </div>
         <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
@@ -297,13 +297,13 @@ export function BentoPipelineCard() {
         <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 space-y-2 font-mono text-2xs">
           <div className="flex items-center justify-between text-foreground-subtle">
             <span className="flex items-center gap-1.5 text-slate-ink">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> GitHub Repos
+              <span className="w-1.5 h-1.5 rounded-full bg-tech-blue" /> GitHub Repos
             </span>
             <span className="text-amber-clay">every 6h</span>
           </div>
           <div className="flex items-center justify-between text-foreground-subtle">
             <span className="flex items-center gap-1.5 text-slate-ink">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> LinkedIn Guest API
+              <span className="w-1.5 h-1.5 rounded-full bg-tech-blue" /> LinkedIn Guest API
             </span>
             <span className="text-amber-clay">daily</span>
           </div>
@@ -313,7 +313,7 @@ export function BentoPipelineCard() {
             <span>↓ 3-Tier Dedup: LRU → Redis → PostgreSQL ↓</span>
           </div>
 
-          <div className="p-2 rounded bg-spruce-green/10 border border-spruce-green/20 text-spruce-green text-center font-medium">
+          <div className="p-2 rounded bg-tech-blue/10 border border-tech-blue/20 text-tech-blue text-center font-medium">
             One canonical listing per role
           </div>
         </div>

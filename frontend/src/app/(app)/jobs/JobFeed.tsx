@@ -181,7 +181,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
               <button
                 type="button"
                 onClick={showPendingJobs}
-                className="font-mono text-2xs uppercase tracking-wider px-3 py-1.5 rounded-full bg-spruce-green text-warm-ivory shadow-card hover:bg-spruce-green-hover transition-colors"
+                className="font-mono text-2xs uppercase tracking-wider px-3 py-1.5 rounded-full bg-tech-blue text-warm-ivory shadow-card hover:bg-tech-blue-hover transition-colors"
               >
                 ↑ {pendingNew} new {pendingNew === 1 ? "job" : "jobs"}
               </button>

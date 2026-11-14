@@ -14,12 +14,12 @@ const base =
 const variants: Record<ButtonVariant, string> = {
   // M3 Filled Button: high-emphasis solid container with subtle elevation
   primary:
-    "bg-spruce-green text-warm-ivory shadow-card hover:bg-spruce-green-hover hover:shadow-m3-1 " +
+    "bg-tech-blue text-warm-ivory shadow-card hover:bg-tech-blue-hover hover:shadow-m3-1 " +
     "disabled:bg-slate-soft disabled:text-foreground-subtle disabled:shadow-none",
   // M3 Filled Tonal Button: medium-emphasis tonal surface container
   secondary:
-    "bg-neutral-soft border border-slate-soft text-slate-ink hover:bg-surface-container hover:border-spruce-green/40 " +
-    "aria-pressed:bg-spruce-green/10 aria-pressed:border-spruce-green/40 aria-pressed:text-spruce-green " +
+    "bg-neutral-soft border border-slate-soft text-slate-ink hover:bg-surface-container hover:border-tech-blue/40 " +
+    "aria-pressed:bg-tech-blue/10 aria-pressed:border-tech-blue/40 aria-pressed:text-tech-blue " +
     "disabled:text-foreground-subtle disabled:hover:border-slate-soft disabled:hover:bg-neutral-soft",
   // M3 Text / Ghost Button: low-emphasis flat interaction
   ghost:

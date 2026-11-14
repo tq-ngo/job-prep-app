@@ -118,6 +118,7 @@ export interface Job {
   sponsorship_status?: string | null;
   sponsorship_label?: string | null;
   work_type?: string | null;
+  company_domain?: string | null;
 }
 
 /** Payload of a live `job` SSE event (see backend app/core/events.py). */

@@ -17,8 +17,8 @@
      text-foreground-muted / -subtle           secondary / tertiary text
      border-slate-soft  --border-soft          dividers, card edges (decorative)
      border-border-strong --border-strong      input/select edges (3:1, WCAG 1.4.11)
-     text-warm-ivory    --background           label on a spruce-green button
-     *-spruce-green     --spruce-green         primary accent
+     text-warm-ivory    --background           label on a tech-blue button
+     *-tech-blue        --tech-blue            primary accent (Google Tech Blue)
      *-amber-clay       --amber-clay           secondary accent (sources, warnings)
      text-amber-clay-on-tint                   amber text on a bg-amber-clay/10 tint
 
@@ -37,8 +37,6 @@
   --foreground-subtle: #6b6760;  /* 5.3:1 */
   --tech-blue: #0b57d0;          /* Google Tech Blue M3 Primary */
   --tech-blue-hover: #0842a0;
-  --spruce-green: #0b57d0;       /* Aliased for backward compatibility */
-  --spruce-green-hover: #0842a0;
   --amber-clay: #b45309;
   /* #b45309 is only 4.2:1 on its own 10% tint, so tinted badges and
      alerts use this darker clay instead (5.2:1). */
@@ -65,8 +63,6 @@
   --foreground-subtle: #a8a398;  /*  7.0:1 */
   --tech-blue: #8ab4f8;          /* Google Tech Blue M3 Dark Primary */
   --tech-blue-hover: #a8c7fa;
-  --spruce-green: #8ab4f8;       /* Aliased for backward compatibility */
-  --spruce-green-hover: #a8c7fa;
   --amber-clay: #f0a03c;
   --amber-clay-on-tint: #f0a03c; /* already 6.9:1 on its tint */
   --border-soft: #2e2c27;
@@ -85,8 +81,6 @@
   --color-slate-ink: var(--foreground-heading);
   --color-tech-blue: var(--tech-blue);
   --color-tech-blue-hover: var(--tech-blue-hover);
-  --color-spruce-green: var(--spruce-green);
-  --color-spruce-green-hover: var(--spruce-green-hover);
   --color-amber-clay: var(--amber-clay);
   --color-amber-clay-on-tint: var(--amber-clay-on-tint);
   --color-slate-soft: var(--border-soft);
@@ -154,7 +148,7 @@
      `outline-none`; adjust the offset if it collides with a neighbour.
      The resting colour is set too: `transition-colors` animates
      outline-color, so the ring used to fade in from currentColor (ivory
-     on a green button) instead of appearing at once. */
+     on a blue button) instead of appearing at once. */
   *,
   ::before,
   ::after {

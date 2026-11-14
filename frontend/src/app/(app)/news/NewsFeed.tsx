@@ -101,7 +101,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
             title="Radar is empty."
             description={
               <>
-                Click <strong className="text-spruce-green">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
+                Click <strong className="text-tech-blue">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
               </>
             }
           />

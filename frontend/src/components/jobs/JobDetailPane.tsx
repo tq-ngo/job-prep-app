@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, type RefObject } from "react";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Briefcase, ExternalLink, SearchX, Sparkles } from "lucide-react";
 import type { Job, JobSummary } from "@/lib/api";
-import { formatDate, formatLocation, formatPay } from "@/lib/format";
+import { formatDate, formatLocation } from "@/lib/format";
 import { getJobSponsorship } from "@/lib/sponsorship";
 import Badge from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -101,22 +101,43 @@ export default function JobDetailPane({
   const description = "description" in job ? job.description : null;
   const sponsorship = getJobSponsorship(job);
 
+  const workType =
+    job.work_type === "remote" || job.is_remote
+      ? "Remote"
+      : job.work_type === "hybrid"
+        ? "Hybrid"
+        : job.work_type === "onsite"
+          ? "On-site"
+          : job.location?.toLowerCase().includes("remote")
+            ? "Remote"
+            : job.location?.toLowerCase().includes("hybrid")
+              ? "Hybrid"
+              : "On-site";
+
   const metrics = [
-    { label: "Source", value: <span className="font-mono uppercase text-amber-clay">{job.source}</span> },
+    {
+      label: "Work Type",
+      value: <span className="font-sans font-medium text-slate-ink">{workType}</span>,
+    },
     { label: "Posted", value: job.posted_at ? formatDate(job.posted_at) : "Unknown" },
     {
       label: "Status",
       value: (
-        <span className={job.is_active !== false ? "text-spruce-green" : "text-amber-clay"}>
+        <span className={job.is_active !== false ? "text-tech-blue" : "text-amber-clay"}>
           {job.is_active !== false ? "Active" : "Closed"}
         </span>
       ),
     },
-    { label: "Compensation", value: formatPay(job) ?? "Not listed" },
     {
       label: "Visa / Work Auth",
       value: sponsorship?.label ? (
-        <span className={sponsorship.isCitizenOnly ? "text-amber-clay font-medium" : "text-spruce-green font-medium"}>
+        <span
+          className={
+            sponsorship.status === "citizenship" || sponsorship.status === "no_sponsorship"
+              ? "text-amber-clay font-medium"
+              : "text-tech-blue font-medium"
+          }
+        >
           {sponsorship.label}
         </span>
       ) : (
@@ -130,7 +151,7 @@ export default function JobDetailPane({
       <header className="sticky top-12 lg:top-0 z-10 bg-background/95 backdrop-blur-md border-b border-slate-soft px-4 sm:px-6 lg:px-8 py-4 shadow-xs">
         <div className="mb-2 lg:hidden">{backButton}</div>
         <div className="flex items-start gap-4">
-          <CompanyAvatar company={job.company} size="lg" />
+          <CompanyAvatar company={job.company} companyDomain={job.company_domain} size="lg" />
           <div className="min-w-0 flex-1">
             <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-xl font-serif font-medium text-slate-ink leading-tight">
               {job.title}
@@ -141,7 +162,15 @@ export default function JobDetailPane({
               <span>{formatLocation(job)}</span>
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
               {sponsorship?.label && (
-                <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
+                <Badge
+                  variant={
+                    sponsorship.status === "citizenship"
+                      ? "citizenship"
+                      : sponsorship.status === "no_sponsorship"
+                        ? "no_sponsorship"
+                        : "sponsorship"
+                  }
+                >
                   {sponsorship.label}
                 </Badge>
               )}
@@ -155,7 +184,7 @@ export default function JobDetailPane({
 
       {/* Detail pane stretches to right edge with comfortable reading line length on JD */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3.5">
           {metrics.map(({ label, value }) => (
             <div key={label} className="border border-slate-soft/80 rounded-xl p-3.5 bg-neutral-soft shadow-xs">
               <dt className="text-2xs font-mono text-foreground-subtle uppercase tracking-wider mb-1">{label}</dt>
@@ -167,7 +196,7 @@ export default function JobDetailPane({
         {job.skills && job.skills.length > 0 && (
           <section className="border-t border-slate-soft pt-4">
             <h3 className="text-xs font-mono uppercase tracking-wider text-foreground-subtle mb-2.5 flex items-center gap-1.5">
-              <Sparkles size={12} aria-hidden="true" className="text-spruce-green" /> Extracted skills
+              <Sparkles size={12} aria-hidden="true" className="text-tech-blue" /> Extracted skills
             </h3>
             <ul className="flex flex-wrap gap-1.5">
               {job.skills.map((skill) => (
@@ -194,7 +223,7 @@ export default function JobDetailPane({
                 href={job.apply_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-spruce-green hover:underline"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-tech-blue hover:underline"
               >
                 View the posting on the company site <ExternalLink size={12} aria-hidden="true" />
               </a>

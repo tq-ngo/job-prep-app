@@ -20,7 +20,7 @@ export default function EmptyState({ icon, title, description, action, headingLe
       {icon && (
         <div
           aria-hidden="true"
-          className="w-14 h-14 rounded-full bg-spruce-green/10 text-spruce-green border border-spruce-green/20 flex items-center justify-center mb-4 shadow-sm"
+          className="w-14 h-14 rounded-full bg-tech-blue/10 text-tech-blue border border-tech-blue/20 flex items-center justify-center mb-4 shadow-sm"
         >
           {icon}
         </div>

@@ -49,7 +49,7 @@ export default function RegisterForm({ nextPath }: { nextPath: string }) {
       footer={
         <>
           Already have an account?{" "}
-          <Link href={withNext("/login")} className="text-spruce-green hover:text-spruce-green-hover font-medium">
+          <Link href={withNext("/login")} className="text-tech-blue hover:text-tech-blue-hover font-medium">
             Sign in
           </Link>
         </>

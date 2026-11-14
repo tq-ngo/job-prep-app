@@ -43,9 +43,9 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
         )}
       </div>
 
-      <h2 className="text-xl font-serif font-medium text-slate-ink group-hover:text-spruce-green transition-colors mb-3 flex items-start gap-2">
+      <h2 className="text-xl font-serif font-medium text-slate-ink group-hover:text-tech-blue transition-colors mb-3 flex items-start gap-2">
         {article.title || article.url}
-        <ExternalLink size={14} aria-hidden="true" className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-spruce-green" />
+        <ExternalLink size={14} aria-hidden="true" className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-tech-blue" />
       </h2>
 
       <p className="font-sans text-sm text-foreground-muted leading-relaxed line-clamp-3">{article.summary || "No summary available."}</p>

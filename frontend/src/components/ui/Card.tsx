@@ -34,7 +34,7 @@ export function cardClasses({ tone = "default", padding = "md", interactive, cla
     "rounded-card",
     tones[tone],
     paddings[padding],
-    interactive && "transition-all duration-200 hover:border-spruce-green/40 hover:shadow-m3-1",
+    interactive && "transition-all duration-200 hover:border-tech-blue/40 hover:shadow-m3-1",
     className,
   );
 }

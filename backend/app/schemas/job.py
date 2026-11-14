@@ -13,6 +13,7 @@ class JobCreate(BaseModel):
     source_url: Optional[str] = None
     title: str
     company: str
+    company_domain: Optional[str] = None
     location: Optional[str] = None
     description: Optional[str] = None
     apply_url: str
@@ -56,6 +57,7 @@ class JobListItem(BaseModel):
     source_url: Optional[str] = None
     title: str
     company: str
+    company_domain: Optional[str] = None
     location: Optional[str] = None
     apply_url: str
     salary_min: Optional[int] = None
