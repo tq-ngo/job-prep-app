@@ -1,31 +1,75 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
-from typing import Optional
+from typing import Optional, List
+import json
 
 from app.core.database import get_session
 from app.core.rate_limit import limiter
 from app.models.job import Job
 from app.models.users import User
-from app.schemas.job import JobRead, JobListResponse
+from app.schemas.job import JobRead, JobListResponse, JobListItem
 from app.tasks.job_tasks import scrape_github, scrape_linkedin
 from app.core.redis import get_redis_pool
 from app.api.v1.auth import get_current_user, require_csrf
 from app.core.task_owner import record_task_owner
-from sqlalchemy import or_
+from app.scraping.sponsorship import classify_sponsorship
+from sqlalchemy import or_, and_, case, Text
 from sqlalchemy.orm import defer
 import hashlib
 import uuid
 
 router = APIRouter()
 
-# NOTE: this endpoint used to accept anonymous callers via an "optional auth"
-# dependency, and the comment claimed authenticated users got richer data.
-# That gating was never implemented — the response was byte-identical for
-# anonymous and authenticated callers. Combined with the absence of any edge
-# guard, the Next.js server component at (app)/jobs/page.tsx fetched
-# this route with no credentials and embedded the result in the RSC payload,
-# so job data shipped to anyone who requested /jobs. Auth is now required.
+POPULAR_TECH_SKILLS = [
+    "Python", "React", "TypeScript", "JavaScript", "Java", "C++", "Go", "Rust",
+    "C", "SQL", "PostgreSQL", "AWS", "Docker", "Kubernetes", "Linux", "Node.js",
+    "GraphQL", "Next.js", "Tailwind CSS", "Redis", "Kafka", "PyTorch", "TensorFlow",
+    "Spark", "FastAPI", "Django", "Flask", "Spring Boot", "Git", "CI/CD", "GCP",
+    "Azure", "Terraform", "MongoDB", "NoSQL", "Pandas", "NumPy", "Swift", "Kotlin",
+    "Android", "iOS", "Microservices", "REST APIs", "System Design", "Distributed Systems"
+]
+
+
+@router.get("/skills", response_model=List[str])
+async def list_skills(
+    q: Optional[str] = Query(default=None, max_length=50, description="Prefix or keyword to search"),
+    limit: int = Query(default=20, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Suggests technical skills for autocomplete based on skills extracted from jobs.
+    """
+    redis = await get_redis_pool()
+    cache_key = "popular_skills_cache"
+    cached = await redis.get(cache_key)
+    
+    if cached:
+        all_skills = json.loads(cached)
+    else:
+        # Fetch any distinct skills in DB
+        result = await session.execute(
+            select(Job.skills)
+            .where(Job.is_active == True, Job.skills.is_not(None))
+            .limit(100)
+        )
+        seen_skills = set(POPULAR_TECH_SKILLS)
+        for row in result.scalars().all():
+            if isinstance(row, list):
+                for s in row:
+                    if isinstance(s, str) and len(s) <= 40:
+                        seen_skills.add(s.strip())
+        all_skills = sorted(seen_skills, key=lambda s: s.lower())
+        await redis.setex(cache_key, 600, json.dumps(all_skills))
+
+    if not q or not q.strip():
+        return all_skills[:limit]
+
+    query = q.strip().lower()
+    prefix_matches = [s for s in all_skills if s.lower().startswith(query)]
+    substr_matches = [s for s in all_skills if query in s.lower() and not s.lower().startswith(query)]
+    return (prefix_matches + substr_matches)[:limit]
 
 
 @router.get("/", response_model=JobListResponse)
@@ -38,28 +82,14 @@ async def list_jobs(
     min_salary: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, max_length=200, description="Search term for title or company"),
     category: Optional[str] = Query(default=None, max_length=16, description="Filter by category (FAANG+, Quant, Others)"),
-    # FastAPI dependency injection: session is automatically managed
+    work_type: Optional[str] = Query(default=None, max_length=16, description="Filter by work type (remote, hybrid, onsite)"),
+    sponsorship: Optional[str] = Query(default=None, max_length=32, description="Filter by sponsorship (f1_eligible, h1b, requires_citizenship)"),
+    skill: Optional[str] = Query(default=None, max_length=50, description="Filter by technical skill"),
+    sort_by: Optional[str] = Query(default="date", max_length=16, description="Sort order (date, relevance)"),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    List jobs with pagination and filtering.
-    
-    This is a standard paginated list endpoint. The offset pattern:
-    - Page 1: OFFSET 0 LIMIT 20
-    - Page 2: OFFSET 20 LIMIT 20
-    - Page N: OFFSET (N-1)*page_size LIMIT page_size
-    """
     offset = (page - 1) * page_size
-    
-    # Build query dynamically based on filters.
-    #
-    # `canonical_id IS NULL` collapses cross-source duplicates: db_sync links
-    # a duplicate to the first row it saw rather than discarding it, so every
-    # row is still queryable but the feed shows each role once.
-    #
-    # defer() keeps the 768-float embedding (~3KB/row) and the description
-    # (up to 40k chars/row) out of the result set: JobListItem shows neither.
     base_filters = [Job.is_active == True, Job.canonical_id.is_(None)]
     query = select(Job).options(defer(Job.embedding), defer(Job.description)).where(*base_filters)
     count_query = select(func.count(Job.id)).where(*base_filters)
@@ -71,38 +101,85 @@ async def list_jobs(
     if is_remote is not None:
         query = query.where(Job.is_remote == is_remote)
         count_query = count_query.where(Job.is_remote == is_remote)
+
+    if work_type:
+        wt = work_type.lower().strip()
+        if wt == "remote":
+            work_filter = or_(Job.is_remote == True, Job.location.ilike("%remote%"))
+        elif wt == "hybrid":
+            work_filter = or_(Job.location.ilike("%hybrid%"), Job.title.ilike("%hybrid%"))
+        elif wt == "onsite":
+            work_filter = and_(
+                or_(Job.is_remote == False, Job.is_remote.is_(None)),
+                ~Job.location.ilike("%remote%"),
+                ~Job.location.ilike("%hybrid%")
+            )
+        else:
+            work_filter = None
+        if work_filter is not None:
+            query = query.where(work_filter)
+            count_query = count_query.where(work_filter)
+
+    if sponsorship:
+        sp = sponsorship.lower().strip()
+        if sp in ("f1_eligible", "cpt_opt"):
+            spons_filter = and_(
+                ~Job.title.ilike("%citizen%"),
+                ~Job.title.ilike("%clearance%"),
+                ~Job.location.ilike("%clearance%")
+            )
+        elif sp == "h1b":
+            spons_filter = or_(
+                Job.title.ilike("%h1b%"),
+                Job.title.ilike("%h-1b%"),
+                Job.title.ilike("%sponsor%")
+            )
+        elif sp in ("requires_citizenship", "citizenship"):
+            spons_filter = or_(
+                Job.title.ilike("%citizen%"),
+                Job.title.ilike("%clearance%"),
+                Job.title.ilike("%itar%")
+            )
+        else:
+            spons_filter = None
+        if spons_filter is not None:
+            query = query.where(spons_filter)
+            count_query = count_query.where(spons_filter)
+
+    if skill:
+        sk_clean = skill.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").strip()
+        skill_filter = or_(
+            Job.skills.cast(Text).ilike(f'%"{sk_clean}"%', escape="\\"),
+            Job.skills.cast(Text).ilike(f'%{sk_clean}%', escape="\\"),
+            Job.title.ilike(f"%{sk_clean}%", escape="\\"),
+        )
+        query = query.where(skill_filter)
+        count_query = count_query.where(skill_filter)
     
     if min_salary is not None:
         query = query.where(Job.salary_min >= min_salary)
         count_query = count_query.where(Job.salary_min >= min_salary)
     
+    search_term = None
     if q:
-        # Escape LIKE wildcards: a bare "_" or "%" in the search box used to
-        # match everything.
-        term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        search_term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").strip()
         search_filter = or_(
-            Job.title.ilike(f"%{term}%", escape="\\"),
-            Job.company.ilike(f"%{term}%", escape="\\"),
+            Job.title.ilike(f"%{search_term}%", escape="\\"),
+            Job.company.ilike(f"%{search_term}%", escape="\\"),
+            Job.skills.cast(Text).ilike(f'%{search_term}%', escape="\\"),
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
 
     if category:
-        # Indexed column computed at ingest (scraping/categorize.py). This
-        # used to be 30+ OR'd substring ILIKEs per request, where '%meta%'
-        # matched Metabase and '%sig%' matched any "Design" role.
         query = query.where(Job.category == category)
         count_query = count_query.where(Job.category == category)
 
-
     MAX_UI_JOBS = 500  # All jobs are stored in DB; UI displays at most 500
     redis = await get_redis_pool()
-    # The `q` term is attacker-controlled and was interpolated raw, so a ":"
-    # corrupted key namespacing and an unbounded term let anyone write
-    # arbitrary Redis keys. Hash the variable part to a fixed-width digest.
     filter_digest = hashlib.sha256(
         "|".join(
-            str(v) for v in (source, is_remote, min_salary, q, category)
+            str(v) for v in (source, is_remote, min_salary, q, category, work_type, sponsorship, skill, sort_by)
         ).encode("utf-8")
     ).hexdigest()[:32]
     cache_key = f"jobs_count:{filter_digest}"
@@ -130,29 +207,43 @@ async def list_jobs(
             capped=capped,
         )
 
-    # Order by date posted (latest on top), apply pagination.
-    #
-    # `Job.id` is a REQUIRED tiebreaker, not decoration: ordering by
-    # posted_at alone is non-deterministic across pages whenever rows share a
-    # timestamp (or are all NULL), so rows could repeat on one page and vanish
-    # from another. Matches index ix_jobs_active_posted.
-    #
-    # The limit is clamped to the remaining rows under MAX_UI_JOBS. Previously
-    # LIMIT/OFFSET ran against the UNCLAMPED query, so with total=500 and
-    # page_size=30 page 17 returned rows 481-510 — ten rows past the cap.
     remaining = total - offset
-    query = (
-        query.order_by(Job.posted_at.desc().nulls_last(), Job.id)
-        .offset(offset)
-        .limit(min(page_size, remaining))
-    )
+    if sort_by == "relevance":
+        if search_term:
+            query = query.order_by(
+                case((Job.title.ilike(f"%{search_term}%", escape="\\"), 1), else_=2),
+                Job.posted_at.desc().nulls_last(),
+                Job.id
+            )
+        else:
+            query = query.order_by(
+                case((Job.category == "FAANG+", 1), (Job.category == "Quant", 2), else_=3),
+                Job.posted_at.desc().nulls_last(),
+                Job.id
+            )
+    else:
+        query = query.order_by(Job.posted_at.desc().nulls_last(), Job.id)
 
-    # Execute data query
+    query = query.offset(offset).limit(min(page_size, remaining))
+
     jobs_result = await session.execute(query)
     jobs = jobs_result.scalars().all()
+
+    items = []
+    for j in jobs:
+        spons = classify_sponsorship(j.title, getattr(j, "description", None) or "")
+        loc = (j.location or "").lower()
+        wt = "remote" if (j.is_remote or "remote" in loc) else ("hybrid" if "hybrid" in loc else "onsite")
+        item_dict = {
+            **j.model_dump(),
+            "sponsorship_status": spons["status"],
+            "sponsorship_label": spons["label"],
+            "work_type": wt,
+        }
+        items.append(JobListItem.model_validate(item_dict))
     
     return JobListResponse(
-        items=jobs,
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -221,4 +312,12 @@ async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session
     job = await session.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    spons = classify_sponsorship(job.title, job.description or "")
+    loc = (job.location or "").lower()
+    wt = "remote" if (job.is_remote or "remote" in loc) else ("hybrid" if "hybrid" in loc else "onsite")
+    return JobRead.model_validate({
+        **job.model_dump(),
+        "sponsorship_status": spons["status"],
+        "sponsorship_label": spons["label"],
+        "work_type": wt,
+    })

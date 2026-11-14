@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { ArrowLeft, Briefcase, ExternalLink, SearchX, Sparkles } from "lucide-react";
 import type { Job, JobSummary } from "@/lib/api";
 import { formatDate, formatLocation, formatPay } from "@/lib/format";
+import { getJobSponsorship } from "@/lib/sponsorship";
 import Badge from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -98,6 +99,8 @@ export default function JobDetailPane({
   }
 
   const description = "description" in job ? job.description : null;
+  const sponsorship = getJobSponsorship(job);
+
   const metrics = [
     { label: "Source", value: <span className="font-mono uppercase text-amber-clay">{job.source}</span> },
     { label: "Posted", value: job.posted_at ? formatDate(job.posted_at) : "Unknown" },
@@ -110,6 +113,14 @@ export default function JobDetailPane({
       ),
     },
     { label: "Compensation", value: formatPay(job) ?? "Not listed" },
+    {
+      label: "Visa / Work Auth",
+      value: (
+        <span className={sponsorship.isCitizenOnly ? "text-amber-clay font-medium" : "text-spruce-green font-medium"}>
+          {sponsorship.label}
+        </span>
+      ),
+    },
   ];
 
   return (
@@ -122,11 +133,14 @@ export default function JobDetailPane({
             <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-xl font-serif font-medium text-slate-ink leading-tight">
               {job.title}
             </h2>
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-foreground-muted font-sans text-xs mt-1">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-foreground-muted font-sans text-xs mt-1.5">
               <span className="font-medium text-slate-ink">{job.company}</span>
               <span aria-hidden="true">•</span>
               <span>{formatLocation(job)}</span>
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
+              <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
+                {sponsorship.label}
+              </Badge>
             </p>
           </div>
           <ButtonLink href={job.apply_url} external size="sm" className="shrink-0 rounded-full px-4 shadow-xs">
@@ -137,7 +151,7 @@ export default function JobDetailPane({
 
       {/* Capped at a readable line length; the pane is ~1000px wide on desktop. */}
       <div className="max-w-3xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {metrics.map(({ label, value }) => (
             <div key={label} className="border border-slate-soft/80 rounded-xl p-3.5 bg-neutral-soft shadow-xs">
               <dt className="text-2xs font-mono text-foreground-subtle uppercase tracking-wider mb-1">{label}</dt>

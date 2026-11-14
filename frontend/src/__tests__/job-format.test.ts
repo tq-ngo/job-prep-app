@@ -40,32 +40,44 @@ describe("parseJobFilters", () => {
   const parse = (qs: string) => parseJobFilters((k) => new URLSearchParams(qs).get(k));
 
   it("reads every filter", () => {
-    expect(parse("q=%20rust%20&category=Quant&source=linkedin&remote=true&page=3")).toEqual({
+    expect(parse("q=%20rust%20&category=Quant&source=linkedin&remote=true&page=3&sponsorship=f1_eligible&skill=Python&sort_by=relevance")).toEqual({
       q: "rust",
       category: "Quant",
       source: "linkedin",
       remote: true,
       page: 3,
+      sponsorship: "f1_eligible",
+      skill: "Python",
+      work_type: "remote",
+      sort_by: "relevance",
     });
   });
 
   it("drops values the API wouldn't accept instead of sending them", () => {
-    expect(parse("category=Nope&source=indeed&remote=yes&page=-2")).toEqual({
+    expect(parse("category=Nope&source=indeed&remote=yes&page=-2&sponsorship=bad&sort_by=random")).toEqual({
       q: "",
       category: "",
       source: "",
       remote: false,
       page: 1,
+      sponsorship: "",
+      skill: "",
+      work_type: "",
+      sort_by: "date",
     });
     expect(parse(`q=${"x".repeat(300)}`).q).toHaveLength(200);
   });
 
   it("builds API params with only the set filters", () => {
-    expect(toListParams(parse("category=FAANG%2B&remote=1"))).toEqual({
+    expect(toListParams(parse("category=FAANG%2B&remote=1&sponsorship=h1b&skill=React&sort_by=relevance"))).toEqual({
       page: 1,
       page_size: 30,
       category: "FAANG+",
       is_remote: true,
+      work_type: "remote",
+      sponsorship: "h1b",
+      skill: "React",
+      sort_by: "relevance",
     });
   });
 

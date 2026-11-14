@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import ThemeToggle from "@/components/ThemeToggle";
 import SkipLink from "@/components/SkipLink";
 import MarketingMobileNav from "./MarketingMobileNav";
 import { ButtonLink } from "@/components/ui/Button";
 import { SITE_URL } from "@/lib/urls";
+import type { User } from "@/lib/api";
+import { INTERNAL_API_URL } from "@/lib/server-api";
 
 const TITLE = "JobPrep — Automated Tech Career Command Center";
 const SHORT_DESCRIPTION =
@@ -37,12 +40,27 @@ export const metadata: Metadata = {
   },
 };
 
+async function getSessionUser(): Promise<User | null> {
+  try {
+    const cookieHeader = (await cookies()).toString();
+    if (!cookieHeader || !cookieHeader.includes("access_token")) return null;
+    const res = await fetch(`${INTERNAL_API_URL}/api/v1/auth/me`, {
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+    });
+    if (res.ok) return (await res.json()) as User;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Persistent marketing chrome, rendered on the server. The header used to
- * live inside the client-only LandingHero, so it shipped as JS and wasn't
- * shared by any other marketing route.
+ * Persistent marketing chrome, rendered on the server. The header adapts
+ * for authenticated sessions vs. guest visitors.
  */
-export default function MarketingLayout({ children }: { children: React.ReactNode }) {
+export default async function MarketingLayout({ children }: { children: React.ReactNode }) {
+  const user = await getSessionUser();
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
@@ -88,24 +106,37 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           </Link>
 
           <nav aria-label="Main" className="hidden md:flex items-center gap-6 text-xs font-medium text-foreground-muted">
+            <Link href="/jobs" className="hover:text-slate-ink transition-colors font-medium">Job Board</Link>
+            <Link href="/news" className="hover:text-slate-ink transition-colors font-medium">Tech Radar</Link>
             <Link href="/#features" className="hover:text-slate-ink transition-colors">Features</Link>
             <Link href="/#demo" className="hover:text-slate-ink transition-colors">AI Intelligence</Link>
-            <Link href="/news" className="hover:text-slate-ink transition-colors">Tech Radar</Link>
-            <Link href="/jobs" className="hover:text-slate-ink transition-colors">Job Board</Link>
           </nav>
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            {/* In the menu below sm, where the header has no room for it. */}
-            <span className="hidden sm:inline">
-              <ButtonLink href="/login" variant="ghost" size="sm">
-                Sign In
-              </ButtonLink>
-            </span>
-            <ButtonLink href="/register" size="sm">
-              Get Started
-            </ButtonLink>
-            <MarketingMobileNav />
+            {user ? (
+              <>
+                <span className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-44 border border-slate-soft px-3 py-1 rounded-full bg-neutral-soft" title={user.email}>
+                  {user.email}
+                </span>
+                <ButtonLink href="/jobs" size="sm" className="rounded-full shadow-xs">
+                  Job Board
+                </ButtonLink>
+                <MarketingMobileNav isLoggedIn />
+              </>
+            ) : (
+              <>
+                <span className="hidden sm:inline">
+                  <ButtonLink href="/login" variant="ghost" size="sm" className="rounded-full">
+                    Sign In
+                  </ButtonLink>
+                </span>
+                <ButtonLink href="/register" size="sm" className="rounded-full shadow-xs">
+                  Get Started
+                </ButtonLink>
+                <MarketingMobileNav />
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -123,8 +154,12 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           <nav aria-label="Footer" className="flex gap-4 text-foreground-muted">
             <Link href="/jobs" className="hover:text-spruce-green transition-colors">Jobs</Link>
             <Link href="/news" className="hover:text-spruce-green transition-colors">Radar</Link>
-            <Link href="/login" className="hover:text-spruce-green transition-colors">Sign In</Link>
-            <Link href="/register" className="hover:text-spruce-green transition-colors">Register</Link>
+            {!user && (
+              <>
+                <Link href="/login" className="hover:text-spruce-green transition-colors">Sign In</Link>
+                <Link href="/register" className="hover:text-spruce-green transition-colors">Register</Link>
+              </>
+            )}
           </nav>
         </div>
       </footer>

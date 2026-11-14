@@ -115,6 +115,9 @@ export interface Job {
   external_id?: string;
   source_url?: string | null;
   terms?: string[] | null;
+  sponsorship_status?: string | null;
+  sponsorship_label?: string | null;
+  work_type?: string | null;
 }
 
 /** Payload of a live `job` SSE event (see backend app/core/events.py). */
@@ -151,8 +154,17 @@ export const jobsApi = {
     is_remote?: boolean;
     q?: string;
     category?: string;
+    work_type?: string;
+    sponsorship?: string;
+    skill?: string;
+    sort_by?: string;
   }): Promise<JobListResponse> => {
     const { data } = await apiClient.get("/api/v1/jobs/", { params });
+    return data;
+  },
+
+  getSkills: async (q?: string): Promise<string[]> => {
+    const { data } = await apiClient.get<string[]>("/api/v1/jobs/skills", { params: q ? { q } : {} });
     return data;
   },
 

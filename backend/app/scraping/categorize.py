@@ -20,15 +20,24 @@ CATEGORY_OTHERS = "Others"
 
 FAANG_COMPANIES = (
     "meta", "apple", "amazon", "netflix", "google", "microsoft", "nvidia",
-    "tesla", "tiktok", "bytedance",
+    "tesla", "tiktok", "bytedance", "uber", "airbnb", "stripe", "palantir",
+    "databricks", "snowflake", "salesforce", "adobe", "snap", "pinterest",
+    "linkedin", "x", "twitter", "oracle", "intel", "amd", "cisco",
+    "atlassian", "figma", "openai", "anthropic", "dropbox", "spotify",
+    "roblox", "coinbase",
 )
 QUANT_COMPANIES = (
     "jane street", "citadel", "two sigma", "hrt", "hudson river trading",
     "optiver", "jump trading", "akuna", "drw", "imc", "tower research",
     "point72", "de shaw", "d e shaw", "deshaw", "renaissance technologies",
-    "susquehanna", "sig",
+    "susquehanna", "sig", "five rings", "bridgewater", "millennium",
+    "balyasny", "worldquant", "radix", "flow traders", "virtu", "pdt partners",
+    "aqr", "squarepoint", "qube", "old mission", "volant", "geneva trading", "belve",
 )
-QUANT_TITLE_TERMS = ("quant", "quantitative", "algorithmic", "algo", "trading", "hft")
+QUANT_TITLE_TERMS = (
+    "quant", "quantitative", "algorithmic", "algo", "trading", "hft",
+    "market maker", "low latency", "strats", "systematic", "execution trader",
+)
 
 
 def _words(text: str) -> str:
