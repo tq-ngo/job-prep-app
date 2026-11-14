@@ -31,6 +31,75 @@ POPULAR_TECH_SKILLS = [
 ]
 
 
+def to_job_list_item(j: Job) -> JobListItem:
+    """Safely build a JobListItem using loaded attributes and description for sponsorship analysis."""
+    spons = classify_sponsorship(j.title, getattr(j, "description", None) or "")
+    loc = (j.location or "").lower()
+    wt = "remote" if (j.is_remote or "remote" in loc) else ("hybrid" if "hybrid" in loc else "onsite")
+    return JobListItem(
+        id=j.id,
+        external_id=j.external_id,
+        source=j.source,
+        source_url=j.source_url,
+        title=j.title,
+        company=j.company,
+        location=j.location,
+        apply_url=j.apply_url,
+        salary_min=j.salary_min,
+        salary_max=j.salary_max,
+        salary_currency=j.salary_currency,
+        salary_period=j.salary_period,
+        category=j.category,
+        skills=j.skills,
+        seniority_level=j.seniority_level,
+        employment_type=j.employment_type,
+        is_remote=j.is_remote,
+        work_type=wt,
+        sponsorship_status=spons["status"],
+        sponsorship_label=spons["label"],
+        terms=j.terms,
+        posted_at=j.posted_at,
+        scraped_at=j.scraped_at,
+        enriched_at=j.enriched_at,
+        is_active=j.is_active,
+    )
+
+
+def to_job_read(j: Job) -> JobRead:
+    """Safely build a JobRead for single-job drawer view with full description."""
+    spons = classify_sponsorship(j.title, j.description or "")
+    loc = (j.location or "").lower()
+    wt = "remote" if (j.is_remote or "remote" in loc) else ("hybrid" if "hybrid" in loc else "onsite")
+    return JobRead(
+        id=j.id,
+        external_id=j.external_id,
+        source=j.source,
+        source_url=j.source_url,
+        title=j.title,
+        company=j.company,
+        location=j.location,
+        description=j.description,
+        apply_url=j.apply_url,
+        salary_min=j.salary_min,
+        salary_max=j.salary_max,
+        salary_currency=j.salary_currency,
+        salary_period=j.salary_period,
+        category=j.category,
+        skills=j.skills,
+        seniority_level=j.seniority_level,
+        employment_type=j.employment_type,
+        is_remote=j.is_remote,
+        work_type=wt,
+        sponsorship_status=spons["status"],
+        sponsorship_label=spons["label"],
+        terms=j.terms,
+        posted_at=j.posted_at,
+        scraped_at=j.scraped_at,
+        enriched_at=j.enriched_at,
+        is_active=j.is_active,
+    )
+
+
 @router.get("/skills", response_model=List[str])
 async def list_skills(
     q: Optional[str] = Query(default=None, max_length=50, description="Prefix or keyword to search"),
@@ -91,7 +160,7 @@ async def list_jobs(
 ):
     offset = (page - 1) * page_size
     base_filters = [Job.is_active == True, Job.canonical_id.is_(None)]
-    query = select(Job).options(defer(Job.embedding), defer(Job.description)).where(*base_filters)
+    query = select(Job).options(defer(Job.embedding)).where(*base_filters)
     count_query = select(func.count(Job.id)).where(*base_filters)
     
     if source:
@@ -111,8 +180,10 @@ async def list_jobs(
         elif wt == "onsite":
             work_filter = and_(
                 or_(Job.is_remote == False, Job.is_remote.is_(None)),
-                ~Job.location.ilike("%remote%"),
-                ~Job.location.ilike("%hybrid%")
+                or_(
+                    Job.location.is_(None),
+                    and_(~Job.location.ilike("%remote%"), ~Job.location.ilike("%hybrid%")),
+                ),
             )
         else:
             work_filter = None
@@ -122,23 +193,32 @@ async def list_jobs(
 
     if sponsorship:
         sp = sponsorship.lower().strip()
-        if sp in ("f1_eligible", "cpt_opt"):
+        if sp in ("sponsorship_available", "f1_eligible", "cpt_opt", "h1b"):
             spons_filter = and_(
                 ~Job.title.ilike("%citizen%"),
                 ~Job.title.ilike("%clearance%"),
-                ~Job.location.ilike("%clearance%")
-            )
-        elif sp == "h1b":
-            spons_filter = or_(
-                Job.title.ilike("%h1b%"),
-                Job.title.ilike("%h-1b%"),
-                Job.title.ilike("%sponsor%")
+                ~Job.title.ilike("%itar%"),
+                or_(
+                    Job.title.ilike("%sponsor%"),
+                    Job.title.ilike("%h1b%"),
+                    Job.title.ilike("%h-1b%"),
+                    Job.title.ilike("%cpt%"),
+                    Job.title.ilike("%opt%"),
+                    Job.description.ilike("%visa sponsorship%"),
+                    Job.description.ilike("%sponsorship available%"),
+                    Job.description.ilike("%h-1b%"),
+                    Job.description.ilike("%cpt%"),
+                    Job.description.ilike("%opt%"),
+                ),
             )
         elif sp in ("requires_citizenship", "citizenship"):
             spons_filter = or_(
                 Job.title.ilike("%citizen%"),
                 Job.title.ilike("%clearance%"),
-                Job.title.ilike("%itar%")
+                Job.title.ilike("%itar%"),
+                Job.description.ilike("%citizen%"),
+                Job.description.ilike("%clearance%"),
+                Job.description.ilike("%itar%"),
             )
         else:
             spons_filter = None
@@ -228,19 +308,7 @@ async def list_jobs(
 
     jobs_result = await session.execute(query)
     jobs = jobs_result.scalars().all()
-
-    items = []
-    for j in jobs:
-        spons = classify_sponsorship(j.title, getattr(j, "description", None) or "")
-        loc = (j.location or "").lower()
-        wt = "remote" if (j.is_remote or "remote" in loc) else ("hybrid" if "hybrid" in loc else "onsite")
-        item_dict = {
-            **j.model_dump(),
-            "sponsorship_status": spons["status"],
-            "sponsorship_label": spons["label"],
-            "work_type": wt,
-        }
-        items.append(JobListItem.model_validate(item_dict))
+    items = [to_job_list_item(j) for j in jobs]
     
     return JobListResponse(
         items=items,
@@ -312,12 +380,4 @@ async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session
     job = await session.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    spons = classify_sponsorship(job.title, job.description or "")
-    loc = (job.location or "").lower()
-    wt = "remote" if (job.is_remote or "remote" in loc) else ("hybrid" if "hybrid" in loc else "onsite")
-    return JobRead.model_validate({
-        **job.model_dump(),
-        "sponsorship_status": spons["status"],
-        "sponsorship_label": spons["label"],
-        "work_type": wt,
-    })
+    return to_job_read(job)

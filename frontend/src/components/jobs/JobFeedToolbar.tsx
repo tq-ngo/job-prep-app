@@ -255,7 +255,7 @@ export default function JobFeedToolbar({
 
   return (
     <div className={cn("sticky top-12 z-30 bg-background/95 backdrop-blur-md border-b border-slate-soft shadow-xs transition-colors", className)}>
-      <div className="max-w-app mx-auto px-4 sm:px-6 lg:px-8 py-2.5 space-y-2">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-2.5 space-y-2">
         {/* Primary Controls Row */}
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-base font-serif font-medium text-slate-ink tracking-tight mr-1">Job Board</h1>

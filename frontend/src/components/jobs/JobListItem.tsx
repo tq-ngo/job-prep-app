@@ -74,9 +74,11 @@ export default function JobListItem({
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-foreground">
             {pay && <span>{pay}</span>}
             {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
-            <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
-              {sponsorship.label}
-            </Badge>
+            {sponsorship?.label && (
+              <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
+                {sponsorship.label}
+              </Badge>
+            )}
           </p>
 
           {skills.length > 0 && (

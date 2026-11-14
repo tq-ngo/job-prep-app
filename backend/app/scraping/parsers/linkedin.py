@@ -132,7 +132,7 @@ class LinkedInScraper:
                     logger.debug(f"Error parsing job card: {e}")
                     continue
 
-            await self._random_delay(300, 800)
+            await self._random_delay(250, 500)
 
         if progress_callback:
             await progress_callback(100, f"Completed LinkedIn scrape: found {len(extracted_jobs)} jobs.")

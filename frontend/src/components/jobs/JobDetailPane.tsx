@@ -115,10 +115,12 @@ export default function JobDetailPane({
     { label: "Compensation", value: formatPay(job) ?? "Not listed" },
     {
       label: "Visa / Work Auth",
-      value: (
+      value: sponsorship?.label ? (
         <span className={sponsorship.isCitizenOnly ? "text-amber-clay font-medium" : "text-spruce-green font-medium"}>
           {sponsorship.label}
         </span>
+      ) : (
+        <span className="text-foreground-subtle">Not specified</span>
       ),
     },
   ];
@@ -138,9 +140,11 @@ export default function JobDetailPane({
               <span aria-hidden="true">•</span>
               <span>{formatLocation(job)}</span>
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
-              <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
-                {sponsorship.label}
-              </Badge>
+              {sponsorship?.label && (
+                <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
+                  {sponsorship.label}
+                </Badge>
+              )}
             </p>
           </div>
           <ButtonLink href={job.apply_url} external size="sm" className="shrink-0 rounded-full px-4 shadow-xs">
@@ -149,8 +153,8 @@ export default function JobDetailPane({
         </div>
       </header>
 
-      {/* Capped at a readable line length; the pane is ~1000px wide on desktop. */}
-      <div className="max-w-3xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* Detail pane stretches to right edge with comfortable reading line length on JD */}
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {metrics.map(({ label, value }) => (
             <div key={label} className="border border-slate-soft/80 rounded-xl p-3.5 bg-neutral-soft shadow-xs">

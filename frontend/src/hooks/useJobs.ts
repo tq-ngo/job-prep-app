@@ -8,6 +8,10 @@ export interface JobListParams {
   source?: string;
   q?: string;
   category?: string;
+  work_type?: string;
+  sponsorship?: string;
+  skill?: string;
+  sort_by?: string;
 }
 
 const JOBS_STALE_TIME = 1000 * 60 * 5;

@@ -13,6 +13,7 @@ from app.core.redis import get_redis_pool
 from app.models.job import Job
 from app.models.users import User
 from app.schemas.job import JobListResponse
+from app.api.v1.jobs import to_job_list_item
 from sqlalchemy.orm import defer
 from app.ai.embedder import generate_embedding
 from app.ai.gemini_client import GeminiTransientError, acquire_gemini_slots
@@ -87,8 +88,7 @@ async def semantic_search(
     # Smallest distance = most semantically similar.
     stmt = (
         select(Job)
-        # JobListItem shows neither column; don't ship them out of Postgres.
-        .options(defer(Job.embedding), defer(Job.description))
+        .options(defer(Job.embedding))
         .where(Job.is_active == True)
         .where(Job.canonical_id.is_(None))  # Collapse cross-source duplicates to canonical entity
         .where(Job.embedding != None)  # Only search jobs that have AI embeddings
@@ -110,9 +110,10 @@ async def semantic_search(
 
     jobs = jobs_result.scalars().all()
     total = count_result.scalar() or 0
+    items = [to_job_list_item(j) for j in jobs]
 
     return JobListResponse(
-        items=jobs,
+        items=items,
         total=total,
         page=page,
         page_size=page_size,

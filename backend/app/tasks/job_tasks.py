@@ -1,6 +1,7 @@
 import logging
 import random
 import re
+import time
 from datetime import datetime, timedelta
 import uuid
 import os
@@ -131,6 +132,7 @@ async def _scrape_github(self, task_id: str = None):
         return {"status": "skipped", "reason": "lock_held"}
 
     try:
+        start_time = time.monotonic()
         total_stats = {"inserted": 0, "updated": 0, "skipped": 0, "linked": 0,
                        "descriptions": 0, "source": "github"}
 
@@ -154,7 +156,7 @@ async def _scrape_github(self, task_id: str = None):
                 batch.append(job.model_dump())
                 seen_external_ids.append(job.external_id)
 
-                if len(batch) >= 100:
+                if len(batch) >= 150:
                     await flush(batch)
                     batch.clear()
 
@@ -175,7 +177,8 @@ async def _scrape_github(self, task_id: str = None):
                 )
             await session.commit()
 
-        logger.info(f"GitHub complete: {total_stats}")
+        duration = time.monotonic() - start_time
+        logger.info(f"GitHub complete in {duration:.1f}s: {total_stats}")
         return total_stats
     except Exception as exc:
         logger.error(f"GitHub scrape failed: {exc}", exc_info=True)
@@ -225,6 +228,7 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
         )
 
     try:
+        start_time = time.monotonic()
         scraper = LinkedInScraper()
         raw_jobs = await scraper.fetch_jobs(
             base_search_url=search_url,
@@ -256,14 +260,15 @@ async def _scrape_linkedin(self, search_url: str, task_id: str = None):
                 job = JobCreate(**job_dict)
                 batch.append(job.model_dump())
 
-                # Sync in chunks of 50 to respect memory and DB limits
-                if len(batch) >= 50:
+                # Sync in chunks of 100 to balance memory and DB throughput
+                if len(batch) >= 100:
                     await flush(batch)
                     batch.clear()
 
             await flush(batch)
 
-        logger.info(f"LinkedIn complete: {total_stats}")
+        duration = time.monotonic() - start_time
+        logger.info(f"LinkedIn complete in {duration:.1f}s: {total_stats}")
         return total_stats
 
     except Exception as exc:

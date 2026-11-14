@@ -46,7 +46,7 @@ describe("parseJobFilters", () => {
       source: "linkedin",
       remote: true,
       page: 3,
-      sponsorship: "f1_eligible",
+      sponsorship: "sponsorship_available",
       skill: "Python",
       work_type: "remote",
       sort_by: "relevance",
@@ -75,7 +75,7 @@ describe("parseJobFilters", () => {
       category: "FAANG+",
       is_remote: true,
       work_type: "remote",
-      sponsorship: "h1b",
+      sponsorship: "sponsorship_available",
       skill: "React",
       sort_by: "relevance",
     });

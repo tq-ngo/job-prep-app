@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from app.scraping.jd_extractor import (
@@ -61,4 +62,63 @@ def test_sanitize_html_to_markdown_enforces_maximum_length():
     assert result is not None
     assert "_[description truncated]_" in result
     assert len(result) <= MAX_JD_CHARS + 50
+
+
+@pytest.mark.unit
+async def test_domain_rate_limiter_distinct_domains():
+    import time
+    from app.scraping.jd_extractor import DomainRateLimiter
+
+    limiter = DomainRateLimiter(default_per_domain_limit=2, default_interval=0.1)
+    start = time.monotonic()
+
+    # Acquire across 4 distinct domains concurrently
+    await asyncio.gather(
+        limiter.acquire("domain1.com"),
+        limiter.acquire("domain2.com"),
+        limiter.acquire("domain3.com"),
+        limiter.acquire("domain4.com"),
+    )
+    elapsed = time.monotonic() - start
+
+    # Across distinct domains, there should be virtually no spacing delay
+    assert elapsed < 0.2
+
+    limiter.release("domain1.com")
+    limiter.release("domain2.com")
+    limiter.release("domain3.com")
+    limiter.release("domain4.com")
+
+
+@pytest.mark.unit
+async def test_enrich_with_descriptions_intra_batch_dedup():
+    from unittest.mock import patch
+    from app.scraping.jd_extractor import enrich_with_descriptions
+
+    # 3 records with identical apply_url (e.g. from 3 different GitHub repos)
+    records = [
+        {"apply_url": "https://boards.greenhouse.io/corp/jobs/1", "source": "github", "external_id": "id-1", "description": None},
+        {"apply_url": "https://boards.greenhouse.io/corp/jobs/1", "source": "github", "external_id": "id-2", "description": None},
+        {"apply_url": "https://boards.greenhouse.io/corp/jobs/1", "source": "github", "external_id": "id-3", "description": None},
+    ]
+
+    fetch_call_count = 0
+
+    async def mock_fetch_jd_with_source(apply_url, source, external_id):
+        nonlocal fetch_call_count
+        fetch_call_count += 1
+        return "## Mock Description", "greenhouse"
+
+    with patch("app.scraping.jd_extractor.fetch_jd_with_source", side_effect=mock_fetch_jd_with_source):
+        filled = await enrich_with_descriptions(records)
+
+    # All 3 records should be filled
+    assert filled == 3
+    for r in records:
+        assert r["description"] == "## Mock Description"
+        assert r["description_source"] == "greenhouse"
+
+    # But network fetch was only called ONCE for the shared apply_url!
+    assert fetch_call_count == 1
+
 

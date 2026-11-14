@@ -165,7 +165,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
         refreshing={isScraping}
       />
 
-      <div className="flex-1 min-h-0 w-full max-w-app mx-auto lg:flex 2xl:border-x border-slate-soft">
+      <div className="flex-1 min-h-0 w-full lg:flex border-t border-slate-soft">
         <section
           ref={listPaneRef}
           aria-label="Results"
