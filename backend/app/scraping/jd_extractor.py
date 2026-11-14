@@ -30,6 +30,7 @@ import json
 import logging
 import random
 import re
+import time
 from html import unescape
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -383,43 +384,122 @@ async def fetch_jd(
     return md
 
 
+class DomainRateLimiter:
+    """
+    Limits concurrent requests per host domain and spaces requests politely.
+
+    This replaces a single global semaphore that unfairly bottlenecks
+    independent hosts with per-domain semaphores.
+    """
+    def __init__(
+        self,
+        default_per_domain_limit: int = 2,
+        default_interval: float = 0.25,
+        linkedin_interval: float = 0.35,
+    ):
+        self.default_per_domain_limit = default_per_domain_limit
+        self.default_interval = default_interval
+        self.linkedin_interval = linkedin_interval
+        self._semaphores: Dict[str, asyncio.Semaphore] = {}
+        self._last_request_time: Dict[str, float] = {}
+        self._lock = asyncio.Lock()
+
+    def get_domain(self, apply_url: str, source: str) -> str:
+        if source == "linkedin":
+            return "www.linkedin.com"
+        netloc = (urlparse(apply_url).netloc or "").lower()
+        return netloc or "generic"
+
+    async def acquire(self, domain: str):
+        async with self._lock:
+            if domain not in self._semaphores:
+                # Up to 2 concurrent requests per individual domain
+                self._semaphores[domain] = asyncio.Semaphore(self.default_per_domain_limit)
+        sem = self._semaphores[domain]
+        await sem.acquire()
+
+        # Enforce domain-specific spacing
+        interval = self.linkedin_interval if "linkedin.com" in domain else self.default_interval
+        now = time.monotonic()
+        last = self._last_request_time.get(domain, 0.0)
+        delay = interval - (now - last)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        self._last_request_time[domain] = time.monotonic()
+
+    def release(self, domain: str):
+        if domain in self._semaphores:
+            self._semaphores[domain].release()
+
+
+# Module-level default limiter
+_default_domain_limiter = DomainRateLimiter()
+
+
 async def enrich_with_descriptions(
     records: List[Dict[str, Any]],
-    concurrency: int = 4,
-    min_delay: float = 0.6,
-    max_delay: float = 1.6,
+    concurrency: int = 16,
+    min_delay: float = 0.2,
+    max_delay: float = 0.5,
+    domain_limiter: Optional[DomainRateLimiter] = None,
 ) -> int:
     """
     Populate `description` on scraped job dicts, in place.
 
-    Politeness is deliberate, not incidental: this turns one request per crawl
-    into one request per *job*, so a semaphore bounds parallelism and each
-    task jitters before firing. At concurrency=4 with ~1s jitter, ~125
-    LinkedIn jobs take roughly 1-2 minutes rather than hammering the host.
+    Uses a global concurrency ceiling (default 16) alongside a DomainRateLimiter
+    to ensure high parallel throughput across distinct domains while politely
+    spacing and capping requests to the same host domain (e.g. LinkedIn or Greenhouse).
+    Also deduplicates identical apply_urls within the batch so a single network fetch
+    populates all matching records.
 
     Returns the number of records that gained a description.
     """
-    semaphore = asyncio.Semaphore(concurrency)
+    if not records:
+        return 0
+
+    limiter = domain_limiter or _default_domain_limiter
+    global_semaphore = asyncio.Semaphore(concurrency)
     filled = 0
 
-    async def one(record: Dict[str, Any]) -> None:
-        nonlocal filled
-        if record.get("description"):
-            return
-        async with semaphore:
-            await asyncio.sleep(random.uniform(min_delay, max_delay))
-            md, strategy = await fetch_jd_with_source(
-                apply_url=record.get("apply_url") or "",
-                source=str(record.get("source") or ""),
-                external_id=(
-                    str(record["external_id"]) if record.get("external_id") else None
-                ),
-            )
-        if md:
-            record["description"] = md
-            record["description_source"] = strategy
-            filled += 1
+    # Group records by (apply_url, source, external_id) to avoid duplicate network fetches
+    groups: Dict[Tuple[str, str, Optional[str]], List[Dict[str, Any]]] = {}
+    for r in records:
+        if r.get("description"):
+            continue
+        key = (
+            r.get("apply_url") or "",
+            str(r.get("source") or ""),
+            str(r["external_id"]) if r.get("external_id") else None,
+        )
+        groups.setdefault(key, []).append(r)
 
-    await asyncio.gather(*(one(r) for r in records), return_exceptions=True)
-    logger.info("JD extraction: %d/%d records gained a description", filled, len(records))
+    async def fetch_group(key: Tuple[str, str, Optional[str]], group_records: List[Dict[str, Any]]) -> None:
+        nonlocal filled
+        apply_url, source, external_id = key
+        domain = limiter.get_domain(apply_url, source)
+
+        async with global_semaphore:
+            await limiter.acquire(domain)
+            try:
+                md, strategy = await fetch_jd_with_source(
+                    apply_url=apply_url,
+                    source=source,
+                    external_id=external_id,
+                )
+            finally:
+                limiter.release(domain)
+
+        if md:
+            for rec in group_records:
+                rec["description"] = md
+                rec["description_source"] = strategy
+                filled += 1
+
+    await asyncio.gather(*(fetch_group(k, v) for k, v in groups.items()), return_exceptions=True)
+    logger.info(
+        "JD extraction: %d/%d records gained a description across %d distinct targets",
+        filled,
+        len(records),
+        len(groups),
+    )
     return filled
