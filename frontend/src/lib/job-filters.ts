@@ -70,13 +70,9 @@ export function parseJobFilters(get: (key: string) => string | null | undefined)
       ? "sponsorship_available"
       : rawSponsorship === "citizenship"
         ? "requires_citizenship"
-<<<<<<< HEAD
         : rawSponsorship === "not_sponsored" || rawSponsorship === "none"
           ? "no_sponsorship"
           : rawSponsorship;
-=======
-        : rawSponsorship;
->>>>>>> origin/main
   const skill = (get("skill") ?? "").trim().slice(0, 50);
   const sort_by = get("sort_by") === "relevance" ? "relevance" : "date";
   const remoteParam = get("remote");

@@ -7,13 +7,8 @@ export interface SponsorshipInfo {
   isF1Eligible: boolean;
 }
 
-<<<<<<< HEAD
 const CITIZEN_REGEX = /\b(?:u\.?s\.?\s+citizen(?:ship)?\s+(?:required|only|is required|mandatory)|must be a u\.?s\.?\s+citizen|you are a u\.?s\.?\s+citizen|u\.?s\.?\s+citizen(?:ship)?\s*,\s*(?:u\.?s\.?\s+)?permanent resident|u\.?s\.?\s+citizen(?:ship)?\s+(?:or|and)\s+(?:u\.?s\.?\s+)?permanent resident|u\.?s\.?\s+person\b|security clearance\b|active secret clearance\b|top secret\b|dod clearance\b|itar\b|export control laws?\b)/i;
 const NO_SPONSOR_REGEX = /\b(?:will not sponsor|does not sponsor|no visa sponsorship|not eligible for (?:visa\s+)?sponsorship|without (?:the\s+)?need for (?:visa\s+)?sponsorship|sponsorship (?:is\s+)?not available|must not require (?:work\s+)?(?:visa\s+)?sponsorship|without\s+(?:[\w\s]{1,30}\s+)?sponsorship|not provide (?:visa\s+|work\s+)?sponsorship|(?:f-?1|cpt|opt|j-?1|m-?1).*?not eligible)\b/i;
-=======
-const CITIZEN_REGEX = /\b(?:u\.?s\.?\s+citizen(?:ship)?\s+(?:required|only|status)|must be a u\.?s\.?\s+citizen|u\.?s\.?\s+person\b|security clearance\b|active secret clearance\b|itar\b|export control laws?\b)/i;
-const NO_SPONSOR_REGEX = /\b(?:will not sponsor|does not sponsor|no visa sponsorship|not eligible for (?:visa\s+)?sponsorship|without (?:the\s+)?need for (?:visa\s+)?sponsorship|sponsorship is not available)\b/i;
->>>>>>> origin/main
 const SPONSOR_AVAILABLE_REGEX = /\b(?:visa sponsorship (?:is\s+)?available|offers? (?:visa\s+)?sponsorship|will sponsor (?:work\s+)?visas?|provides? (?:visa\s+)?sponsorship|h-?1b (?:sponsorship|sponsor|visa support)|sponsors? h-?1b|accepts?\s+(?:cpt|opt)|(?:cpt|opt)\s+accepted|cpt\/opt\s+eligible|f-?1\s+visa\s+sponsorship)\b/i;
 
 /**
@@ -36,7 +31,6 @@ export function getJobSponsorship(job: {
         isF1Eligible: false,
       };
     }
-<<<<<<< HEAD
     if (job.sponsorship_status === "no_sponsorship") {
       return {
         status: "no_sponsorship",
@@ -45,8 +39,6 @@ export function getJobSponsorship(job: {
         isF1Eligible: false,
       };
     }
-=======
->>>>>>> origin/main
     if (
       job.sponsorship_status === "sponsorship_available" ||
       job.sponsorship_status === "cpt_opt" ||
@@ -89,4 +81,3 @@ export function getJobSponsorship(job: {
   // Not explicitly confirmed: leave untagged
   return null;
 }
-
