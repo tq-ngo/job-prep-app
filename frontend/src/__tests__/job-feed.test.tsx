@@ -135,10 +135,10 @@ describe("JobFeed list", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
-  it("shows pay, location, up to three skills and relative date on each row", () => {
+  it("shows location, up to three skills and relative date on each row", () => {
     renderFeed();
     const row = link(/Backend Intern/);
-    expect(row).toHaveTextContent("$55 – $65/hr");
+    expect(row).not.toHaveTextContent("$55 – $65/hr");
     expect(row).toHaveTextContent("Boston, MA");
     expect(row).not.toHaveTextContent("github");
     expect(row).toHaveTextContent(/ago|today|yesterday/i);

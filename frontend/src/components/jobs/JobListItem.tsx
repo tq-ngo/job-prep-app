@@ -2,7 +2,7 @@
 
 import type { MouseEvent } from "react";
 import type { JobSummary } from "@/lib/api";
-import { formatLocation, formatPay, formatPostedAgo } from "@/lib/format";
+import { formatLocation, formatPostedAgo } from "@/lib/format";
 import { getJobSponsorship } from "@/lib/sponsorship";
 import Badge from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
@@ -34,7 +34,6 @@ export default function JobListItem({
   onSelect,
   onPrefetch,
 }: JobListItemProps) {
-  const pay = formatPay(job);
   const skills = job.skills?.slice(0, 3) ?? [];
   const sponsorship = getJobSponsorship(job);
 
@@ -59,27 +58,36 @@ export default function JobListItem({
         className={cn(
           "group flex gap-3 px-4 py-3.5 border-l-4 transition-all duration-150 hover:bg-neutral-soft -outline-offset-2",
           selected || defaultSelected
-            ? "border-l-spruce-green bg-spruce-green/8 shadow-xs"
+            ? "border-l-tech-blue bg-tech-blue/8 shadow-xs"
             : "border-l-transparent",
         )}
       >
-        <CompanyAvatar company={job.company} />
+        <CompanyAvatar company={job.company} companyDomain={job.company_domain} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-ink leading-snug line-clamp-2 group-hover:text-spruce-green transition-colors">
+          <p className="text-sm font-medium text-slate-ink leading-snug line-clamp-2 group-hover:text-tech-blue transition-colors">
             {job.title}
           </p>
           <p className="mt-0.5 text-xs text-foreground-muted truncate">{job.company}</p>
           <p className="text-xs text-foreground-subtle truncate">{formatLocation(job, "—")}</p>
 
-          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-foreground">
-            {pay && <span>{pay}</span>}
-            {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
-            {sponsorship?.label && (
-              <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
-                {sponsorship.label}
-              </Badge>
-            )}
-          </p>
+          {(job.is_remote || sponsorship?.label) && (
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-foreground">
+              {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
+              {sponsorship?.label && (
+                <Badge
+                  variant={
+                    sponsorship.status === "citizenship"
+                      ? "citizenship"
+                      : sponsorship.status === "no_sponsorship"
+                        ? "no_sponsorship"
+                        : "sponsorship"
+                  }
+                >
+                  {sponsorship.label}
+                </Badge>
+              )}
+            </p>
+          )}
 
           {skills.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
@@ -91,16 +99,13 @@ export default function JobListItem({
             </div>
           )}
 
-          <p className="mt-2 flex items-center gap-2 font-mono text-2xs text-foreground-subtle">
-            <Badge variant="source">{job.source}</Badge>
-            {job.posted_at && (
-              // Relative to now, so it can differ by a day between the server
-              // render and hydration around midnight.
+          {job.posted_at && (
+            <p className="mt-2 flex items-center font-mono text-2xs text-foreground-subtle">
               <time dateTime={job.posted_at} suppressHydrationWarning>
                 {formatPostedAgo(job.posted_at)}
               </time>
-            )}
-          </p>
+            </p>
+          )}
         </div>
       </a>
     </li>

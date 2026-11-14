@@ -26,7 +26,7 @@ jobs:
     name: Compose build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       # Compose's env_file and ${VAR} interpolation both read .env.
       - run: cp .env.example .env
       - name: Validate compose (dev = base + override, and production)
