@@ -35,22 +35,24 @@
   --foreground-heading: #141413;
   --foreground-muted: #57544d;   /* 7.0:1 */
   --foreground-subtle: #6b6760;  /* 5.3:1 */
-  --spruce-green: #1b3b2b;
-  --spruce-green-hover: #143224;
+  --tech-blue: #0b57d0;          /* Google Tech Blue M3 Primary */
+  --tech-blue-hover: #0842a0;
+  --spruce-green: #0b57d0;       /* Aliased for backward compatibility */
+  --spruce-green-hover: #0842a0;
   --amber-clay: #b45309;
   /* #b45309 is only 4.2:1 on its own 10% tint, so tinted badges and
      alerts use this darker clay instead (5.2:1). */
   --amber-clay-on-tint: #9a4a0a;
   --border-soft: #e6e4de;
   --border-strong: #8a857b;      /* 3.5:1 */
-  --focus-ring: #1b3b2b;
+  --focus-ring: #0b57d0;
   --neutral-soft: #f4f1e8;       /* M3 Surface Container Low */
   --surface-container: #eeeae0;  /* M3 Surface Container */
   --surface-container-high: #e6e1d5; /* M3 Surface Container High */
   --surface-container-lowest: #ffffff;
 }
 
-/* Warm dark palette, matching light mode's editorial ivory/ink look. */
+/* Warm dark palette, matching light mode's editorial ivory/ink look with Google Tech Blue. */
 .dark {
   color-scheme: dark;
 
@@ -61,13 +63,15 @@
      than --foreground, which inverted the hierarchy in dark mode. */
   --foreground-muted: #bab5aa;   /*  8.6:1 */
   --foreground-subtle: #a8a398;  /*  7.0:1 */
-  --spruce-green: #5fd39b;
-  --spruce-green-hover: #4bc48a;
+  --tech-blue: #8ab4f8;          /* Google Tech Blue M3 Dark Primary */
+  --tech-blue-hover: #a8c7fa;
+  --spruce-green: #8ab4f8;       /* Aliased for backward compatibility */
+  --spruce-green-hover: #a8c7fa;
   --amber-clay: #f0a03c;
   --amber-clay-on-tint: #f0a03c; /* already 6.9:1 on its tint */
   --border-soft: #2e2c27;
   --border-strong: #77726a;      /* 3.7:1 */
-  --focus-ring: #5fd39b;
+  --focus-ring: #8ab4f8;
   --neutral-soft: #23211c;       /* M3 Surface Container Low */
   --surface-container: #2b2822;  /* M3 Surface Container */
   --surface-container-high: #34302a; /* M3 Surface Container High */
@@ -79,6 +83,8 @@
   --color-foreground: var(--foreground);
   --color-warm-ivory: var(--background);
   --color-slate-ink: var(--foreground-heading);
+  --color-tech-blue: var(--tech-blue);
+  --color-tech-blue-hover: var(--tech-blue-hover);
   --color-spruce-green: var(--spruce-green);
   --color-spruce-green-hover: var(--spruce-green-hover);
   --color-amber-clay: var(--amber-clay);

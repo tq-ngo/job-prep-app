@@ -67,7 +67,10 @@ class JobListItem(BaseModel):
     seniority_level: Optional[str] = None
     employment_type: Optional[str] = None
     is_remote: Optional[bool] = None
-    terms: Optional[List[str]]
+    work_type: Optional[str] = None
+    sponsorship_status: Optional[str] = None
+    sponsorship_label: Optional[str] = None
+    terms: Optional[List[str]] = None
     posted_at: Optional[datetime] = None
     scraped_at: datetime
     enriched_at: Optional[datetime] = None

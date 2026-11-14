@@ -152,7 +152,7 @@ describe("JobFeed list", () => {
 
     expect(screen.getByLabelText("Category")).toHaveValue("Quant");
     expect(screen.getByRole("searchbox", { name: /search role/i })).toHaveValue("intern");
-    expect(screen.getByRole("button", { name: "Remote" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Work Type")).toHaveValue("remote");
     expect(jobsApi.list).not.toHaveBeenCalled();
   });
 

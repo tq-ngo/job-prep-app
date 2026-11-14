@@ -1,4 +1,7 @@
+import { cookies } from "next/headers";
 import LandingHero, { type PublicStats } from "./LandingHero";
+import SignedInHome from "./SignedInHome";
+import type { User } from "@/lib/api";
 import { INTERNAL_API_URL } from "@/lib/server-api";
 
 // Statically generated, then regenerated at most every 5 minutes (ISR) so
@@ -18,6 +21,25 @@ async function getStats(): Promise<PublicStats | null> {
   }
 }
 
-export default async function MarketingPage() {
-  return <LandingHero stats={await getStats()} />;
+async function getSessionUser(): Promise<User | null> {
+  try {
+    const cookieHeader = (await cookies()).toString();
+    if (!cookieHeader || !cookieHeader.includes("access_token")) return null;
+    const res = await fetch(`${INTERNAL_API_URL}/api/v1/auth/me`, {
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+    });
+    if (res.ok) return (await res.json()) as User;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export default async function HomePage() {
+  const [stats, user] = await Promise.all([getStats(), getSessionUser()]);
+  if (user) {
+    return <SignedInHome user={user} stats={stats} />;
+  }
+  return <LandingHero stats={stats} />;
 }

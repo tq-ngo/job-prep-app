@@ -3,6 +3,7 @@
 import type { MouseEvent } from "react";
 import type { JobSummary } from "@/lib/api";
 import { formatLocation, formatPay, formatPostedAgo } from "@/lib/format";
+import { getJobSponsorship } from "@/lib/sponsorship";
 import Badge from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 import CompanyAvatar from "./CompanyAvatar";
@@ -35,6 +36,7 @@ export default function JobListItem({
 }: JobListItemProps) {
   const pay = formatPay(job);
   const skills = job.skills?.slice(0, 3) ?? [];
+  const sponsorship = getJobSponsorship(job);
 
   const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
     // Let the browser handle new-tab/new-window gestures.
@@ -69,12 +71,13 @@ export default function JobListItem({
           <p className="mt-0.5 text-xs text-foreground-muted truncate">{job.company}</p>
           <p className="text-xs text-foreground-subtle truncate">{formatLocation(job, "—")}</p>
 
-          {(pay || job.is_remote) && (
-            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-foreground">
-              {pay}
-              {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
-            </p>
-          )}
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-foreground">
+            {pay && <span>{pay}</span>}
+            {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
+            <Badge variant={sponsorship.isCitizenOnly ? "citizenship" : "sponsorship"}>
+              {sponsorship.label}
+            </Badge>
+          </p>
 
           {skills.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
