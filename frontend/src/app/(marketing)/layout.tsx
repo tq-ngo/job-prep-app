@@ -9,6 +9,8 @@ import { SITE_URL } from "@/lib/urls";
 import type { User } from "@/lib/api";
 import { INTERNAL_API_URL } from "@/lib/server-api";
 
+export const dynamic = "force-dynamic";
+
 const TITLE = "JobPrep — Automated Tech Career Command Center";
 const SHORT_DESCRIPTION =
   "SWE internship listings from GitHub and LinkedIn, with AI skill extraction and live updates.";

@@ -13,8 +13,7 @@ export const SOURCES = [
 ] as const;
 
 export const SPONSORSHIPS = [
-  { value: "f1_eligible", label: "CPT/OPT (F-1 Eligible)" },
-  { value: "h1b", label: "H-1B Sponsor" },
+  { value: "sponsorship_available", label: "Sponsorship Available" },
   { value: "requires_citizenship", label: "US Citizen Required" },
 ] as const;
 
@@ -64,8 +63,13 @@ export function parseJobFilters(get: (key: string) => string | null | undefined)
   const category = get("category") ?? "";
   const source = get("source") ?? "";
   const work_type = get("work_type") ?? "";
-  const rawSponsorship = get("sponsorship") ?? "";
-  const sponsorship = rawSponsorship === "cpt_opt" ? "f1_eligible" : rawSponsorship;
+  const rawSponsorship = (get("sponsorship") ?? "").toLowerCase().trim();
+  const sponsorship =
+    rawSponsorship === "cpt_opt" || rawSponsorship === "h1b" || rawSponsorship === "f1_eligible"
+      ? "sponsorship_available"
+      : rawSponsorship === "citizenship"
+        ? "requires_citizenship"
+        : rawSponsorship;
   const skill = (get("skill") ?? "").trim().slice(0, 50);
   const sort_by = get("sort_by") === "relevance" ? "relevance" : "date";
   const remoteParam = get("remote");

@@ -4,6 +4,8 @@ import SignedInHome from "./SignedInHome";
 import type { User } from "@/lib/api";
 import { INTERNAL_API_URL } from "@/lib/server-api";
 
+export const dynamic = "force-dynamic";
+
 // Statically generated, then regenerated at most every 5 minutes (ISR) so
 // the live numbers stay fresh without rendering per request.
 const STATS_REVALIDATE_SECONDS = 300;
