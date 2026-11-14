@@ -53,6 +53,16 @@ describe("parseJobFilters", () => {
     });
   });
 
+  it("normalizes legacy and tier-based sponsorship values", () => {
+    expect(parse("sponsorship=citizenship").sponsorship).toBe("requires_citizenship");
+    expect(parse("sponsorship=requires_citizenship").sponsorship).toBe("requires_citizenship");
+    expect(parse("sponsorship=no_sponsorship").sponsorship).toBe("no_sponsorship");
+    expect(parse("sponsorship=not_sponsored").sponsorship).toBe("no_sponsorship");
+    expect(parse("sponsorship=sponsorship_available").sponsorship).toBe("sponsorship_available");
+    expect(parse("sponsorship=cpt_opt").sponsorship).toBe("sponsorship_available");
+    expect(parse("sponsorship=h1b").sponsorship).toBe("sponsorship_available");
+  });
+
   it("drops values the API wouldn't accept instead of sending them", () => {
     expect(parse("category=Nope&source=indeed&remote=yes&page=-2&sponsorship=bad&sort_by=random")).toEqual({
       q: "",

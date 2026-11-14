@@ -135,12 +135,13 @@ describe("JobFeed list", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
-  it("shows pay, location, up to three skills and the source on each row", () => {
+  it("shows pay, location, up to three skills and relative date on each row", () => {
     renderFeed();
     const row = link(/Backend Intern/);
     expect(row).toHaveTextContent("$55 – $65/hr");
     expect(row).toHaveTextContent("Boston, MA");
-    expect(row).toHaveTextContent("github");
+    expect(row).not.toHaveTextContent("github");
+    expect(row).toHaveTextContent(/ago|today|yesterday/i);
     expect(within(row).getByText("SQL")).toBeInTheDocument();
     expect(within(row).queryByText("Rust")).not.toBeInTheDocument();
   });
@@ -150,9 +151,9 @@ describe("JobFeed list", () => {
     vi.spyOn(jobsApi, "list");
     renderFeed();
 
-    expect(screen.getByLabelText("Category")).toHaveValue("Quant");
+    expect(screen.getByRole("button", { name: "Category" })).toHaveTextContent("Quant");
     expect(screen.getByRole("searchbox", { name: /search role/i })).toHaveValue("intern");
-    expect(screen.getByLabelText("Work Type")).toHaveValue("remote");
+    expect(screen.getByRole("button", { name: "Work Type" })).toHaveTextContent("Remote");
     expect(jobsApi.list).not.toHaveBeenCalled();
   });
 
@@ -161,7 +162,9 @@ describe("JobFeed list", () => {
     const listSpy = vi.spyOn(jobsApi, "list").mockResolvedValue(feed());
     renderFeed();
 
-    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "FAANG+" } });
+    const ue = userEvent.setup();
+    await ue.click(screen.getByRole("button", { name: "Category" }));
+    await ue.click(screen.getByRole("option", { name: "FAANG+" }));
 
     expect(replaceSpy).toHaveBeenCalled();
     expect(pushSpy).not.toHaveBeenCalled();
