@@ -419,7 +419,8 @@ class DomainRateLimiter:
         await sem.acquire()
 
         # Enforce domain-specific spacing
-        interval = self.linkedin_interval if "linkedin.com" in domain else self.default_interval
+        is_linkedin_domain = domain == "linkedin.com" or domain.endswith(".linkedin.com")
+        interval = self.linkedin_interval if is_linkedin_domain else self.default_interval
         now = time.monotonic()
         last = self._last_request_time.get(domain, 0.0)
         delay = interval - (now - last)
@@ -461,16 +462,18 @@ async def enrich_with_descriptions(
     global_semaphore = asyncio.Semaphore(concurrency)
     filled = 0
 
-    # Group records by (apply_url, source, external_id) to avoid duplicate network fetches
+    # Group records by target fetch identity to avoid duplicate network requests.
+    # Most sources fetch by apply_url only, so external_id differences should not
+    # force additional calls for the same URL. LinkedIn is the exception because
+    # it primarily fetches by external_id.
     groups: Dict[Tuple[str, str, Optional[str]], List[Dict[str, Any]]] = {}
     for r in records:
         if r.get("description"):
             continue
-        key = (
-            r.get("apply_url") or "",
-            str(r.get("source") or ""),
-            str(r["external_id"]) if r.get("external_id") else None,
-        )
+        apply_url = r.get("apply_url") or ""
+        source = str(r.get("source") or "")
+        external_id = str(r["external_id"]) if r.get("external_id") else None
+        key = (apply_url, source, external_id if source == "linkedin" and not apply_url else None)
         groups.setdefault(key, []).append(r)
 
     async def fetch_group(key: Tuple[str, str, Optional[str]], group_records: List[Dict[str, Any]]) -> None:
