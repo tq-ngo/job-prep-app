@@ -15,6 +15,7 @@ export const SOURCES = [
 export const SPONSORSHIPS = [
   { value: "sponsorship_available", label: "Sponsorship Available" },
   { value: "requires_citizenship", label: "US Citizen Required" },
+  { value: "no_sponsorship", label: "No Sponsorship" },
 ] as const;
 
 export const WORK_TYPES = [
@@ -69,7 +70,9 @@ export function parseJobFilters(get: (key: string) => string | null | undefined)
       ? "sponsorship_available"
       : rawSponsorship === "citizenship"
         ? "requires_citizenship"
-        : rawSponsorship;
+        : rawSponsorship === "not_sponsored" || rawSponsorship === "none"
+          ? "no_sponsorship"
+          : rawSponsorship;
   const skill = (get("skill") ?? "").trim().slice(0, 50);
   const sort_by = get("sort_by") === "relevance" ? "relevance" : "date";
   const remoteParam = get("remote");

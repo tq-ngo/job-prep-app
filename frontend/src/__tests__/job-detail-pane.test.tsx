@@ -47,15 +47,26 @@ describe("JobDetailPane", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows company, pay, skills and an Apply link that opens off-site safely", () => {
+  it("shows company, work type, skills and an Apply link that opens off-site safely", () => {
     renderPane();
     expect(screen.getByText("Linear")).toBeInTheDocument();
-    expect(screen.getByText("$60 – $75/hr")).toBeInTheDocument();
+    expect(screen.getAllByText("Remote").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("TypeScript")).toBeInTheDocument();
-    const apply = screen.getByRole("link", { name: /^apply$/i });
+    const apply = screen.getByRole("link", { name: /^apply/i });
     expect(apply).toHaveAttribute("href", job.apply_url);
     expect(apply).toHaveAttribute("target", "_blank");
     expect(apply).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("shows visa sponsorship badge and metric when specified", () => {
+    renderPane({
+      job: {
+        ...job,
+        sponsorship_status: "citizenship",
+        sponsorship_label: "US Citizen Required",
+      },
+    });
+    expect(screen.getAllByText("US Citizen Required").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders the sanitized GFM description, with headings under the title", async () => {

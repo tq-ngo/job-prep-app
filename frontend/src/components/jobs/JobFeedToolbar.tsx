@@ -5,7 +5,6 @@ import { ArrowUpDown, Check, RefreshCw, Search, Sparkles, X } from "lucide-react
 import {
   CATEGORIES,
   SORT_OPTIONS,
-  SOURCES,
   SPONSORSHIPS,
   WORK_TYPES,
   type FilterKey,
@@ -15,7 +14,8 @@ import { jobsApi } from "@/lib/api";
 import Badge from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
-import { Input, Select } from "@/components/ui/Input";
+import { Input } from "@/components/ui/Input";
+import FilterDropdown from "@/components/ui/FilterDropdown";
 
 const SEARCH_DEBOUNCE_MS = 350;
 
@@ -153,8 +153,8 @@ function SkillAutocompleteInput({
           onKeyDown={handleKeyDown}
           placeholder="Filter by skill…"
           aria-label="Filter by skill"
-          leadingIcon={<Sparkles size={13} className="text-spruce-green" />}
-          className={cn("pr-7 text-xs", value && "border-spruce-green/50 bg-spruce-green/5")}
+          leadingIcon={<Sparkles size={13} className="text-tech-blue" />}
+          className={cn("pr-7 text-xs", value && "border-tech-blue/50 bg-tech-blue/5")}
         />
         {value && (
           <button
@@ -163,10 +163,10 @@ function SkillAutocompleteInput({
               setQuery("");
               onSelectSkill("");
             }}
-            aria-label="Clear skill filter"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-foreground-subtle hover:text-slate-ink"
+            aria-label="Clear skill"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-foreground-subtle hover:text-foreground"
           >
-            <X size={13} />
+            <X size={12} />
           </button>
         )}
       </div>
@@ -175,7 +175,7 @@ function SkillAutocompleteInput({
         <ul
           role="listbox"
           aria-label="Suggested skills"
-          className="absolute z-50 left-0 top-full mt-1.5 w-60 max-h-56 overflow-y-auto rounded-card border border-slate-soft bg-neutral-soft p-1 shadow-pop"
+          className="absolute z-50 left-0 top-full mt-1.5 w-60 max-h-56 overflow-y-auto rounded-card border border-slate-soft bg-surface-container-lowest dark:bg-surface-container p-1.5 shadow-pop"
         >
           {suggestions.map((skill, index) => {
             const isSelected = skill.toLowerCase() === value.toLowerCase();
@@ -188,13 +188,15 @@ function SkillAutocompleteInput({
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => handleSelect(skill)}
                 className={cn(
-                  "flex items-center justify-between px-3 py-1.5 rounded-control text-xs font-medium cursor-pointer transition-colors",
-                  isActive ? "bg-surface-container text-slate-ink" : "text-foreground-muted hover:bg-surface-container",
-                  isSelected && "text-spruce-green font-semibold bg-spruce-green/10",
+                  "flex items-center justify-between gap-3 px-3 py-2 rounded-control text-xs cursor-pointer transition-colors",
+                  isActive
+                    ? "bg-neutral-soft dark:bg-surface-container-high text-slate-ink"
+                    : "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft dark:hover:bg-surface-container-high",
+                  isSelected ? "text-tech-blue font-semibold bg-tech-blue/10" : "font-medium",
                 )}
               >
                 <span>{skill}</span>
-                {isSelected && <Check size={12} className="text-spruce-green" />}
+                {isSelected && <Check size={13} className="text-tech-blue shrink-0" />}
               </li>
             );
           })}
@@ -226,22 +228,18 @@ export default function JobFeedToolbar({
   const onSearch = useCallback((q: string) => onFilter("q", q), [onFilter]);
   const onSkill = useCallback((skill: string) => onFilter("skill", skill), [onFilter]);
 
+  // Active filters for chips
   const activeFilters = [
-    filters.q && { key: "q" as FilterKey, label: `Search: "${filters.q}"` },
-    filters.category && { key: "category" as FilterKey, label: `Category: ${filters.category}` },
     filters.sponsorship && {
       key: "sponsorship" as FilterKey,
       label: SPONSORSHIPS.find((s) => s.value === filters.sponsorship)?.label ?? filters.sponsorship,
     },
+    filters.category && { key: "category" as FilterKey, label: filters.category },
     filters.work_type && {
       key: "work_type" as FilterKey,
       label: WORK_TYPES.find((w) => w.value === filters.work_type)?.label ?? filters.work_type,
     },
     filters.skill && { key: "skill" as FilterKey, label: `Skill: ${filters.skill}` },
-    filters.source && {
-      key: "source" as FilterKey,
-      label: SOURCES.find((s) => s.value === filters.source)?.label ?? filters.source,
-    },
   ].filter(Boolean) as { key: FilterKey; label: string }[];
 
   const clearAll = () => {
@@ -250,7 +248,6 @@ export default function JobFeedToolbar({
     onFilter("sponsorship", "");
     onFilter("work_type", "");
     onFilter("skill", "");
-    onFilter("source", "");
   };
 
   return (
@@ -266,29 +263,21 @@ export default function JobFeedToolbar({
             className="inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-soft border border-slate-soft text-foreground-subtle mr-auto select-none"
             title={liveConnected ? "Live updates connected" : "Live updates disconnected"}
           >
-            <span aria-hidden="true" className={cn("w-1.5 h-1.5 rounded-full", liveConnected ? "bg-spruce-green animate-pulse" : "bg-slate-soft")} />
+            <span aria-hidden="true" className={cn("w-1.5 h-1.5 rounded-full", liveConnected ? "bg-tech-blue animate-pulse" : "bg-slate-soft")} />
             <span className="hidden sm:inline">{liveConnected ? "Live" : "Offline"}</span>
           </span>
 
           <SearchBox value={filters.q} onSearch={onSearch} />
 
           {/* Sort By */}
-          <div className="flex items-center gap-1">
-            <Select
-              size="sm"
-              aria-label="Sort by"
-              value={filters.sort_by || "date"}
-              onChange={(e) => onFilter("sort_by", e.target.value)}
-              className="rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container text-xs pl-7"
-            >
-              {SORT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </Select>
-            <ArrowUpDown size={12} className="absolute ml-2.5 text-foreground-subtle pointer-events-none" />
-          </div>
+          <FilterDropdown
+            value={filters.sort_by || "date"}
+            onChange={(val) => onFilter("sort_by", val)}
+            options={SORT_OPTIONS}
+            placeholder="Sort by"
+            leadingIcon={<ArrowUpDown size={12} className="text-foreground-subtle" />}
+            ariaLabel="Sort by"
+          />
 
           <Button
             size="sm"
@@ -304,83 +293,37 @@ export default function JobFeedToolbar({
         {/* Refined Filter Chips Row */}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {/* Sponsorship Filter */}
-          <Select
-            size="sm"
-            aria-label="Visa Sponsorship"
+          <FilterDropdown
             value={filters.sponsorship}
-            onChange={(e) => onFilter("sponsorship", e.target.value)}
-            className={cn(
-              "rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container text-xs font-mono",
-              filters.sponsorship && "border-spruce-green/50 bg-spruce-green/10 text-spruce-green font-medium",
-            )}
-          >
-            <option value="">All Sponsorship</option>
-            {SPONSORSHIPS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
+            onChange={(val) => onFilter("sponsorship", val)}
+            options={SPONSORSHIPS}
+            placeholder="All Sponsorship"
+            allOptionLabel="All Sponsorship"
+            ariaLabel="Visa Sponsorship"
+          />
 
           {/* Category Filter */}
-          <Select
-            size="sm"
-            aria-label="Category"
+          <FilterDropdown
             value={filters.category}
-            onChange={(e) => onFilter("category", e.target.value)}
-            className={cn(
-              "rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container text-xs font-mono",
-              filters.category && "border-spruce-green/50 bg-spruce-green/10 text-spruce-green font-medium",
-            )}
-          >
-            <option value="">All Categories</option>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </Select>
+            onChange={(val) => onFilter("category", val)}
+            options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+            placeholder="All Categories"
+            allOptionLabel="All Categories"
+            ariaLabel="Category"
+          />
 
           {/* Work Type Filter */}
-          <Select
-            size="sm"
-            aria-label="Work Type"
+          <FilterDropdown
             value={filters.work_type}
-            onChange={(e) => onFilter("work_type", e.target.value)}
-            className={cn(
-              "rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container text-xs font-mono",
-              filters.work_type && "border-spruce-green/50 bg-spruce-green/10 text-spruce-green font-medium",
-            )}
-          >
-            <option value="">All Work Types</option>
-            {WORK_TYPES.map((w) => (
-              <option key={w.value} value={w.value}>
-                {w.label}
-              </option>
-            ))}
-          </Select>
+            onChange={(val) => onFilter("work_type", val)}
+            options={WORK_TYPES}
+            placeholder="All Work Types"
+            allOptionLabel="All Work Types"
+            ariaLabel="Work Type"
+          />
 
           {/* Skills Filter with Autocomplete */}
           <SkillAutocompleteInput value={filters.skill} onSelectSkill={onSkill} />
-
-          {/* Source Filter */}
-          <Select
-            size="sm"
-            aria-label="Source"
-            value={filters.source}
-            onChange={(e) => onFilter("source", e.target.value)}
-            className={cn(
-              "rounded-full bg-neutral-soft border-slate-soft hover:bg-surface-container text-xs font-mono",
-              filters.source && "border-spruce-green/50 bg-spruce-green/10 text-spruce-green font-medium",
-            )}
-          >
-            <option value="">All Sources</option>
-            {SOURCES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
         </div>
 
         {/* Active Filters Badges & Clear Affordance */}
@@ -405,7 +348,7 @@ export default function JobFeedToolbar({
             <button
               type="button"
               onClick={clearAll}
-              className="text-2xs font-mono text-spruce-green hover:underline ml-1.5"
+              className="text-2xs font-mono text-tech-blue hover:underline ml-1.5"
             >
               Clear all
             </button>

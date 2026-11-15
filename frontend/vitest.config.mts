@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
+process.env.VITEST_SKIP_INSTALL_CHECKS = "1";
+
 export default defineConfig({
   root: path.resolve(import.meta.dirname),
   plugins: [react()],

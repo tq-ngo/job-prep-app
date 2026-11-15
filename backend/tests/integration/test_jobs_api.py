@@ -164,3 +164,93 @@ async def test_get_job_detail_endpoint(
         f"/api/v1/jobs/{uuid.uuid4()}", cookies=auth_headers["cookies"]
     )
     assert res_404.status_code == 404
+
+
+@pytest.mark.integration
+async def test_job_feed_sponsorship_filtering_and_domain(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict,
+):
+    j_us = Job(
+        id=uuid.uuid4(),
+        external_id="motorola-spons-1",
+        source="github",
+        title="Software Engineering Intern",
+        company="Motorola Solutions",
+        company_domain="motorolasolutions.com",
+        category="Others",
+        apply_url="https://motorolasolutions.com/careers/1",
+        is_active=True,
+        canonical_id=None,
+        description="You are a U.S. Citizen, U.S. permanent resident or possess other unrestricted US work authorization.",
+    )
+    j_no = Job(
+        id=uuid.uuid4(),
+        external_id="nbc-spons-2",
+        source="github",
+        title="Software Engineer Intern",
+        company="NBCUniversal",
+        company_domain="nbcuniversal.com",
+        category="Others",
+        apply_url="https://nbcuniversal.com/careers/2",
+        is_active=True,
+        canonical_id=None,
+        description="Must not require work visa sponsorship. F-1 CPT and OPT students are not eligible.",
+    )
+    j_avail = Job(
+        id=uuid.uuid4(),
+        external_id="stripe-spons-3",
+        source="github",
+        title="Backend Engineering Intern",
+        company="Stripe",
+        company_domain="stripe.com",
+        category="Others",
+        apply_url="https://stripe.com/careers/3",
+        is_active=True,
+        canonical_id=None,
+        description="Visa sponsorship is available for eligible candidates. We sponsor H-1B visas.",
+    )
+    mock_db_session.add_all([j_us, j_no, j_avail])
+    await mock_db_session.commit()
+
+    # Filter requires_citizenship
+    res_us = await client.get(
+        "/api/v1/jobs/",
+        params={"sponsorship": "requires_citizenship"},
+        cookies=auth_headers["cookies"],
+    )
+    assert res_us.status_code == 200
+    us_data = res_us.json()
+    assert us_data["total"] == 1
+    assert us_data["items"][0]["company"] == "Motorola Solutions"
+    assert us_data["items"][0]["company_domain"] == "motorolasolutions.com"
+    assert us_data["items"][0]["sponsorship_status"] == "citizenship"
+    assert us_data["items"][0]["sponsorship_label"] == "US Citizen Required"
+
+    # Filter no_sponsorship
+    res_no = await client.get(
+        "/api/v1/jobs/",
+        params={"sponsorship": "no_sponsorship"},
+        cookies=auth_headers["cookies"],
+    )
+    assert res_no.status_code == 200
+    no_data = res_no.json()
+    assert no_data["total"] == 1
+    assert no_data["items"][0]["company"] == "NBCUniversal"
+    assert no_data["items"][0]["sponsorship_status"] == "no_sponsorship"
+    assert no_data["items"][0]["sponsorship_label"] == "No Sponsorship"
+
+    # Filter sponsorship_available
+    res_avail = await client.get(
+        "/api/v1/jobs/",
+        params={"sponsorship": "sponsorship_available"},
+        cookies=auth_headers["cookies"],
+    )
+    assert res_avail.status_code == 200
+    avail_data = res_avail.json()
+    assert avail_data["total"] == 1
+    assert avail_data["items"][0]["company"] == "Stripe"
+    assert avail_data["items"][0]["sponsorship_status"] == "sponsorship_available"
+    assert avail_data["items"][0]["sponsorship_label"] == "Sponsorship Available"
+
