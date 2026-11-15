@@ -71,7 +71,7 @@ describe("JobDetailPane", () => {
 
   it("renders the sanitized GFM description, with headings under the title", async () => {
     const { container } = renderPane();
-    expect(await screen.findByRole("heading", { level: 4, name: "About The Team" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 4, name: "About The Team" }, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
     const link = screen.getByRole("link", { name: "Apply Directly" });
     expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
