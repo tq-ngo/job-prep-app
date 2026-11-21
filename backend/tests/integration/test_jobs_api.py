@@ -183,6 +183,8 @@ async def test_job_feed_sponsorship_filtering_and_domain(
         apply_url="https://motorolasolutions.com/careers/1",
         is_active=True,
         canonical_id=None,
+        sponsorship_status="citizenship",
+        sponsorship_label="US Citizen Required",
         description="You are a U.S. Citizen, U.S. permanent resident or possess other unrestricted US work authorization.",
     )
     j_no = Job(
@@ -196,6 +198,8 @@ async def test_job_feed_sponsorship_filtering_and_domain(
         apply_url="https://nbcuniversal.com/careers/2",
         is_active=True,
         canonical_id=None,
+        sponsorship_status="no_sponsorship",
+        sponsorship_label="No Sponsorship",
         description="Must not require work visa sponsorship. F-1 CPT and OPT students are not eligible.",
     )
     j_avail = Job(
@@ -209,6 +213,8 @@ async def test_job_feed_sponsorship_filtering_and_domain(
         apply_url="https://stripe.com/careers/3",
         is_active=True,
         canonical_id=None,
+        sponsorship_status="sponsorship_available",
+        sponsorship_label="Sponsorship Available",
         description="Visa sponsorship is available for eligible candidates. We sponsor H-1B visas.",
     )
     mock_db_session.add_all([j_us, j_no, j_avail])

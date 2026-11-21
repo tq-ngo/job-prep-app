@@ -14,6 +14,7 @@ from app.core.redis import create_worker_redis
 from app.models.job import Job
 from app.scraping.categorize import categorize, company_domain
 from app.scraping.dedup import dedup_engine
+from app.scraping.sponsorship import classify_sponsorship
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ _UPDATABLE_COLUMNS = (
     "title", "company", "location", "salary_min", "salary_max",
     "apply_url", "source_url", "is_remote", "scraped_at", "is_active",
     "canonical_hash", "category", "company_domain",
+    "sponsorship_status", "sponsorship_label",
 )
 
 # A posting whose description couldn't be fetched (403/404, JS-only page) is
@@ -131,6 +133,9 @@ class DatabaseSyncService:
                 now = utc_now()
                 for r in needs_upsert:
                     r["description_fetched_at"] = now
+                    spons = classify_sponsorship(r.get("title") or "", r.get("description") or "")
+                    r["sponsorship_status"] = spons["status"]
+                    r["sponsorship_label"] = spons["label"]
                 inserted_ids = await self._upsert(needs_upsert)
                 stats["inserted"] = len(inserted_ids)
                 stats["updated"] = len(needs_upsert) - stats["inserted"]
@@ -263,6 +268,9 @@ class DatabaseSyncService:
                 )
             r["category"] = categorize(company, title)
             r["company_domain"] = company_domain(r.get("apply_url"))
+            spons = classify_sponsorship(title, r.get("description") or "")
+            r["sponsorship_status"] = spons["status"]
+            r["sponsorship_label"] = spons["label"]
 
     async def _upsert(self, records: List[Dict[str, Any]]) -> List[Any]:
         """UPSERT the records; returns ids of rows that were newly INSERTED."""
@@ -289,6 +297,12 @@ class DatabaseSyncService:
             )
             update_cols["description_fetched_at"] = func.coalesce(
                 stmt.excluded.description_fetched_at, Job.description_fetched_at
+            )
+            update_cols["sponsorship_status"] = func.coalesce(
+                stmt.excluded.sponsorship_status, Job.sponsorship_status
+            )
+            update_cols["sponsorship_label"] = func.coalesce(
+                stmt.excluded.sponsorship_label, Job.sponsorship_label
             )
             # A row enriched while it had no description was marked done
             # with no skills; when a later crawl finally fetches its JD, send

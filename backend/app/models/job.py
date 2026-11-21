@@ -111,6 +111,11 @@ class Job(SQLModel, table=True):
     company: str
     # FAANG+ / Quant / Others, computed at ingest (scraping/categorize.py).
     category: Optional[str] = Field(default=None, max_length=16, index=True)
+    # Visa sponsorship analysis ("sponsorship_available", "citizenship", "no_sponsorship"),
+    # computed at ingest (scraping/sponsorship.py). Persisting this allows feed queries
+    # to filter via B-tree index and defer the heavy description column.
+    sponsorship_status: Optional[str] = Field(default=None, max_length=32, index=True)
+    sponsorship_label: Optional[str] = Field(default=None, max_length=32)
     # Registrable domain when the apply link is on the company's own site.
     company_domain: Optional[str] = Field(default=None, max_length=255)
     location: Optional[str] = None

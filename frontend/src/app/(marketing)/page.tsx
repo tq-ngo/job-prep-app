@@ -4,10 +4,14 @@ import SignedInHome from "./SignedInHome";
 import type { User } from "@/lib/api";
 import { INTERNAL_API_URL } from "@/lib/server-api";
 
+// Dynamic SSR rendering: this route evaluates on every request to inspect
+// incoming session cookies via `getSessionUser()`, seamlessly rendering
+// `SignedInHome` for authenticated users without client-side redirects or auth flicker.
 export const dynamic = "force-dynamic";
 
-// Statically generated, then regenerated at most every 5 minutes (ISR) so
-// the live numbers stay fresh without rendering per request.
+// The public aggregate platform statistics are cached upstream and revalidated
+// at most every 5 minutes (300s). This prevents heavy database aggregations on
+// every homepage load while ensuring public metrics stay fresh.
 const STATS_REVALIDATE_SECONDS = 300;
 
 async function getStats(): Promise<PublicStats | null> {
