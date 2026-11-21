@@ -28,6 +28,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
+      - name: Security audit with pip-audit
+        run: pip-audit
       # Env defaults live in tests/conftest.py; Redis is faked, DB is SQLite.
       - run: pytest -m "not pg"
 
@@ -95,6 +97,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - name: Security audit with npm audit
+        run: npm audit --audit-level=high
       - run: npm run lint
       - name: Type-check
         run: npx tsc --noEmit
