@@ -200,6 +200,9 @@ async def register(
     session: AsyncSession = Depends(get_session),
 ):
     if await _find_user_by_email(session, user_in.email):
+        # Always execute bcrypt hashing even when email is duplicate to ensure
+        # constant-time latency parity and eliminate the registration timing oracle.
+        await get_password_hash_async(user_in.password)
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(

@@ -17,7 +17,7 @@ import { cn } from "@/components/ui/cn";
 import { Input } from "@/components/ui/Input";
 import FilterDropdown from "@/components/ui/FilterDropdown";
 
-const SEARCH_DEBOUNCE_MS = 350;
+const SEARCH_DEBOUNCE_MS = 250;
 
 /**
  * Search input that writes to the URL after a pause, and follows the URL

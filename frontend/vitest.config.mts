@@ -6,6 +6,12 @@ process.env.VITEST_SKIP_INSTALL_CHECKS = "1";
 
 export default defineConfig({
   root: path.resolve(import.meta.dirname),
+  server: {
+    fs: {
+      strict: true,
+      allow: [path.resolve(import.meta.dirname)],
+    },
+  },
   plugins: [react()],
   test: {
     globals: true,
