@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { authApi } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
@@ -26,6 +26,11 @@ export default function LoginForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState(initialError);
   const [isLoading, setIsLoading] = useState(false);
+  const isHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const { completeLogin } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,7 +80,7 @@ export default function LoginForm({
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} method="post" action="#" data-hydrated={isHydrated} className="space-y-4">
         <Field label="Email">
           <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>

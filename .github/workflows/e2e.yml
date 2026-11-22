@@ -43,28 +43,31 @@ jobs:
       CELERY_BROKER_URL: redis://localhost:6379/1
       CELERY_RESULT_BACKEND: redis://localhost:6379/2
       SECRET_KEY: e2e-secret-key-at-least-32-chars-long-for-testing
+      JWT_SECRET: e2e-secret-key-at-least-32-chars-long-for-testing
       APP_ENV: development
       COOKIE_SECURE: "false"
       FRONTEND_URL: http://127.0.0.1:3000
       INTERNAL_API_URL: http://127.0.0.1:8000
-      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+      NEXT_PUBLIC_API_URL: ""
+      CORS_ORIGINS: http://localhost,http://127.0.0.1,http://localhost:3000,http://127.0.0.1:3000
       NEXT_TELEMETRY_DISABLED: "1"
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/requirements*.txt
 
-      - name: Install backend dependencies & run migrations
+      - name: Install backend dependencies, run migrations & seed test data
         working-directory: backend
         run: |
           pip install -r requirements-dev.txt
           alembic upgrade head
+          python scripts/seed_e2e.py
 
       - name: Start FastAPI Backend
         working-directory: backend
@@ -80,7 +83,7 @@ jobs:
           done
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm

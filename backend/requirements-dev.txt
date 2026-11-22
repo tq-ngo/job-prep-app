@@ -7,4 +7,5 @@ fakeredis[aioredis]==2.40.0
 respx==0.23.1
 aiosqlite==0.21.0
 pip-audit==2.9.0
+setuptools==84.1.0
 

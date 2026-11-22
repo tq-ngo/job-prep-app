@@ -4,14 +4,15 @@ test.describe("Authentication Smoke Suite", () => {
   test("renders login page with credentials form", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(page.getByRole("heading", { name: /sign in/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible();
     await expect(page.getByLabel(/email/i)).toBeVisible();
-    await expect(page.getByLabel(/password/i)).toBeVisible();
+    await expect(page.getByLabel(/^password$/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
   });
 
   test("validates required fields before submitting", async ({ page }) => {
     await page.goto("/login");
+    await page.locator("form[data-hydrated='true']").waitFor();
 
     const submitBtn = page.getByRole("button", { name: /sign in/i });
     await submitBtn.click();
