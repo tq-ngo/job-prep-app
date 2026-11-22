@@ -1,15 +1,35 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Job Board & Feed Interactions", () => {
+  const credentials = {
+    email: "playwright-smoke@example.com",
+    password: "SmokePassword123!",
+  };
+
+  test.beforeAll(async ({ request }) => {
+    await request.post("http://127.0.0.1:8000/api/v1/auth/register", {
+      data: credentials,
+    });
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel(/email/i).fill(credentials.email);
+    await page.getByRole("textbox", { name: /^password$/i }).fill(credentials.password);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/jobs/);
+  });
+
   test("loads jobs board and allows category filter interaction", async ({ page }) => {
     await page.goto("/jobs");
 
     // Board toolbar controls should render
-    const categorySelect = page.getByLabel(/category/i);
-    await expect(categorySelect).toBeVisible();
+    const categoryFilter = page.getByRole("button", { name: "Category" });
+    await expect(categoryFilter).toBeVisible();
 
     // Selecting a category updates URL state without full page reload
-    await categorySelect.selectOption("FAANG+");
+    await categoryFilter.click();
+    await page.getByRole("option", { name: "FAANG+" }).click();
     await expect(page).toHaveURL(/category=FAANG%2B/);
   });
 
