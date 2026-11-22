@@ -8,6 +8,8 @@ import path from "path";
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+
   // Fix Turbopack workspace root detection warning
   turbopack: {
     root: path.resolve(__dirname),

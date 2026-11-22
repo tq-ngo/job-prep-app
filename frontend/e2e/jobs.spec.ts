@@ -1,15 +1,30 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Job Board & Feed Interactions", () => {
+  test.beforeEach(async ({ page, request }) => {
+    const email = "playwright-smoke@example.com";
+    const password = "SmokeTest123!";
+
+    await request.post("http://127.0.0.1:8000/api/v1/auth/register", {
+      data: { email, password },
+    });
+    await page.goto("/login");
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByRole("textbox", { name: "Password" }).fill(password);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/jobs/);
+  });
+
   test("loads jobs board and allows category filter interaction", async ({ page }) => {
     await page.goto("/jobs");
 
     // Board toolbar controls should render
-    const categorySelect = page.getByLabel(/category/i);
-    await expect(categorySelect).toBeVisible();
+    const categoryButton = page.getByRole("button", { name: "Category" });
+    await expect(categoryButton).toBeVisible();
 
     // Selecting a category updates URL state without full page reload
-    await categorySelect.selectOption("FAANG+");
+    await categoryButton.click();
+    await page.getByRole("option", { name: "FAANG+" }).click();
     await expect(page).toHaveURL(/category=FAANG%2B/);
   });
 
