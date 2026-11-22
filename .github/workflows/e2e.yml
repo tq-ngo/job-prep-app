@@ -67,7 +67,7 @@ jobs:
         run: |
           pip install -r requirements-dev.txt
           alembic upgrade head
-          python scripts/seed_e2e.py
+          PYTHONPATH=. python scripts/seed_e2e.py
 
       - name: Start FastAPI Backend
         working-directory: backend

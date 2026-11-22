@@ -3,6 +3,14 @@ Seed script for Playwright E2E smoke tests.
 Seeds a test user and sample job listings into the E2E database.
 """
 import asyncio
+import sys
+from pathlib import Path
+
+# Ensure backend root is on sys.path so `app` can be imported regardless of invocation cwd
+backend_dir = Path(__file__).resolve().parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
 from sqlmodel import select
 from app.core.database import create_worker_session_ctx
 from app.models.users import User
