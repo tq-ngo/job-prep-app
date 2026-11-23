@@ -66,9 +66,9 @@ celery_app.conf.update(
     result_expires=3600,
 
     beat_schedule={
-        "scrape-github-every-6h": {
+        "scrape-github-hourly": {
             "task": "app.tasks.job_tasks.scrape_github",
-            "schedule": 6 * 60 * 60,
+            "schedule": 60 * 60,
         },
         # LinkedIn runs at 06:00 UTC daily
         "scrape-linkedin-daily": {

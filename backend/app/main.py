@@ -35,9 +35,19 @@ async def lifespan(app: FastAPI):
     # call while the pipeline reports success. No-ops without an API key.
     await verify_model()
 
-    # NOTE: Playwright/Chromium was started here, costing ~300MB RSS on every
-    # API replica, but PlaywrightScraper.fetch has no call sites. JD extraction
-    # uses the HTTP path (TLSImpersonateScraper) instead. Removed.
+    # Automatically bootstrap initial postings if the database is empty on startup
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.models.job import Job
+        from sqlmodel import select, func
+        async with AsyncSessionLocal() as session:
+            count = await session.scalar(select(func.count(Job.id)))
+            if count == 0:
+                logger.info("Jobs table is empty; enqueuing initial GitHub scrape bootstrap...")
+                from app.tasks.job_tasks import scrape_github
+                scrape_github.delay()
+    except Exception as exc:
+        logger.warning("Could not check or enqueue startup scrape bootstrap: %s", exc)
 
     logger.info("Startup complete")
 

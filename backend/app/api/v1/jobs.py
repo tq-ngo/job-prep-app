@@ -322,9 +322,10 @@ async def trigger_scrape(
     _: None = Depends(require_csrf),
 ):
     """
-    Trigger a background scrape job. Idempotency is handled inside each
-    task via Redis NX locks — the API simply dispatches and
-    the task will self-skip if already running.
+    Administrative endpoint to manually trigger a background scrape job.
+    Continuous ingestion is managed automatically by Celery Beat and live SSE push.
+    Idempotency is handled inside each task via Redis NX locks — the API simply
+    dispatches and the task will self-skip if already running.
     """
     task_map = {
         "github": scrape_github,
