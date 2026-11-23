@@ -30,6 +30,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Security audit with pip-audit
         run: pip-audit
+      - name: Static application security testing (SAST) with Bandit
+        run: bandit -r app/ -ll -x app/tests
       # Env defaults live in tests/conftest.py; Redis is faked, DB is SQLite.
       - run: pytest -m "not pg"
 

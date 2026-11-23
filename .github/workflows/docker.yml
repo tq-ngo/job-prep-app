@@ -43,3 +43,11 @@ jobs:
           -v "$PWD/infra/nginx/templates:/etc/nginx/templates:ro"
           nginx:alpine nginx -t
       - run: docker compose build backend frontend
+      - name: Scan repository and dependencies with Trivy
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'

@@ -104,10 +104,11 @@ alembic check   # models and migrations agree
 cd frontend
 npm run lint && npx tsc --noEmit && npm test
 npm run check:contrast   # WCAG contrast audit of the colour tokens
+npm run test:e2e         # Playwright smoke test suite
 npm run build
 ```
 
-GitHub Actions runs all of these on every pull request (`.github/workflows/ci.yml`), and validates the compose files, nginx config and Docker images when infrastructure changes (`docker.yml`).
+GitHub Actions runs unit tests, static security analysis (`pip-audit`, `bandit`, `npm audit`), WCAG contrast checks, and Docker image validation on every pull request (`.github/workflows/ci.yml`, `docker.yml`), plus end-to-end smoke testing (`.github/workflows/e2e.yml`).
 
 ## Configuration
 
