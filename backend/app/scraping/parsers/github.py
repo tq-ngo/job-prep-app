@@ -251,7 +251,7 @@ def _parse_html_tables(text: str, source_url: str, include_inactive: bool = Fals
                     location=location,
                     apply_url=apply_url,
                     is_remote=is_remote,
-                    posted_at=parse_relative_date(date_raw),
+                    posted_at=parse_relative_date(date_raw) or utc_now(),
                     terms=None,
                 )
             )
@@ -341,7 +341,7 @@ def _parse_markdown_tables(text: str, source_url: str, include_inactive: bool = 
                         location=location,
                         apply_url=apply_url,
                         is_remote=is_remote,
-                        posted_at=parse_relative_date(date_raw),
+                        posted_at=parse_relative_date(date_raw) or utc_now(),
                         terms=None,
                     )
                 )

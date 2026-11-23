@@ -62,6 +62,16 @@ def _member(key: Key) -> str:
     return f"{key[1]}:{key[0]}"
 
 
+async def invalidate_jobs_count_cache(redis) -> None:
+    """Clear cached count totals in Redis so subsequent feed queries reflect fresh rows."""
+    try:
+        keys = await redis.keys("jobs_count:*")
+        if keys:
+            await redis.delete(*keys)
+    except Exception as exc:
+        logger.warning("Failed to invalidate jobs_count cache: %s", exc)
+
+
 class DatabaseSyncService:
     """
     Sync a crawled batch through a sequential 3-layer dedup pipeline, and
@@ -145,6 +155,9 @@ class DatabaseSyncService:
             await self.session.commit()
 
             await self._publish_created(inserted_ids, redis)
+
+            if inserted_ids or stats["linked"]:
+                await invalidate_jobs_count_cache(redis)
 
             # A cache hit must mean "nothing left to fetch for this posting",
             # so a failed fetch stays uncached and is retried next crawl until

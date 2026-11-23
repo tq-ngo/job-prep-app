@@ -40,6 +40,7 @@ def job_event_payload(job, kind: str, skills=None) -> dict:
         "id": str(job.id),
         "title": job.title,
         "company": job.company,
+        "company_domain": getattr(job, "company_domain", None),
         "location": job.location,
         "skills": list(skills or (job.skills if hasattr(job, "skills") and job.skills else [])),
         "apply_url": job.apply_url,

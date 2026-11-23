@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from app.tasks.celery_app import celery_app
 from app.tasks.runtime import HARD_LIMIT_GRACE, run_async
 from app.scraping.parsers.github import parse_github_jobs
-from app.scraping.db_sync import DatabaseSyncService
+from app.scraping.db_sync import DatabaseSyncService, invalidate_jobs_count_cache
 from app.scraping.jd_extractor import enrich_with_descriptions
 from app.core.database import create_worker_session_ctx
 from app.core.datetime_utils import as_utc, utc_now
@@ -175,6 +175,8 @@ async def _scrape_github(self, task_id: str = None):
                 total_stats["deactivated"] = await deactivate_unseen_github(
                     db_service, successful_urls, seen_external_ids
                 )
+                if total_stats["deactivated"]:
+                    await invalidate_jobs_count_cache(redis)
             await session.commit()
 
         duration = time.monotonic() - start_time
@@ -584,6 +586,11 @@ async def _deactivate_stale_jobs(self, source: str, max_age_days: int):
         await session.commit()
     if deactivated:
         logger.info("Deactivated %d %s postings unseen for %d days", len(deactivated), source, max_age_days)
+        redis = create_worker_redis()
+        try:
+            await invalidate_jobs_count_cache(redis)
+        finally:
+            await redis.aclose()
     return f"Deactivated {len(deactivated)}"
 
 
