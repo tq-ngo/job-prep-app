@@ -53,7 +53,7 @@ docker compose up --build -d
 | http://127.0.0.1:8000/docs    | API docs (dev only; disabled when `APP_ENV=production`)              |
 | http://127.0.0.1:5555         | Flower, the Celery dashboard (dev only; `FLOWER_BASIC_AUTH` login)   |
 
-Migrations run automatically when the backend starts. The board fills as Celery Beat runs the crawlers (GitHub every 6 hours, LinkedIn daily), or immediately with **Refresh** on the Jobs page.
+Migrations run automatically when the backend starts. The board fills as Celery Beat runs the crawlers (GitHub hourly, LinkedIn daily), or automatically on first startup when the database is empty.
 
 AI features stay off until `GEMINI_API_KEY` is set. Google sign-in stays off until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; register the redirect URI `http://localhost/api/v1/auth/google/callback`.
 
