@@ -158,7 +158,7 @@ async def list_skills(
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
     # Query parameters with defaults and validation
-    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
+    page: int = Query(default=1, ge=1, le=100, description="Page number (1-indexed)"),
     page_size: int = Query(default=30, ge=1, le=100, description="Items per page"),
     source: Optional[str] = Query(default=None, max_length=32, description="Filter by source"),
     is_remote: Optional[bool] = Query(default=None),

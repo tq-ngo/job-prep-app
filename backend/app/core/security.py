@@ -39,9 +39,9 @@ _AUDIENCE = "job-prep-app:api"
 
 
 # bcrypt only reads the first 72 bytes of its input (bcrypt>=5 raises on
-# longer input instead of truncating). Registration rejects longer passwords
-# so nothing is silently ignored; verify still truncates so hashes created
-# before that check keep working.
+# longer input instead of truncating). Passwords exceeding MAX_PASSWORD_BYTES
+# are rejected at registration, fail verification, and raise on hash generation
+# to prevent silent truncation security bypasses.
 MAX_PASSWORD_BYTES = 72
 
 
@@ -50,22 +50,34 @@ class TokenError(Exception):
 
 
 def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool:
-    """Verify a plaintext password against a bcrypt hash."""
+    """
+    Verify a plaintext password against a bcrypt hash.
+
+    Passwords exceeding MAX_PASSWORD_BYTES fail verification to prevent
+    silent truncation bypasses, while still running constant-time bcrypt
+    evaluation on the prefix to protect against timing side channels.
+    """
     if not hashed_password:
         return False
+    pwd_bytes = plain_password.encode("utf-8")
+    is_valid_len = len(pwd_bytes) <= MAX_PASSWORD_BYTES
     try:
-        return bcrypt.checkpw(
-            plain_password.encode("utf-8")[:MAX_PASSWORD_BYTES],
+        matches = bcrypt.checkpw(
+            pwd_bytes[:MAX_PASSWORD_BYTES],
             hashed_password.encode("utf-8"),
         )
+        return matches and is_valid_len
     except Exception:
         return False
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a plaintext password with bcrypt (12 rounds)."""
+    """Hash a plaintext password with bcrypt (12 rounds). Rejects passwords exceeding 72 bytes."""
+    pwd_bytes = password.encode("utf-8")
+    if len(pwd_bytes) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes")
     return bcrypt.hashpw(
-        password.encode("utf-8")[:MAX_PASSWORD_BYTES],
+        pwd_bytes,
         bcrypt.gensalt(rounds=12),
     ).decode("utf-8")
 

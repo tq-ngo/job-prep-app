@@ -34,15 +34,19 @@ def test_bcrypt_password_hashing():
 
 
 @pytest.mark.unit
-def test_bcrypt_72_byte_truncation():
+def test_bcrypt_72_byte_boundary():
     # Passwords up to 72 bytes hash and verify properly
     valid_pwd = "A" * MAX_PASSWORD_BYTES
     hashed = get_password_hash(valid_pwd)
     assert verify_password(valid_pwd, hashed) is True
 
-    # Bcrypt truncates verification at 72 bytes
+    # Passwords exceeding 72 bytes fail verification to prevent silent truncation bypass
     long_pwd = valid_pwd + "EXTRA_BYTES_BEYOND_72"
-    assert verify_password(long_pwd, hashed) is True
+    assert verify_password(long_pwd, hashed) is False
+
+    # Hashing passwords exceeding 72 bytes raises ValueError rather than silently truncating
+    with pytest.raises(ValueError, match=f"at most {MAX_PASSWORD_BYTES} bytes"):
+        get_password_hash(long_pwd)
 
 
 @pytest.mark.unit

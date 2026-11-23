@@ -88,7 +88,7 @@ async def semantic_search(
     # Smallest distance = most semantically similar.
     stmt = (
         select(Job)
-        .options(defer(Job.embedding))
+        .options(defer(Job.embedding), defer(Job.description))
         .where(Job.is_active == True)
         .where(Job.canonical_id.is_(None))  # Collapse cross-source duplicates to canonical entity
         .where(Job.embedding != None)  # Only search jobs that have AI embeddings
