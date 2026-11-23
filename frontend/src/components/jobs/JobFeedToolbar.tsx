@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpDown, Check, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { ArrowUpDown, Check, Search, Sparkles, X } from "lucide-react";
 import {
   CATEGORIES,
   SORT_OPTIONS,
@@ -12,7 +12,6 @@ import {
 } from "@/lib/job-filters";
 import { jobsApi } from "@/lib/api";
 import Badge from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { Input } from "@/components/ui/Input";
 import FilterDropdown from "@/components/ui/FilterDropdown";
@@ -211,8 +210,6 @@ interface JobFeedToolbarProps {
   onFilter: (key: FilterKey, value: string) => void;
   totalLabel: string;
   liveConnected: boolean;
-  onRefresh: () => void;
-  refreshing: boolean;
   className?: string;
 }
 
@@ -221,8 +218,6 @@ export default function JobFeedToolbar({
   onFilter,
   totalLabel,
   liveConnected,
-  onRefresh,
-  refreshing,
   className,
 }: JobFeedToolbarProps) {
   const onSearch = useCallback((q: string) => onFilter("q", q), [onFilter]);
@@ -278,16 +273,6 @@ export default function JobFeedToolbar({
             leadingIcon={<ArrowUpDown size={12} className="text-foreground-subtle" />}
             ariaLabel="Sort by"
           />
-
-          <Button
-            size="sm"
-            className="rounded-full shadow-xs"
-            onClick={onRefresh}
-            loading={refreshing}
-            icon={<RefreshCw size={12} aria-hidden="true" />}
-          >
-            {refreshing ? "Syncing…" : "Refresh"}
-          </Button>
         </div>
 
         {/* Refined Filter Chips Row */}

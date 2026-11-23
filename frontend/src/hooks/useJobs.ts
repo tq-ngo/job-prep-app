@@ -24,6 +24,8 @@ export function useJobs(
     queryKey: ["jobs", params],
     queryFn: () => jobsApi.list(params),
     staleTime: JOBS_STALE_TIME,
+    // Background polling fallback to guarantee constant data freshness alongside live SSE
+    refetchInterval: 60_000,
     // Seed the cache with the server-rendered page. Without this the query
     // started empty, `isLoading` replaced the SSR rows with skeletons, and
     // the same page was fetched a second time from the browser.

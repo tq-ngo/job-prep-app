@@ -1,15 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Briefcase } from "lucide-react";
-import { JobEvent, JobListResponse, JobSummary } from "@/lib/api";
-import { apiErrorMessage } from "@/lib/errors";
+import { Job, JobEvent, JobListResponse, JobSummary } from "@/lib/api";
 import { hasActiveFilters, sameFilters, toListParams, type JobFilters } from "@/lib/job-filters";
-import { useJob, useJobs, useTriggerScrape } from "@/hooks/useJobs";
+import { jobQueryKey, useJob, useJobs } from "@/hooks/useJobs";
 import { useJobAlerts } from "@/hooks/useJobAlerts";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
-import { useScrapePolling } from "@/hooks/useScrapePolling";
 import Alert from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -46,16 +44,47 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
   const { data, isLoading, isError, isPlaceholderData, refetch } = jobsQuery;
   const jobs = data?.items ?? [];
 
-  // ── Live updates ───────────────────────────────────────────────────────
-  // New postings are counted, not auto-inserted: inserting reshuffled rows
-  // under the user's cursor. `enriched` events only add skills to existing
-  // rows, so they don't count.
-  const [pendingNew, setPendingNew] = useState(0);
+  // ── Continuous live updates ─────────────────────────────────────────────
+  // Newly retrieved postings from background crawlers are pushed directly
+  // into the feed without requiring manual refresh or showing intrusive alerts.
+  // Invalidation is debounced so bursts of newly ingested postings during an
+  // active crawl batch coalesce into a single smooth refetch.
+  const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { connected: sseConnected } = useJobAlerts({
-    onEvent: useCallback((event: JobEvent) => {
-      if (event.kind === "created") setPendingNew((n) => n + 1);
-    }, []),
+    onEvent: useCallback(
+      (event: JobEvent) => {
+        if (event.kind === "created") {
+          if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
+          invalidateTimerRef.current = setTimeout(() => {
+            queryClient.invalidateQueries({ queryKey: ["jobs"] });
+          }, 300);
+        } else if (event.kind === "enriched") {
+          // Immediately update enriched attributes (skills) in query cache
+          queryClient.setQueriesData<JobListResponse>({ queryKey: ["jobs"] }, (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              items: old.items.map((job) =>
+                job.id === event.id ? { ...job, skills: event.skills } : job
+              ),
+            };
+          });
+          queryClient.setQueryData<Job>(jobQueryKey(event.id), (old) => {
+            if (!old) return old;
+            return { ...old, skills: event.skills };
+          });
+        }
+      },
+      [queryClient],
+    ),
   });
+
+  useEffect(() => {
+    return () => {
+      if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
+    };
+  }, []);
 
   const listPaneRef = useRef<HTMLElement>(null);
   const scrollListToTop = () => {
@@ -63,46 +92,10 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
     if (!isDesktop) window.scrollTo({ top: 0 });
   };
 
-  const showPendingJobs = () => {
-    setPendingNew(0);
-    if (filters.page !== 1) setPage(1);
-    scrollListToTop();
-    queryClient.invalidateQueries({ queryKey: ["jobs"] });
-  };
-
   const handlePage = (page: number) => {
     setPage(page);
     scrollListToTop();
   };
-
-  // ── Manual scrape ──────────────────────────────────────────────────────
-  const triggerScrape = useTriggerScrape();
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [scrapeError, setScrapeError] = useState<string | null>(null);
-  const onScrapeComplete = useCallback(() => {
-    setTaskId(null);
-    queryClient.invalidateQueries({ queryKey: ["jobs"] });
-  }, [queryClient]);
-  useScrapePolling(taskId, {
-    onSuccess: onScrapeComplete,
-    onError: (message) => {
-      setTaskId(null);
-      setScrapeError(`Refresh didn't finish. ${message}`);
-    },
-  });
-
-  const handleRefresh = () => {
-    setScrapeError(null);
-    triggerScrape.mutate(filters.source || "all", {
-      onSuccess: (res) => {
-        if (res.task_id) setTaskId(res.task_id);
-        else onScrapeComplete();
-      },
-      onError: (err) =>
-        setScrapeError(apiErrorMessage(err, { fallback: "Couldn't start a refresh. Try again in a moment." })),
-    });
-  };
-  const isScraping = triggerScrape.isPending || !!taskId;
 
   // ── Selection ──────────────────────────────────────────────────────────
   // With nothing selected, desktop shows the first result, like LinkedIn,
@@ -161,8 +154,6 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
         onFilter={setFilter}
         totalLabel={totalLabel}
         liveConnected={sseConnected}
-        onRefresh={handleRefresh}
-        refreshing={isScraping}
       />
 
       <div className="flex-1 min-h-0 w-full lg:flex border-t border-slate-soft">
@@ -174,35 +165,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
             activeJobId ? "hidden" : "flex",
           )}
         >
-          {/* A live region that's always rendered (not display:none), so the
-              count is announced when it appears. */}
-          <div aria-live="polite" className="flex justify-center not-empty:py-2 not-empty:border-b border-slate-soft">
-            {pendingNew > 0 && (
-              <button
-                type="button"
-                onClick={showPendingJobs}
-                className="font-mono text-2xs uppercase tracking-wider px-3 py-1.5 rounded-full bg-spruce-green text-warm-ivory shadow-card hover:bg-spruce-green-hover transition-colors"
-              >
-                ↑ {pendingNew} new {pendingNew === 1 ? "job" : "jobs"}
-              </button>
-            )}
-          </div>
-
-          {scrapeError && (
-            <Alert
-              variant="error"
-              className="m-4"
-              action={
-                <Button variant="ghost" size="sm" onClick={() => setScrapeError(null)}>
-                  Dismiss
-                </Button>
-              }
-            >
-              {scrapeError}
-            </Alert>
-          )}
-
-          {isError && (
+          {isError && !data && (
             <Alert
               variant="error"
               className="m-4"
@@ -212,7 +175,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
                 </Button>
               }
             >
-              {data ? "Couldn't refresh the job list." : "Couldn't load jobs. Check your connection and try again."}
+              Couldn&apos;t load jobs. Check your connection and try again.
             </Alert>
           )}
 
@@ -232,7 +195,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
                   ? `No job matches for "${filters.q}". Try a different keyword or clear your filters.`
                   : filtered
                     ? "No roles match these filters."
-                    : "The board is waiting for the daily crawler or manual refresh."
+                    : "The board is waiting for new postings from the background crawlers."
               }
               action={
                 filtered && (

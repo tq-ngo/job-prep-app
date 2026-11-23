@@ -132,6 +132,14 @@ export interface JobEvent {
   apply_url: string;
   source: string;
   is_remote: boolean | null;
+  sponsorship_status?: string | null;
+  sponsorship_label?: string | null;
+  category?: string | null;
+  posted_at?: string | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  salary_currency?: string | null;
+  salary_period?: string | null;
 }
 
 /** A feed row: the list endpoint omits `description` (fetched per job). */

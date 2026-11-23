@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import JobFeed from "@/app/(app)/jobs/JobFeed";
-import { jobsApi, tasksApi, type Job, type JobEvent, type JobListResponse } from "@/lib/api";
+import { jobsApi, type Job, type JobEvent, type JobListResponse } from "@/lib/api";
 import { parseJobFilters, type JobFilters } from "@/lib/job-filters";
 
 // Next syncs useSearchParams with window.history.pushState/replaceState and
@@ -225,38 +225,60 @@ describe("JobFeed list", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("reports a refresh that can't start, and resets the button", async () => {
-    vi.spyOn(jobsApi, "triggerScrape").mockRejectedValue({ response: { status: 429 } });
-    renderFeed();
-    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/too many attempts/i);
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
-  });
-
-  it("reports a refresh whose task fails, instead of spinning forever", async () => {
-    vi.spyOn(jobsApi, "triggerScrape").mockResolvedValue({ task_id: "t-1", status: "accepted" });
-    vi.spyOn(tasksApi, "getStatus").mockResolvedValue({ status: "FAILURE", result: null, error: "GitHub rate limit" });
-    renderFeed();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Refresh didn't finish. The task failed: GitHub rate limit");
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("counts live 'created' events into a new-jobs button", () => {
+  it("automatically refetches and pushes newly created jobs without alert popups", async () => {
+    const listSpy = vi.spyOn(jobsApi, "list").mockResolvedValue(
+      feed({
+        items: [
+          item("j-3", "Security Intern", "Cloudflare"),
+          item("j-1", "Backend Intern", "Datadog"),
+          item("j-2", "Frontend Intern", "Vercel"),
+        ],
+        total: 3,
+      }),
+    );
     renderFeed();
     expect(screen.queryByText(/new job/i)).not.toBeInTheDocument();
 
-    const event: JobEvent = { kind: "created", id: "j-3", title: "Security Intern", company: "Cloudflare", location: null, skills: [], apply_url: "https://x", source: "github", is_remote: false };
+    const event: JobEvent = {
+      kind: "created",
+      id: "j-3",
+      title: "Security Intern",
+      company: "Cloudflare",
+      location: null,
+      skills: [],
+      apply_url: "https://x",
+      source: "github",
+      is_remote: false,
+    };
     act(() => emitJobEvent?.(event));
-    expect(screen.getByRole("button", { name: /1 new job/i })).toBeInTheDocument();
-    act(() => emitJobEvent?.({ ...event, id: "j-4" }));
-    act(() => emitJobEvent?.({ ...event, id: "j-5", kind: "enriched" }));
-    expect(screen.getByRole("button", { name: /2 new jobs/i })).toBeInTheDocument();
+
+    // No button/alert is shown
+    expect(screen.queryByRole("button", { name: /new job/i })).not.toBeInTheDocument();
+
+    // After debounce interval, query is automatically invalidated and refetched
+    await waitFor(() => expect(listSpy).toHaveBeenCalled());
+    expect(link(/Security Intern/)).toBeInTheDocument();
+  });
+
+  it("updates row skills in place when enriched events arrive", async () => {
+    renderFeed();
+    const event: JobEvent = {
+      kind: "enriched",
+      id: "j-1",
+      title: "Backend Intern",
+      company: "Datadog",
+      location: null,
+      skills: ["Rust", "Distributed Systems"],
+      apply_url: "https://x",
+      source: "github",
+      is_remote: false,
+    };
+    act(() => emitJobEvent?.(event));
+
+    // Enriched skill appears on the row and detail pane without alert
+    const skills = await screen.findAllByText("Distributed Systems");
+    expect(skills.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("button", { name: /new job/i })).not.toBeInTheDocument();
   });
 });
 
