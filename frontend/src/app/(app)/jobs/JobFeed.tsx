@@ -130,7 +130,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
 
   const handleBack = () => {
     if (openedFromList.current) window.history.back();
-    else closeJob(); // deep link: there's no list entry behind us to go back to
+    else closeJob("push"); // deep link: push list state so hardware back navigates within history rather than exiting site
   };
 
   // Below lg, the detail view starts at the top, and returning restores the

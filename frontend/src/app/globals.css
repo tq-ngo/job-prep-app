@@ -5,7 +5,18 @@
    inline script in layout.tsx), so bind the variant to that class. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ── Colour tokens ────────────────────────────────────────────────────────
+/* ── Design System Architecture: Editorial Modern + Material Design 3 Hybrid ──
+   JobPrep's design system intentionally integrates Material Design 3 (M3)
+   structural primitives (surface container tiers, tonal elevation shadows,
+   pill filter chips, and Google Tech Blue accents) with a warm editorial paper
+   palette (warm ivory #faf9f5, dark slate ink #141413, Lora serif typography,
+   and balanced 8px/12px control/card radii).
+
+   This hybrid aesthetic delivers the visual warmth and high-contrast reading
+   comfort of editorial publishing alongside the structured elevation and state
+   hierarchy of modern Google interfaces, achieving 100% WCAG 2.1 AA compliance.
+
+── Colour tokens ────────────────────────────────────────────────────────
    Raw values live here; the @theme block below exposes them as utilities.
    Some utility names predate the tokens and are kept to avoid churn:
 

@@ -318,7 +318,7 @@ describe("JobFeed selection", () => {
     await waitFor(() => expect(link(/Frontend Intern/)).toHaveFocus());
   });
 
-  it("removes the job from the URL on Back from a deep link (nothing to go back to)", async () => {
+  it("pushes the list to history on Back from a deep link so hardware back stays within the app", async () => {
     realReplace(null, "", "/jobs?jobId=j-1");
     const back = vi.spyOn(window.history, "back");
     renderFeed();
@@ -326,6 +326,7 @@ describe("JobFeed selection", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /back to results/i }));
 
     expect(back).not.toHaveBeenCalled();
+    expect(pushSpy).toHaveBeenCalledWith(null, "", "/jobs");
     expect(window.location.search).toBe("");
   });
 

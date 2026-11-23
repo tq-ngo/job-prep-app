@@ -79,7 +79,10 @@ export function useJobFeedUrlState() {
 
   const jobHref = useCallback((id: string) => hrefWith((p) => p.set("jobId", id)), [hrefWith]);
   const openJob = useCallback((id: string) => go((p) => p.set("jobId", id), "push"), [go]);
-  const closeJob = useCallback(() => go((p) => p.delete("jobId"), "replace"), [go]);
+  const closeJob = useCallback(
+    (mode: "push" | "replace" = "push") => go((p) => p.delete("jobId"), mode),
+    [go],
+  );
 
   return { filters, activeJobId, setFilter, clearFilters, setPage, jobHref, openJob, closeJob };
 }
