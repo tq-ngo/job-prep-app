@@ -240,7 +240,7 @@ def _parse_html_tables(text: str, source_url: str, include_inactive: bool = Fals
 
         if company and role:
             id_str = f"{company}-{apply_url}"
-            stable_id = str(uuid.UUID(hashlib.md5(id_str.encode()).hexdigest()))
+            stable_id = str(uuid.UUID(hashlib.md5(id_str.encode(), usedforsecurity=False).hexdigest()))
             jobs.append(
                 JobCreate(
                     external_id=stable_id,
@@ -330,7 +330,7 @@ def _parse_markdown_tables(text: str, source_url: str, include_inactive: bool = 
 
             if company and role:
                 id_str = f"{company}-{apply_url}"
-                stable_id = str(uuid.UUID(hashlib.md5(id_str.encode()).hexdigest()))
+                stable_id = str(uuid.UUID(hashlib.md5(id_str.encode(), usedforsecurity=False).hexdigest()))
                 jobs.append(
                     JobCreate(
                         external_id=stable_id,
