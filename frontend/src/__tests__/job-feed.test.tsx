@@ -252,6 +252,9 @@ describe("JobFeed list", () => {
     };
     act(() => emitJobEvent?.(event));
 
+    // Immediately pushed to feed without waiting for network refetch
+    await waitFor(() => expect(link(/Security Intern/)).toBeInTheDocument());
+
     // No button/alert is shown
     expect(screen.queryByRole("button", { name: /new job/i })).not.toBeInTheDocument();
 

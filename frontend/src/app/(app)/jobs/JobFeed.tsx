@@ -55,6 +55,39 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
     onEvent: useCallback(
       (event: JobEvent) => {
         if (event.kind === "created") {
+          // Immediately push the newly created job directly into the feed cache
+          queryClient.setQueriesData<JobListResponse>({ queryKey: ["jobs"] }, (old) => {
+            if (!old) return old;
+            if (old.items.some((job) => job.id === event.id)) return old;
+
+            const newJob: JobSummary = {
+              id: event.id,
+              title: event.title,
+              company: event.company,
+              company_domain: event.company_domain ?? null,
+              location: event.location,
+              skills: event.skills ?? [],
+              apply_url: event.apply_url,
+              source: event.source,
+              is_remote: event.is_remote,
+              sponsorship_status: event.sponsorship_status ?? null,
+              sponsorship_label: event.sponsorship_label ?? null,
+              category: event.category ?? null,
+              posted_at: event.posted_at ?? null,
+              scraped_at: new Date().toISOString(),
+              salary_min: event.salary_min ?? null,
+              salary_max: event.salary_max ?? null,
+              salary_currency: event.salary_currency ?? "USD",
+              salary_period: (event.salary_period as "hour" | "year") ?? null,
+            };
+
+            return {
+              ...old,
+              total: old.total + 1,
+              items: [newJob, ...old.items],
+            };
+          });
+
           if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
           invalidateTimerRef.current = setTimeout(() => {
             queryClient.invalidateQueries({ queryKey: ["jobs"] });

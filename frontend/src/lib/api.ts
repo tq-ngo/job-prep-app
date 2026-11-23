@@ -127,6 +127,7 @@ export interface JobEvent {
   id: string;
   title: string;
   company: string;
+  company_domain?: string | null;
   location: string | null;
   skills: string[];
   apply_url: string;
