@@ -68,6 +68,7 @@ def patch_redis_and_limiter(fake_redis, monkeypatch):
 
     monkeypatch.setattr("app.core.redis.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.core.auth_cookies.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.core.user_cache.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.core.google_oauth.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.api.v1.jobs.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.api.v1.stats.get_redis_pool", _mock_get_redis_pool)

@@ -139,3 +139,121 @@ async def test_update_skills_normalizes_and_bounds(client: AsyncClient, auth_hea
         headers=auth_headers["headers"],
     )
     assert too_long.status_code == 422
+
+
+@pytest.mark.integration
+async def test_get_me_uses_redis_profile_cache_without_sql_select(
+    client: AsyncClient, auth_headers, test_user, fake_redis, mock_db_session, monkeypatch
+):
+    from app.core.user_cache import user_profile_key
+
+    key = user_profile_key(test_user.email)
+    assert await fake_redis.get(key) is None
+
+    # First call warms Redis from Postgres.
+    first = await client.get("/api/v1/auth/me", cookies=auth_headers["cookies"])
+    assert first.status_code == 200
+    assert await fake_redis.get(key) is not None
+
+    # Second call must serve from Redis without executing any SQL statement.
+    exec_calls = 0
+    orig_execute = mock_db_session.execute
+
+    async def spy_execute(*args, **kwargs):
+        nonlocal exec_calls
+        exec_calls += 1
+        return await orig_execute(*args, **kwargs)
+
+    monkeypatch.setattr(mock_db_session, "execute", spy_execute)
+    second = await client.get("/api/v1/auth/me", cookies=auth_headers["cookies"])
+    assert second.status_code == 200
+    assert second.json() == {"id": test_user.id, "email": test_user.email, "skills": []}
+    assert exec_calls == 0
+
+
+@pytest.mark.integration
+async def test_login_warms_profile_cache_and_logout_evicts_it(
+    client: AsyncClient, test_user, fake_redis
+):
+    from app.core.user_cache import user_profile_key
+
+    key = user_profile_key(test_user.email)
+    login_res = await client.post(
+        "/api/v1/auth/login",
+        data={"username": test_user.email, "password": "ValidPass123!"},
+    )
+    assert login_res.status_code == 200
+    assert await fake_redis.get(key) is not None
+
+    logout_res = await client.post(
+        "/api/v1/auth/logout",
+        cookies=login_res.cookies,
+        headers={"X-CSRF-Token": login_res.cookies[CSRF_COOKIE]},
+    )
+    assert logout_res.status_code == 200
+    assert await fake_redis.get(key) is None
+
+    me_after = await client.get(
+        "/api/v1/auth/me",
+        cookies={ACCESS_COOKIE: login_res.cookies[ACCESS_COOKIE]},
+    )
+    assert me_after.status_code == 401
+
+
+@pytest.mark.integration
+async def test_update_skills_from_cached_user_updates_db_and_cache(
+    client: AsyncClient, auth_headers, test_user, fake_redis, mock_db_session, monkeypatch
+):
+    import json
+    from app.core.user_cache import user_profile_key
+
+    key = user_profile_key(test_user.email)
+    # Warm cache first so PUT /me/skills receives a Redis-hydrated transient User.
+    warm = await client.get("/api/v1/auth/me", cookies=auth_headers["cookies"])
+    assert warm.status_code == 200
+
+    put_res = await client.put(
+        "/api/v1/auth/me/skills",
+        json={"skills": ["Python", "PostgreSQL"]},
+        cookies=auth_headers["cookies"],
+        headers=auth_headers["headers"],
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["skills"] == ["python", "postgresql"]
+
+    cached = json.loads(await fake_redis.get(key))
+    assert cached["skills"] == ["python", "postgresql"]
+
+    # Subsequent /me reads updated skills from Redis without SQL.
+    exec_calls = 0
+    orig_execute = mock_db_session.execute
+
+    async def spy_execute(*args, **kwargs):
+        nonlocal exec_calls
+        exec_calls += 1
+        return await orig_execute(*args, **kwargs)
+
+    monkeypatch.setattr(mock_db_session, "execute", spy_execute)
+    me_res = await client.get("/api/v1/auth/me", cookies=auth_headers["cookies"])
+    assert me_res.status_code == 200
+    assert me_res.json()["skills"] == ["python", "postgresql"]
+    assert exec_calls == 0
+
+
+@pytest.mark.integration
+async def test_refresh_evicts_profile_cache_when_user_disabled(
+    client: AsyncClient, auth_headers, test_user, fake_redis, mock_db_session
+):
+    from app.core.user_cache import user_profile_key
+
+    key = user_profile_key(test_user.email)
+    assert (await client.get("/api/v1/auth/me", cookies=auth_headers["cookies"])).status_code == 200
+    assert await fake_redis.get(key) is not None
+
+    test_user.is_active = False
+    mock_db_session.add(test_user)
+    await mock_db_session.commit()
+
+    res = await _refresh(client, auth_headers["cookies"][REFRESH_COOKIE])
+    assert res.status_code == 401
+    assert await fake_redis.get(key) is None
