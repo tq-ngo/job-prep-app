@@ -9,7 +9,64 @@
 // pair says `on`). That is how Tailwind's `bg-amber-clay/10` renders.
 //   4.5 = text (1.4.3 AA)   3 = UI boundaries and focus rings (1.4.11)
 export const PAIRS = [
-  // Body text hierarchy
+  // ── M3 On-Surface text hierarchy across all surface tiers ─────────────
+  ["on-surface", "surface", 4.5],
+  ["on-surface-variant", "surface", 4.5],
+  ["on-surface", "surface-container-lowest", 4.5],
+  ["on-surface-variant", "surface-container-lowest", 4.5],
+  ["on-surface", "surface-container-low", 4.5],
+  ["on-surface-variant", "surface-container-low", 4.5],
+  ["on-surface", "surface-container-default", 4.5],
+  ["on-surface-variant", "surface-container-default", 4.5],
+  ["on-surface", "surface-container-high", 4.5],
+  ["on-surface-variant", "surface-container-high", 4.5],
+  ["on-surface", "surface-container-highest", 4.5],
+  ["on-surface-variant", "surface-container-highest", 4.5],
+
+  // ── M3 Primary links/accents on all surface tiers ─────────────────────
+  ["primary", "surface", 4.5],
+  ["primary", "surface-container-lowest", 4.5],
+  ["primary", "surface-container-low", 4.5],
+  ["primary", "surface-container-default", 4.5],
+  ["primary", "surface-container-high", 4.5],
+  ["primary", "surface-container-highest", 4.5],
+  ["primary-hover", "surface", 4.5],
+  ["primary-hover", "surface-container-low", 4.5],
+
+  // ── M3 Filled & Tonal Container pairings ──────────────────────────────
+  ["on-primary", "primary", 4.5],
+  ["on-primary", "primary-hover", 4.5],
+  ["on-primary-container", "primary-container", 4.5],
+  ["on-secondary-container", "secondary-container", 4.5],
+  ["on-surface", "secondary-container", 4.5],
+  ["on-surface-variant", "secondary-container", 4.5],
+  ["on-error", "error", 4.5],
+  ["on-error-container", "error-container", 4.5],
+  ["error", "surface", 4.5],
+  ["error", "surface-container-lowest", 4.5],
+  ["error", "surface-container-low", 4.5],
+  ["error", "surface-container-default", 4.5],
+
+  // ── M3 State-layer overlays (hover 8%, focus-visible 12%) ─────────────
+  ["on-surface", "on-surface/8", 4.5],
+  ["on-surface-variant", "on-surface/8", 4.5],
+  ["on-surface", "on-surface/12", 4.5],
+  ["on-surface-variant", "on-surface/12", 4.5],
+  ["primary", "primary/8", 4.5],
+  ["primary", "primary/12", 4.5],
+
+  // ── M3 Non-text UI boundaries & focus rings (WCAG 1.4.11, 3:1) ────────
+  ["outline", "surface", 3],
+  ["outline", "surface-container-lowest", 3],
+  ["outline", "surface-container-low", 3],
+  ["outline", "surface-container-default", 3],
+  ["outline", "surface-container-high", 3],
+  ["outline", "surface-container-highest", 3],
+  ["primary", "surface", 3],
+  ["primary", "surface-container-low", 3],
+  ["primary", "surface-container-default", 3],
+
+  // ── Legacy compatibility pairs (checked until TSX migration) ──────────
   ["foreground-heading", "background", 4.5],
   ["foreground", "background", 4.5],
   ["foreground-muted", "background", 4.5],
@@ -23,29 +80,14 @@ export const PAIRS = [
   ["foreground-heading", "surface-container-high", 4.5],
   ["foreground", "surface-container-high", 4.5],
 
-  // Accents as text
-  ["spruce-green", "background", 4.5],
-  ["spruce-green", "neutral-soft", 4.5],
-  ["spruce-green", "surface-container", 4.5],
-  ["spruce-green-hover", "background", 4.5],
   ["amber-clay", "background", 4.5],
   ["amber-clay-on-tint", "neutral-soft", 4.5],
 
-  // Primary button label, at rest and hovered
-  ["background", "spruce-green", 4.5],
-  ["background", "spruce-green-hover", 4.5],
-
-  // Tinted badges and alerts (Badge, Alert, selected toggles)
-  ["spruce-green", "spruce-green/10", 4.5],
   ["amber-clay-on-tint", "amber-clay/10", 4.5],
-  ["foreground-heading", "border-soft/40", 4.5], // ghost button hover (bg-slate-soft/40)
+  ["foreground-heading", "border-soft/40", 4.5],
 
-  // Job list rows: selected (bg-spruce-green/5) and hovered (bg-slate-soft/30)
-  ["foreground-subtle", "spruce-green/5", 4.5],
-  ["foreground-muted", "spruce-green/5", 4.5],
   ["foreground-subtle", "border-soft/30", 4.5],
 
-  // Non-text: input borders and the focus ring must be visible (3:1)
   ["border-strong", "background", 3],
   ["border-strong", "neutral-soft", 3],
   ["focus-ring", "background", 3],

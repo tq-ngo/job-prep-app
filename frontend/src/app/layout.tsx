@@ -73,7 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body
         suppressHydrationWarning
-        className="bg-background text-foreground min-h-screen font-sans selection:bg-spruce-green/20 selection:text-spruce-green transition-colors duration-200"
+        className="bg-surface text-on-surface min-h-screen font-sans selection:bg-primary/20 selection:text-primary transition-colors duration-200"
       >
         <Providers>
           {children}
