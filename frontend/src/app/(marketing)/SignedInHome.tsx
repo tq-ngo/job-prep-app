@@ -54,19 +54,19 @@ export default function SignedInHome({
       <section className="max-w-6xl mx-auto px-6 mb-16">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-spruce-green/10 border border-spruce-green/20 mb-5">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green animate-pulse" />
-              <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary-container border border-primary/20 mb-5">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
+              <span className="font-mono text-label-small uppercase tracking-widest text-on-primary-container font-semibold">
                 Live Command Center · Signed in as {user.email}
               </span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl font-serif font-medium text-slate-ink leading-[1.15] tracking-tight mb-4">
+            <h1 className="text-display-small sm:text-display-medium font-serif font-medium text-on-surface leading-[1.15] tracking-tight mb-4">
               Welcome back, <br />
-              <span className="text-spruce-green italic">{name}</span>.
+              <span className="text-primary italic">{name}</span>.
             </h1>
 
-            <p className="text-base text-foreground-muted leading-relaxed mb-6 max-w-lg">
+            <p className="text-body-large text-on-surface-variant leading-relaxed mb-6 max-w-lg">
               Your personal dashboard is actively tracking internship opportunities across GitHub and LinkedIn with AI skill extraction and live updates.
             </p>
 
@@ -79,29 +79,29 @@ export default function SignedInHome({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search role, company, or skill…"
                 leadingIcon={<Search size={16} />}
-                className="flex-1 text-sm bg-neutral-soft"
+                className="flex-1"
               />
-              <Button type="submit" size="md" className="rounded-full px-5">
+              <Button type="submit" variant="filled" size="md" className="px-5">
                 Search
               </Button>
             </form>
 
             {/* Primary Action Buttons */}
             <div className="flex flex-wrap gap-3 mb-8">
-              <ButtonLink href="/jobs" size="lg" icon={<Briefcase size={16} />} className="rounded-full shadow-xs">
+              <ButtonLink href="/jobs" variant="filled" size="lg" icon={<Briefcase size={16} />}>
                 Open Job Board <ArrowRight size={15} aria-hidden="true" />
               </ButtonLink>
-              <ButtonLink href="/news" variant="secondary" size="lg" icon={<Newspaper size={16} />} className="rounded-full">
+              <ButtonLink href="/news" variant="outlined" size="lg" icon={<Newspaper size={16} />}>
                 Tech News Radar
               </ButtonLink>
             </div>
 
             {/* Quick Metrics */}
-            <dl className="grid grid-cols-3 gap-6 pt-6 border-t border-slate-soft max-w-md">
+            <dl className="grid grid-cols-3 gap-6 pt-6 border-t border-outline-variant max-w-md">
               {metrics.map(({ value, label }) => (
                 <div key={label} className="flex flex-col-reverse">
-                  <dt className="font-mono text-2xs uppercase tracking-wider text-foreground-subtle mt-0.5">{label}</dt>
-                  <dd className="text-2xl font-serif font-medium text-slate-ink">{value}</dd>
+                  <dt className="font-mono text-label-small uppercase tracking-wider text-on-surface-variant mt-0.5">{label}</dt>
+                  <dd className="text-headline-small font-serif font-medium text-on-surface">{value}</dd>
                 </div>
               ))}
             </dl>
@@ -116,18 +116,18 @@ export default function SignedInHome({
 
       {/* Tracked Skills Hub */}
       <section className="max-w-6xl mx-auto px-6 mb-16">
-        <Card tone="muted" padding="lg" className="border-slate-soft/80 shadow-xs">
+        <Card tone="filled" padding="lg">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles size={16} className="text-spruce-green" />
-                <h2 className="text-lg font-serif font-medium text-slate-ink">Your Tracked Skills</h2>
+                <Sparkles size={16} className="text-primary" />
+                <h2 className="text-title-large font-serif font-medium text-on-surface">Your Tracked Skills</h2>
               </div>
-              <p className="text-xs text-foreground-muted mt-0.5">
+              <p className="text-body-small text-on-surface-variant mt-0.5">
                 Postings matching your tracked technologies are flagged with live alerts.
               </p>
             </div>
-            <ButtonLink href="/jobs" variant="secondary" size="sm" className="rounded-full">
+            <ButtonLink href="/jobs" variant="outlined" size="sm">
               Manage in Navbar
             </ButtonLink>
           </div>
@@ -138,17 +138,17 @@ export default function SignedInHome({
                 <Link
                   key={skill}
                   href={`/jobs?skill=${encodeURIComponent(skill)}`}
-                  className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-spruce-green/10 text-spruce-green border border-spruce-green/20 hover:bg-spruce-green/20 transition-colors text-xs font-mono font-medium"
+                  className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary-container text-on-primary-container border border-primary/25 hover:shadow-level-1 transition-all text-label-medium font-mono font-medium"
                 >
                   <span>{skill}</span>
-                  <ExternalLink size={11} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+                  <ExternalLink size={11} className="opacity-70 group-hover:opacity-100 transition-opacity" />
                 </Link>
               ))}
             </div>
           ) : (
-            <div className="p-4 rounded-xl bg-background border border-dashed border-slate-soft text-center">
-              <p className="text-xs text-foreground-muted mb-2">You haven&apos;t added any tracked skills yet.</p>
-              <ButtonLink href="/jobs" size="sm" className="rounded-full">
+            <div className="p-4 rounded-md bg-surface border border-dashed border-outline-variant text-center">
+              <p className="text-body-small text-on-surface-variant mb-2">You haven&apos;t added any tracked skills yet.</p>
+              <ButtonLink href="/jobs" variant="filled" size="sm">
                 Add skills in the Job Board
               </ButtonLink>
             </div>
@@ -157,13 +157,13 @@ export default function SignedInHome({
       </section>
 
       {/* Live AI Intelligence Demos */}
-      <section className="py-14 border-t border-slate-soft bg-neutral-soft/30">
+      <section className="py-14 border-t border-outline-variant bg-surface-container-low/50">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center max-w-xl mx-auto mb-10">
-            <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+            <span className="font-mono text-label-small uppercase tracking-widest text-primary font-semibold">
               Live Intelligence Engine
             </span>
-            <h2 className="text-2xl font-serif font-medium text-slate-ink tracking-tight mt-1.5">
+            <h2 className="text-headline-medium font-serif font-medium text-on-surface tracking-tight mt-1.5">
               Automated crawling, extraction, and deduplication.
             </h2>
           </div>

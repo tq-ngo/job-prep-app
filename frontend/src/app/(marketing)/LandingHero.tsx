@@ -54,21 +54,21 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
 
             {/* Left: Editorial Copy */}
             <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-spruce-green/10 border border-spruce-green/20 mb-6">
-                <div className="w-1.5 h-1.5 rounded-full bg-spruce-green animate-pulse" />
-                <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary-container border border-primary/20 mb-6">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
+                <span className="font-mono text-label-small uppercase tracking-widest text-on-primary-container font-semibold">
                   {stats && stats.added_24h > 0
                     ? `${stats.added_24h.toLocaleString("en-US")} new roles in the last 24h`
                     : "Crawled every 6 hours from GitHub & LinkedIn"}
                 </span>
               </div>
 
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-medium text-slate-ink leading-[1.12] tracking-tight mb-6">
+              <h1 className="text-display-medium sm:text-display-large font-serif font-medium text-on-surface leading-[1.12] tracking-tight mb-6">
                 Your automated <br />
-                <span className="text-spruce-green italic">tech career</span> command center.
+                <span className="text-primary italic">tech career</span> command center.
               </h1>
 
-              <p className="text-base sm:text-lg text-foreground-muted leading-relaxed mb-8 max-w-lg">
+              <p className="text-body-large text-on-surface-variant leading-relaxed mb-8 max-w-lg">
                 JobPrep crawls software engineering internship postings across curated GitHub repositories and LinkedIn, then enriches them with Gemini skill extraction, semantic search, and live updates.
               </p>
 
@@ -77,31 +77,32 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
                 <ButtonLink
                   href={googleLoginUrl("/jobs")}
                   native
+                  variant="filled"
                   size="lg"
-                  icon={<GoogleIcon size={16} className="bg-white rounded-sm p-px" />}
+                  icon={<GoogleIcon size={16} className="bg-surface-container-lowest rounded-xs p-px" />}
                 >
                   Sign in with Google
                 </ButtonLink>
 
                 {/* The board requires an account; say so rather than promise
                     a "public board" that bounces to /login. */}
-                <ButtonLink href="/jobs" variant="secondary" size="lg">
+                <ButtonLink href="/jobs" variant="outlined" size="lg">
                   Open the job board <ArrowRight size={15} aria-hidden="true" />
                 </ButtonLink>
               </div>
-              <p className="mt-3 text-xs text-foreground-subtle">Free account required to browse listings.</p>
+              <p className="mt-3 text-body-small text-on-surface-variant">Free account required to browse listings.</p>
 
               {/* Metrics Row */}
-              <dl className="grid grid-cols-3 gap-6 mt-10 pt-8 border-t border-slate-soft">
+              <dl className="grid grid-cols-3 gap-6 mt-10 pt-8 border-t border-outline-variant">
                 {metrics.map(({ value, label }) => (
                   <div key={label} className="flex flex-col-reverse">
-                    <dt className="font-mono text-2xs uppercase tracking-wider text-foreground-subtle mt-0.5">{label}</dt>
-                    <dd className="text-2xl font-serif font-medium text-slate-ink">{value}</dd>
+                    <dt className="font-mono text-label-small uppercase tracking-wider text-on-surface-variant mt-0.5">{label}</dt>
+                    <dd className="text-headline-small font-serif font-medium text-on-surface">{value}</dd>
                   </div>
                 ))}
               </dl>
               {stats?.last_crawl_at && (
-                <p className="mt-3 font-mono text-2xs text-foreground-subtle">
+                <p className="mt-3 font-mono text-label-small text-on-surface-variant">
                   Last crawl:{" "}
                   <time dateTime={stats.last_crawl_at}>{lastCrawlFormat.format(new Date(stats.last_crawl_at))}</time>
                 </p>
@@ -117,16 +118,16 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
       </section>
 
       {/* Feature Bento Grid */}
-      <section id="features" className="py-20 border-t border-slate-soft bg-neutral-soft/30">
+      <section id="features" className="py-20 border-t border-outline-variant bg-surface-container-low/50">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center max-w-xl mx-auto mb-14">
-            <span className="font-mono text-2xs uppercase tracking-widest text-spruce-green font-semibold">
+            <span className="font-mono text-label-small uppercase tracking-widest text-primary font-semibold">
               Engineered for Quality
             </span>
-            <h2 className="text-3xl font-serif font-medium text-slate-ink tracking-tight mt-2">
+            <h2 className="text-headline-large font-serif font-medium text-on-surface tracking-tight mt-2">
               From raw listings to verified intelligence.
             </h2>
-            <p className="text-sm text-foreground-muted mt-2">
+            <p className="text-body-medium text-on-surface-variant mt-2">
               Every job posting is sanitized, its full description extracted, and duplicates across sources linked to one listing.
             </p>
           </div>
@@ -137,13 +138,13 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
             <BentoAIDemoCard />
 
             {/* Smart Categories Card */}
-            <Card interactive className="flex flex-col justify-between">
+            <Card tone="elevated" interactive className="flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <Layers size={18} className="text-amber-clay" />
-                  <h3 className="font-serif text-base font-medium text-slate-ink">Smart Categorization</h3>
+                  <Layers size={18} className="text-primary" />
+                  <h3 className="font-serif text-title-medium font-medium text-on-surface">Smart Categorization</h3>
                 </div>
-                <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+                <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
                   Sorts companies into FAANG+, quant finance, and everything else, with one-click remote filtering.
                 </p>
                 <div className="flex flex-wrap gap-1.5 pt-2">
@@ -155,33 +156,33 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
             </Card>
 
             {/* Semantic Vector Search Card */}
-            <Card interactive className="flex flex-col justify-between">
+            <Card tone="elevated" interactive className="flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <Search size={18} className="text-spruce-green" />
-                  <h3 className="font-serif text-base font-medium text-slate-ink">Semantic Vector Search</h3>
+                  <Search size={18} className="text-primary" />
+                  <h3 className="font-serif text-title-medium font-medium text-on-surface">Semantic Vector Search</h3>
                 </div>
-                <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+                <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
                   Search with natural language or a resume snippet, ranked by pgvector cosine distance over Gemini embeddings.
                 </p>
-                <div className="bg-neutral-soft border border-slate-soft rounded-card p-2.5 font-mono text-2xs text-foreground-subtle">
+                <div className="bg-surface-container-low border border-outline-variant rounded-sm p-2.5 font-mono text-label-small text-on-surface-variant">
                   SELECT * FROM jobs ORDER BY embedding &lt;=&gt; query_vector LIMIT 20
                 </div>
               </div>
             </Card>
 
             {/* Security Card */}
-            <Card interactive className="flex flex-col justify-between">
+            <Card tone="elevated" interactive className="flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <ShieldCheck size={18} className="text-amber-clay" />
-                  <h3 className="font-serif text-base font-medium text-slate-ink">Security by Default</h3>
+                  <ShieldCheck size={18} className="text-primary" />
+                  <h3 className="font-serif text-title-medium font-medium text-on-surface">Security by Default</h3>
                 </div>
-                <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+                <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
                   Google sign-in with PKCE, HttpOnly SameSite=Lax session cookies, rotating refresh tokens with reuse detection, and double-submit CSRF.
                 </p>
-                <div className="flex items-center gap-2 text-2xs font-mono text-spruce-green">
-                  <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> No tokens in localStorage
+                <div className="flex items-center gap-2 text-label-small font-mono text-primary">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" /> No tokens in localStorage
                 </div>
               </div>
             </Card>
@@ -190,19 +191,19 @@ export default function LandingHero({ stats }: { stats: PublicStats | null }) {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 border-t border-slate-soft">
+      <section className="py-20 border-t border-outline-variant">
         <div className="max-w-2xl mx-auto px-6 text-center">
-          <h2 className="text-3xl font-serif font-medium text-slate-ink tracking-tight mb-4">
+          <h2 className="text-headline-large font-serif font-medium text-on-surface tracking-tight mb-4">
             Never miss an internship window again.
           </h2>
-          <p className="text-sm text-foreground-muted mb-8 leading-relaxed">
+          <p className="text-body-medium text-on-surface-variant mb-8 leading-relaxed">
             See new software engineering roles soon after they are posted.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
-            <ButtonLink href="/register" size="lg">
+            <ButtonLink href="/register" variant="filled" size="lg">
               Create free account
             </ButtonLink>
-            <ButtonLink href="/login" variant="secondary" size="lg">
+            <ButtonLink href="/login" variant="outlined" size="lg">
               Sign in to browse
             </ButtonLink>
           </div>

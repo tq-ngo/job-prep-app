@@ -35,22 +35,21 @@ export default function MarketingMobileNav({ isLoggedIn = false }: { isLoggedIn?
     <div ref={containerRef} className="md:hidden">
       <Button
         ref={triggerRef}
-        variant="ghost"
+        variant="text"
         size="icon"
         aria-label="Menu"
         aria-expanded={open}
         aria-controls="marketing-menu"
         onClick={() => setOpen((o) => !o)}
-        className="rounded-full"
       >
         {open ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
       </Button>
       {open && (
-        <nav id="marketing-menu" aria-label="Main menu" className="absolute inset-x-0 top-16 border-b border-slate-soft bg-neutral-soft/95 backdrop-blur-md rounded-b-2xl px-6 py-4 shadow-pop">
+        <nav id="marketing-menu" aria-label="Main menu" className="absolute inset-x-0 top-16 border-b border-outline-variant bg-surface-container-low/95 backdrop-blur-md rounded-b-lg px-6 py-4 shadow-level-3">
           <ul className="space-y-1">
             {links.map(({ href, label }) => (
               <li key={href}>
-                <Link href={href} onClick={close} className="block rounded-full px-4 py-2.5 text-sm font-medium text-foreground-muted hover:bg-surface-container hover:text-slate-ink transition-colors">
+                <Link href={href} onClick={close} className="block rounded-full px-4 py-2.5 text-label-large font-medium text-on-surface-variant hover:bg-on-surface/8 hover:text-on-surface focus-visible:bg-on-surface/12 transition-colors">
                   {label}
                 </Link>
               </li>

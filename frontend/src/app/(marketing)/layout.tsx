@@ -91,37 +91,37 @@ export default async function MarketingLayout({ children }: { children: React.Re
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans">
+    <div className="min-h-screen bg-surface text-on-surface font-sans">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
       <SkipLink />
-      <header className="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-background/85 border-b border-slate-soft">
+      <header className="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-surface/90 border-b border-outline-variant">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link
             href="/"
-            className="font-serif text-xl font-medium tracking-tight text-slate-ink hover:text-spruce-green transition-colors"
+            className="font-serif text-title-large font-medium tracking-tight text-on-surface hover:text-primary transition-colors"
           >
             JobPrep
           </Link>
 
-          <nav aria-label="Main" className="hidden md:flex items-center gap-6 text-xs font-medium text-foreground-muted">
-            <Link href="/jobs" className="hover:text-slate-ink transition-colors font-medium">Job Board</Link>
-            <Link href="/news" className="hover:text-slate-ink transition-colors font-medium">Tech Radar</Link>
-            <Link href="/#features" className="hover:text-slate-ink transition-colors">Features</Link>
-            <Link href="/#demo" className="hover:text-slate-ink transition-colors">AI Intelligence</Link>
+          <nav aria-label="Main" className="hidden md:flex items-center gap-6 text-label-large font-medium text-on-surface-variant">
+            <Link href="/jobs" className="hover:text-on-surface transition-colors font-medium">Job Board</Link>
+            <Link href="/news" className="hover:text-on-surface transition-colors font-medium">Tech Radar</Link>
+            <Link href="/#features" className="hover:text-on-surface transition-colors">Features</Link>
+            <Link href="/#demo" className="hover:text-on-surface transition-colors">AI Intelligence</Link>
           </nav>
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
             {user ? (
               <>
-                <span className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-44 border border-slate-soft px-3 py-1 rounded-full bg-neutral-soft" title={user.email}>
+                <span className="hidden sm:inline font-sans text-label-medium text-on-surface-variant truncate max-w-44 border border-outline-variant px-3 py-1 rounded-full bg-surface-container-low" title={user.email}>
                   {user.email}
                 </span>
-                <ButtonLink href="/jobs" size="sm" className="rounded-full shadow-xs">
+                <ButtonLink href="/jobs" variant="filled" size="sm">
                   Job Board
                 </ButtonLink>
                 <MarketingMobileNav isLoggedIn />
@@ -129,11 +129,11 @@ export default async function MarketingLayout({ children }: { children: React.Re
             ) : (
               <>
                 <span className="hidden sm:inline">
-                  <ButtonLink href="/login" variant="ghost" size="sm" className="rounded-full">
+                  <ButtonLink href="/login" variant="text" size="sm">
                     Sign In
                   </ButtonLink>
                 </span>
-                <ButtonLink href="/register" size="sm" className="rounded-full shadow-xs">
+                <ButtonLink href="/register" variant="filled" size="sm">
                   Get Started
                 </ButtonLink>
                 <MarketingMobileNav />
@@ -148,18 +148,18 @@ export default async function MarketingLayout({ children }: { children: React.Re
         {children}
       </main>
 
-      <footer className="border-t border-slate-soft py-8 bg-neutral-soft/20 text-xs">
+      <footer className="border-t border-outline-variant py-8 bg-surface-container-low/40 text-body-small">
         <div className="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider">
+          <p className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider">
             © 2026 JobPrep · Built with Next.js, FastAPI, Celery, Gemini
           </p>
-          <nav aria-label="Footer" className="flex gap-4 text-foreground-muted">
-            <Link href="/jobs" className="hover:text-spruce-green transition-colors">Jobs</Link>
-            <Link href="/news" className="hover:text-spruce-green transition-colors">Radar</Link>
+          <nav aria-label="Footer" className="flex gap-4 text-on-surface-variant">
+            <Link href="/jobs" className="hover:text-primary transition-colors">Jobs</Link>
+            <Link href="/news" className="hover:text-primary transition-colors">Radar</Link>
             {!user && (
               <>
-                <Link href="/login" className="hover:text-spruce-green transition-colors">Sign In</Link>
-                <Link href="/register" className="hover:text-spruce-green transition-colors">Register</Link>
+                <Link href="/login" className="hover:text-primary transition-colors">Sign In</Link>
+                <Link href="/register" className="hover:text-primary transition-colors">Register</Link>
               </>
             )}
           </nav>

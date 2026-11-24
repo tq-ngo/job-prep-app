@@ -70,36 +70,36 @@ export function InteractiveLiveCard() {
   return (
     <div className="relative w-full max-w-lg mx-auto lg:mx-0">
       {/* Glow highlight */}
-      <div className="absolute -inset-1.5 bg-gradient-to-r from-spruce-green/20 via-amber-clay/10 to-spruce-green/20 rounded-2xl blur-xl opacity-70" />
-      
-      <div className="relative bg-background border border-slate-soft rounded-card shadow-pop overflow-hidden">
+      <div className="absolute -inset-1.5 bg-gradient-to-r from-primary/20 via-secondary-container/40 to-primary/20 rounded-xl blur-xl opacity-70" />
+
+      <div className="relative bg-surface-container-lowest dark:bg-surface-container-default border border-outline-variant rounded-lg shadow-level-3 overflow-hidden">
         {/* Mock Window Title Bar */}
-        <div className="px-5 py-3 border-b border-slate-soft bg-neutral-soft/50 flex items-center justify-between">
+        <div className="px-5 py-3 border-b border-outline-variant bg-surface-container-low flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-spruce-green animate-pulse" />
-            <span className="font-mono text-2xs font-semibold uppercase tracking-wider text-spruce-green">
+            <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
+            <span className="font-mono text-label-small font-semibold uppercase tracking-wider text-primary">
               Live feed preview
             </span>
           </div>
 
           <div className="flex items-center gap-2">
             <Button
-              variant="ghost"
+              variant="text"
               size="xs"
               onClick={() => setPausedByUser(!isPaused)}
               title={isPaused ? "Resume preview" : "Pause preview"}
               aria-label={isPaused ? "Resume preview" : "Pause preview"}
             >
-              {isPaused ? <Play size={12} aria-hidden="true" className="text-amber-clay" /> : <Pause size={12} aria-hidden="true" />}
+              {isPaused ? <Play size={12} aria-hidden="true" className="text-primary" /> : <Pause size={12} aria-hidden="true" />}
             </Button>
-            <span className="font-mono text-2xs text-foreground-subtle px-1.5 py-0.5 rounded bg-slate-soft/40">
+            <span className="font-mono text-label-small text-on-surface-variant px-2 py-0.5 rounded-full bg-surface-container-default">
               Sample data
             </span>
           </div>
         </div>
 
         {/* Filter Toolbar */}
-        <div className="px-4 py-2 border-b border-slate-soft flex items-center justify-between text-xs bg-background">
+        <div className="px-4 py-2 border-b border-outline-variant flex items-center justify-between text-body-small bg-surface">
           <div className="flex gap-1">
             {(["All", "FAANG+", "Quant"] as const).map((cat) => (
               <button
@@ -107,17 +107,17 @@ export function InteractiveLiveCard() {
                 type="button"
                 aria-pressed={filter === cat}
                 onClick={() => setFilter(cat)}
-                className={`px-2 py-0.5 rounded text-2xs font-mono transition-colors ${
+                className={`px-2.5 py-0.5 rounded-full text-label-small font-mono transition-colors ${
                   filter === cat
-                    ? "bg-spruce-green/10 text-spruce-green font-medium"
-                    : "text-foreground-subtle hover:text-slate-ink"
+                    ? "bg-secondary-container text-on-secondary-container font-semibold"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12"
                 }`}
               >
                 {cat}
               </button>
             ))}
           </div>
-          <span className="font-mono text-2xs text-foreground-subtle">
+          <span className="font-mono text-label-small text-on-surface-variant">
             <span role="status">{filtered.length} visible</span>
           </span>
         </div>
@@ -125,28 +125,28 @@ export function InteractiveLiveCard() {
         {/* Feed List Items */}
         {/* Not a live region: announcing a new row every 2.8s would talk over
             everything else. The visible count above is announced on filter. */}
-        <div className="divide-y divide-slate-soft" aria-label="Sample job feed, updating automatically" role="group">
+        <div className="divide-y divide-outline-variant" aria-label="Sample job feed, updating automatically" role="group">
           {filtered.map((job) => (
             <div
               key={`${job.company}-${job.title}`}
-              className="p-3.5 flex items-center justify-between hover:bg-neutral-soft/40 transition-colors group cursor-pointer"
+              className="p-3.5 flex items-center justify-between hover:bg-on-surface/8 transition-colors group cursor-pointer"
             >
               <div className="min-w-0 flex-1 pr-3">
                 <div className="flex items-center gap-2">
-                  <p className="text-xs font-medium text-slate-ink truncate group-hover:text-spruce-green transition-colors">
+                  <p className="text-label-large font-medium text-on-surface truncate group-hover:text-primary transition-colors">
                     {job.title}
                   </p>
                   <Badge variant="skill">{job.category}</Badge>
                 </div>
-                <p className="text-2xs text-foreground-muted mt-0.5">
+                <p className="text-label-small text-on-surface-variant mt-0.5">
                   {job.company} · {job.location}
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <span className="font-mono text-2xs uppercase tracking-wider text-amber-clay block">
+                <span className="font-mono text-label-small uppercase tracking-wider text-primary block">
                   {job.source}
                 </span>
-                <span className="font-mono text-2xs text-foreground-subtle block mt-0.5">
+                <span className="font-mono text-label-small text-on-surface-variant block mt-0.5">
                   {job.time}
                 </span>
               </div>
@@ -155,9 +155,9 @@ export function InteractiveLiveCard() {
         </div>
 
         {/* Card Footer */}
-        <div className="px-4 py-2.5 bg-neutral-soft/30 border-t border-slate-soft flex items-center justify-between text-2xs font-mono text-foreground-subtle">
+        <div className="px-4 py-2.5 bg-surface-container-low border-t border-outline-variant flex items-center justify-between text-label-small font-mono text-on-surface-variant">
           <span>Illustrative listings</span>
-          <span className="text-spruce-green flex items-center gap-1">
+          <span className="text-primary flex items-center gap-1">
             <CheckCircle2 size={11} /> Pushed over SSE in the app
           </span>
         </div>
@@ -171,42 +171,42 @@ export function BentoAIDemoCard() {
   const [analyzed, setAnalyzed] = useState(false);
 
   return (
-    <Card interactive className="flex flex-col justify-between">
+    <Card tone="elevated" interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Cpu size={18} className="text-amber-clay" />
-            <h3 className="font-serif text-base font-medium text-slate-ink">AI Intelligence Engine</h3>
+            <Cpu size={18} className="text-primary" />
+            <h3 className="font-serif text-title-medium font-medium text-on-surface">AI Intelligence Engine</h3>
           </div>
-          <Button variant="secondary" size="xs" onClick={() => setAnalyzed(!analyzed)}>
+          <Button variant="tonal" size="xs" onClick={() => setAnalyzed(!analyzed)}>
             {analyzed ? "Reset" : "Transform with Gemini"}
           </Button>
         </div>
 
-        <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+        <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
           Gemini distills raw market news into structured hiring signals and tech skill demand.
         </p>
 
-        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 text-xs space-y-2">
-          <div className="font-mono text-2xs text-foreground-subtle">Raw Headline:</div>
-          <p className="italic text-foreground-muted">
+        <div className="bg-surface-container-low border border-outline-variant rounded-md p-3 text-body-small space-y-2">
+          <div className="font-mono text-label-small text-on-surface-variant">Raw Headline:</div>
+          <p className="italic text-on-surface-variant">
             &quot;NVIDIA accelerates datacenter AI infrastructure investments with new Blackwell platform cluster deployments.&quot;
           </p>
 
-          <div className="border-t border-slate-soft pt-2">
+          <div className="border-t border-outline-variant pt-2">
             {analyzed ? (
-              <div className="space-y-1.5 text-xs animate-fadeSlideIn">
-                <div className="font-mono text-2xs text-spruce-green font-semibold flex items-center gap-1">
+              <div className="space-y-1.5 text-body-small animate-fadeSlideIn motion-reduce:animate-none">
+                <div className="font-mono text-label-small text-primary font-semibold flex items-center gap-1">
                   <Sparkles size={10} /> Example takeaways:
                 </div>
-                <div className="flex items-center gap-2 text-foreground-muted">
-                  <span className="text-spruce-green">→</span> Hiring Sentiment: <strong className="text-spruce-green">Bullish (SWE/ML)</strong>
+                <div className="flex items-center gap-2 text-on-surface-variant">
+                  <span className="text-primary">→</span> Hiring Sentiment: <strong className="text-primary">Bullish (SWE/ML)</strong>
                 </div>
-                <div className="flex items-center gap-2 text-foreground-muted">
-                  <span className="text-spruce-green">→</span> Impact: High infrastructure scale
+                <div className="flex items-center gap-2 text-on-surface-variant">
+                  <span className="text-primary">→</span> Impact: High infrastructure scale
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1 pt-1">
-                  {["CUDA", "Triton", "PyTorch", "RDMA"].map(skill => (
+                  {["CUDA", "Triton", "PyTorch", "RDMA"].map((skill) => (
                     <Badge key={skill} variant="skill">
                       {skill}
                     </Badge>
@@ -214,9 +214,9 @@ export function BentoAIDemoCard() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between py-1 text-foreground-subtle font-mono text-2xs">
+              <div className="flex items-center justify-between py-1 text-on-surface-variant font-mono text-label-small">
                 <span>Click &quot;Transform with Gemini&quot; to test AI parsing</span>
-                <ArrowRight size={12} className="text-spruce-green" />
+                <ArrowRight size={12} className="text-primary" />
               </div>
             )}
           </div>
@@ -244,34 +244,34 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
   };
 
   return (
-    <Card interactive className="flex flex-col justify-between">
+    <Card tone="elevated" interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Radio size={18} aria-hidden="true" className="text-spruce-green" />
-            <h3 className="font-serif text-base font-medium text-slate-ink">Real-Time Sync (SSE)</h3>
+            <Radio size={18} aria-hidden="true" className="text-primary" />
+            <h3 className="font-serif text-title-medium font-medium text-on-surface">Real-Time Sync (SSE)</h3>
           </div>
           <Badge variant="skill">Live Stream</Badge>
         </div>
-        <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+        <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
           Server-Sent Events push new listings to your screen instantly. Redis Stream backlog preserves event state during re-connections.
         </p>
 
-        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 text-center">
+        <div className="bg-surface-container-low border border-outline-variant rounded-md p-3 text-center">
           {initialCount !== null && (
-            <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-3">
-              <span className="font-serif text-base normal-case tracking-normal text-slate-ink">{initialCount.toLocaleString("en-US")}</span>{" "}
+            <p className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider mb-3">
+              <span className="font-serif text-title-medium normal-case tracking-normal text-on-surface">{initialCount.toLocaleString("en-US")}</span>{" "}
               roles added in the last 24h
             </p>
           )}
-          <p className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mb-1">Simulated events</p>
+          <p className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider mb-1">Simulated events</p>
           <p
             aria-live="polite"
-            className={`font-serif text-3xl font-medium transition-transform ${animating ? "scale-110 text-spruce-green" : "text-slate-ink"}`}
+            className={`font-serif text-headline-medium font-medium transition-transform motion-reduce:transition-none ${animating ? "scale-110 motion-reduce:scale-100 text-primary" : "text-on-surface"}`}
           >
             {simulated}
           </p>
-          <Button variant="secondary" size="sm" block onClick={triggerMockPing} className="mt-3">
+          <Button variant="outlined" size="sm" block onClick={triggerMockPing} className="mt-3">
             + Simulate a live event (demo)
           </Button>
         </div>
@@ -283,37 +283,37 @@ export function BentoSSECard({ initialCount }: { initialCount: number | null }) 
 // ── Daily Crawler Pipeline Card ──────────────────────────────────────────
 export function BentoPipelineCard() {
   return (
-    <Card interactive className="flex flex-col justify-between">
+    <Card tone="elevated" interactive className="flex flex-col justify-between">
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <GitBranch size={18} aria-hidden="true" className="text-spruce-green" />
-          <h3 className="font-serif text-base font-medium text-slate-ink">Daily Crawler Pipeline</h3>
+          <GitBranch size={18} aria-hidden="true" className="text-primary" />
+          <h3 className="font-serif text-title-medium font-medium text-on-surface">Daily Crawler Pipeline</h3>
         </div>
-        <p className="text-xs text-foreground-muted mb-4 leading-relaxed">
+        <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
           Scrapers crawl 4 curated GitHub repos every 6 hours and LinkedIn daily, then fetch each posting&apos;s full description, sanitized and stripped of tracking pixels.
         </p>
 
         {/* Visual Pipeline Flow */}
-        <div className="bg-neutral-soft border border-slate-soft rounded-card p-3 space-y-2 font-mono text-2xs">
-          <div className="flex items-center justify-between text-foreground-subtle">
-            <span className="flex items-center gap-1.5 text-slate-ink">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> GitHub Repos
+        <div className="bg-surface-container-low border border-outline-variant rounded-md p-3 space-y-2 font-mono text-label-small">
+          <div className="flex items-center justify-between text-on-surface-variant">
+            <span className="flex items-center gap-1.5 text-on-surface">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" /> GitHub Repos
             </span>
-            <span className="text-amber-clay">every 6h</span>
+            <span className="text-primary">every 6h</span>
           </div>
-          <div className="flex items-center justify-between text-foreground-subtle">
-            <span className="flex items-center gap-1.5 text-slate-ink">
-              <span className="w-1.5 h-1.5 rounded-full bg-spruce-green" /> LinkedIn Guest API
+          <div className="flex items-center justify-between text-on-surface-variant">
+            <span className="flex items-center gap-1.5 text-on-surface">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" /> LinkedIn Guest API
             </span>
-            <span className="text-amber-clay">daily</span>
+            <span className="text-primary">daily</span>
           </div>
-          
+
           {/* Deduplication Arrow */}
-          <div className="border-t border-slate-soft pt-2 text-center text-foreground-subtle flex items-center justify-center gap-1 text-2xs uppercase tracking-wider">
+          <div className="border-t border-outline-variant pt-2 text-center text-on-surface-variant flex items-center justify-center gap-1 text-label-small uppercase tracking-wider">
             <span>↓ 3-Tier Dedup: LRU → Redis → PostgreSQL ↓</span>
           </div>
 
-          <div className="p-2 rounded bg-spruce-green/10 border border-spruce-green/20 text-spruce-green text-center font-medium">
+          <div className="p-2 rounded-sm bg-primary-container border border-primary/20 text-on-primary-container text-center font-medium">
             One canonical listing per role
           </div>
         </div>
