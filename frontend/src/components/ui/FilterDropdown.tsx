@@ -68,14 +68,14 @@ export default function FilterDropdown({
         aria-label={ariaLabel || placeholder}
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
-          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150 cursor-pointer shadow-xs -outline-offset-2",
+          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-label-medium font-medium border transition-all duration-150 cursor-pointer -outline-offset-2",
           isFiltered
             ? open
-              ? "border-tech-blue ring-2 ring-tech-blue/25 bg-tech-blue/15 text-tech-blue font-semibold"
-              : "border-tech-blue/60 bg-tech-blue/10 text-tech-blue font-semibold"
+              ? "border-primary ring-2 ring-primary/25 bg-primary-container text-on-primary-container font-semibold shadow-level-1"
+              : "border-primary/40 bg-primary-container text-on-primary-container font-semibold hover:shadow-level-1"
             : open
-              ? "border-tech-blue ring-2 ring-tech-blue/20 bg-surface-container text-slate-ink"
-              : "border-slate-soft bg-neutral-soft text-foreground hover:bg-surface-container hover:border-slate-soft/80",
+              ? "border-primary ring-2 ring-primary/20 bg-surface-container-default text-on-surface"
+              : "border-outline-variant bg-surface-container-low text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12 hover:border-outline",
         )}
       >
         {leadingIcon && <span className="shrink-0">{leadingIcon}</span>}
@@ -84,7 +84,7 @@ export default function FilterDropdown({
           size={12}
           className={cn(
             "shrink-0 transition-transform duration-150",
-            isFiltered ? "text-tech-blue" : "text-foreground-subtle",
+            isFiltered ? "text-on-primary-container" : "text-on-surface-variant",
             open && "rotate-180",
           )}
         />
@@ -94,7 +94,7 @@ export default function FilterDropdown({
         <ul
           role="listbox"
           aria-label={ariaLabel || placeholder}
-          className="absolute z-50 left-0 top-full mt-1.5 min-w-[190px] w-max max-h-64 overflow-y-auto rounded-card border border-slate-soft bg-surface-container-lowest dark:bg-surface-container p-1.5 shadow-pop animate-fadeSlideIn"
+          className="absolute z-50 left-0 top-full mt-1.5 min-w-[190px] w-max max-h-64 overflow-y-auto rounded-md border border-outline-variant bg-surface-container-lowest dark:bg-surface-container-default p-1.5 shadow-level-3 animate-fadeSlideIn"
         >
           {allOptionLabel && (
             <li
@@ -105,14 +105,14 @@ export default function FilterDropdown({
                 setOpen(false);
               }}
               className={cn(
-                "flex items-center justify-between gap-3 px-3 py-2 rounded-control text-xs cursor-pointer transition-colors",
+                "flex items-center justify-between gap-3 px-3 py-2 rounded-sm text-label-medium cursor-pointer transition-colors",
                 !value
-                  ? "text-tech-blue font-semibold bg-tech-blue/10"
-                  : "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft dark:hover:bg-surface-container-high font-medium",
+                  ? "text-on-primary-container font-semibold bg-primary-container"
+                  : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 font-medium",
               )}
             >
               <span>{allOptionLabel}</span>
-              {!value && <Check size={13} className="text-tech-blue shrink-0" />}
+              {!value && <Check size={13} className="text-on-primary-container shrink-0" />}
             </li>
           )}
 
@@ -128,14 +128,14 @@ export default function FilterDropdown({
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex items-center justify-between gap-3 px-3 py-2 rounded-control text-xs cursor-pointer transition-colors",
+                  "flex items-center justify-between gap-3 px-3 py-2 rounded-sm text-label-medium cursor-pointer transition-colors",
                   isSelected
-                    ? "text-tech-blue font-semibold bg-tech-blue/10"
-                    : "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft dark:hover:bg-surface-container-high font-medium",
+                    ? "text-on-primary-container font-semibold bg-primary-container"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 font-medium",
                 )}
               >
                 <span>{opt.label}</span>
-                {isSelected && <Check size={13} className="text-tech-blue shrink-0" />}
+                {isSelected && <Check size={13} className="text-on-primary-container shrink-0" />}
               </li>
             );
           })}

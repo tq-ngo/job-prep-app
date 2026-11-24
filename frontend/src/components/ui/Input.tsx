@@ -7,18 +7,17 @@ import { useFieldControl } from "./Field";
 
 export type ControlSize = "sm" | "md";
 
-// border-strong (3:1) because the border is what identifies the control;
-// the decorative slate-soft border failed WCAG 1.4.11. Focus uses the global
-// :focus-visible ring, pulled in tight so it hugs the border.
+// outline (>= 3:1) identifies the control boundary per WCAG 1.4.11.
+// Focus uses the global :focus-visible ring, pulled in tight to hug the border.
 const control =
-  "w-full bg-background border border-border-strong rounded-control text-slate-ink font-sans " +
-  "placeholder:text-foreground-subtle transition-all duration-150 focus-visible:outline-offset-0 " +
-  "hover:border-slate-ink/50 focus:bg-background " +
-  "aria-invalid:border-amber-clay disabled:cursor-not-allowed disabled:bg-neutral-soft disabled:text-foreground-subtle";
+  "w-full bg-surface-container-lowest dark:bg-surface-container-low border border-outline rounded-sm text-on-surface font-sans " +
+  "placeholder:text-on-surface-variant transition-all duration-150 focus-visible:outline-offset-0 " +
+  "hover:border-on-surface focus:bg-surface-container-lowest dark:focus:bg-surface-container-default focus:border-primary " +
+  "aria-invalid:border-error disabled:cursor-not-allowed disabled:bg-surface-container-default disabled:text-on-surface-variant";
 
 const sizes: Record<ControlSize, string> = {
-  sm: "h-8 px-3 text-xs",
-  md: "h-11 px-4 text-sm",
+  sm: "h-8 px-3 text-body-small",
+  md: "h-11 px-4 text-body-medium",
 };
 
 type InputProps = Omit<ComponentProps<"input">, "size"> & {
@@ -51,7 +50,7 @@ export function Input({ size = "md", leadingIcon, pill, className, ...props }: I
       <span
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-foreground-subtle",
+          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-on-surface-variant",
           size === "sm" ? "left-2.5" : "left-3.5",
         )}
       >
@@ -80,7 +79,7 @@ export function Select({ size = "md", className, children, ...props }: SelectPro
         size={size === "sm" ? 13 : 16}
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-foreground-subtle",
+          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-on-surface-variant",
           size === "sm" ? "right-2" : "right-3.5",
         )}
       />
@@ -91,7 +90,7 @@ export function Select({ size = "md", className, children, ...props }: SelectPro
 /** Multi-line text input. */
 export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   const field = useFieldControl();
-  return <textarea {...field} {...props} className={cn(control, "px-4 py-3 text-sm min-h-24", className)} />;
+  return <textarea {...field} {...props} className={cn(control, "px-4 py-3 text-body-medium min-h-24", className)} />;
 }
 
 /**
@@ -114,7 +113,7 @@ export function PasswordInput({ size = "md", className, ...props }: Omit<InputPr
         aria-controls={inputId}
         onClick={() => setVisible((v) => !v)}
         className={cn(
-          "absolute top-1/2 -translate-y-1/2 flex items-center justify-center rounded-control text-foreground-subtle hover:text-slate-ink",
+          "absolute top-1/2 -translate-y-1/2 flex items-center justify-center rounded-sm text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12",
           size === "sm" ? "right-1 h-6 w-7" : "right-1.5 h-8 w-9",
         )}
       >

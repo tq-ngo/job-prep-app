@@ -20,13 +20,13 @@ export default function EmptyState({ icon, title, description, action, headingLe
       {icon && (
         <div
           aria-hidden="true"
-          className="w-14 h-14 rounded-full bg-spruce-green/10 text-spruce-green border border-spruce-green/20 flex items-center justify-center mb-4 shadow-sm"
+          className="w-14 h-14 rounded-full bg-primary-container text-on-primary-container border border-primary/20 flex items-center justify-center mb-4 shadow-level-1"
         >
           {icon}
         </div>
       )}
-      <Heading className="text-lg font-serif text-slate-ink mb-1.5">{title}</Heading>
-      {description && <p className="text-foreground-muted max-w-sm font-sans text-xs leading-relaxed">{description}</p>}
+      <Heading className="text-title-large font-serif text-on-surface mb-1.5">{title}</Heading>
+      {description && <p className="text-on-surface-variant max-w-sm font-sans text-body-small leading-relaxed">{description}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );

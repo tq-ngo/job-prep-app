@@ -4,8 +4,8 @@ import { cn } from "./cn";
 export type AlertVariant = "error" | "info";
 
 const variants: Record<AlertVariant, string> = {
-  error: "bg-amber-clay/10 border-amber-clay/30 text-amber-clay-on-tint",
-  info: "bg-spruce-green/10 border-spruce-green/30 text-spruce-green",
+  error: "bg-error-container border-error/30 text-on-error-container",
+  info: "bg-primary-container border-primary/30 text-on-primary-container",
 };
 
 interface AlertProps {
@@ -27,7 +27,7 @@ export default function Alert({ variant = "info", icon, action, className, child
   return (
     <div
       role={variant === "error" ? "alert" : "status"}
-      className={cn("flex items-center gap-2 rounded-control border px-4 py-3 text-sm", variants[variant], className)}
+      className={cn("flex items-center gap-2 rounded-sm border px-4 py-3 text-body-medium", variants[variant], className)}
     >
       {icon && (
         <span aria-hidden="true" className="shrink-0">

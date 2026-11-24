@@ -40,19 +40,19 @@ export default function Field({ label, hint, error, labelVisible = true, classNa
 
   return (
     <div className={cn("space-y-1.5", className)}>
-      <label htmlFor={id} className={labelVisible ? "block text-sm font-medium text-foreground" : "sr-only"}>
+      <label htmlFor={id} className={labelVisible ? "block text-label-large font-medium text-on-surface" : "sr-only"}>
         {label}
       </label>
       <FieldContext.Provider value={{ id, "aria-describedby": describedBy, "aria-invalid": error ? true : undefined }}>
         {children}
       </FieldContext.Provider>
       {hint && (
-        <p id={hintId} className="text-xs text-foreground-subtle">
+        <p id={hintId} className="text-body-small text-on-surface-variant">
           {hint}
         </p>
       )}
       {error && (
-        <p id={errorId} className="text-xs font-medium text-amber-clay">
+        <p id={errorId} className="text-body-small font-medium text-error">
           {error}
         </p>
       )}
