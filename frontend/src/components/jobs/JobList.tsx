@@ -45,7 +45,7 @@ export default function JobList({ jobs, activeJobId, defaultJobId, jobHref, onSe
       aria-label="Job results"
       aria-busy={stale || undefined}
       onKeyDown={handleKeyDown}
-      className={`divide-y divide-slate-soft transition-opacity ${stale ? "opacity-60" : ""}`}
+      className={`divide-y divide-outline-variant transition-opacity ${stale ? "opacity-60" : ""}`}
     >
       {jobs.map((job) => (
         <JobListItem
@@ -66,7 +66,7 @@ export default function JobList({ jobs, activeJobId, defaultJobId, jobHref, onSe
 /** Placeholder rows for the first load (aria-hidden; the feed announces loading). */
 export function JobListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
-    <div aria-hidden="true" className="divide-y divide-slate-soft">
+    <div aria-hidden="true" className="divide-y divide-outline-variant">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex gap-3 px-4 py-3">
           <Skeleton className="w-10 h-10 shrink-0" />

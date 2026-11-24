@@ -179,7 +179,7 @@ export default function CompanyAvatar({ company, companyDomain, size = "md" }: C
     <div
       aria-hidden="true"
       className={cn(
-        "rounded-xl border border-slate-soft/80 bg-white dark:bg-surface-container shadow-xs",
+        "rounded-md border border-outline-variant bg-surface-container-lowest dark:bg-surface-container-high shadow-level-1",
         "flex items-center justify-center shrink-0 overflow-hidden select-none transition-colors",
         size === "lg" ? "w-12 h-12 p-1.5" : "w-10 h-10 p-1",
       )}
@@ -193,10 +193,10 @@ export default function CompanyAvatar({ company, companyDomain, size = "md" }: C
           onError={() => {
             if (domain) setFailedDomain(domain);
           }}
-          className="w-full h-full object-contain rounded-lg"
+          className="w-full h-full object-contain rounded-sm"
         />
       ) : (
-        <span className={cn("font-serif font-semibold text-tech-blue", size === "lg" ? "text-base" : "text-sm")}>
+        <span className={cn("font-serif font-semibold text-primary", size === "lg" ? "text-title-medium" : "text-title-small")}>
           {initials || "?"}
         </span>
       )}

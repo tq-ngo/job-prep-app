@@ -31,18 +31,18 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
   const count = articles?.length ?? 0;
 
   return (
-    <div className="bg-background text-foreground font-sans pt-6 pb-16">
+    <div className="bg-surface text-on-surface font-sans pt-6 pb-16">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap gap-3 justify-between items-center mb-6 border-b border-slate-soft pb-4">
+        <div className="flex flex-wrap gap-3 justify-between items-center mb-6 border-b border-outline-variant pb-4">
           <div>
-            <h1 className="text-2xl font-serif font-medium text-slate-ink tracking-tight">Tech News Radar</h1>
-            <p className="font-mono text-xs text-foreground-muted mt-1 uppercase tracking-wider">
+            <h1 className="text-headline-medium font-serif font-medium text-on-surface tracking-tight">Tech News Radar</h1>
+            <p className="font-mono text-label-small text-on-surface-variant mt-1 uppercase tracking-wider">
               {count > 0 ? `${count} article${count !== 1 ? "s" : ""} · AI-summarized insights` : "AI-summarized insights from across the industry"}
             </p>
           </div>
           <Button
+            variant="filled"
             size="sm"
-            className="rounded-full shadow-xs"
             onClick={() => linkedin.run(undefined).catch(() => {})}
             loading={linkedin.busy}
             icon={<RefreshCw size={13} aria-hidden="true" />}
@@ -61,7 +61,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
             variant="error"
             className="mb-6"
             action={
-              <Button variant="ghost" size="sm" onClick={linkedin.dismissError}>
+              <Button variant="text" size="sm" onClick={linkedin.dismissError}>
                 Dismiss
               </Button>
             }
@@ -75,7 +75,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
         {isLoading ? (
           <SkeletonGroup label="Loading articles" className="space-y-6">
             {[1, 2, 3].map((i) => (
-              <Card key={i} tone="muted" className="h-32 flex flex-col justify-center">
+              <Card key={i} tone="filled" className="h-32 flex flex-col justify-center">
                 <Skeleton className="h-3 w-24 mb-4" />
                 <Skeleton className="h-6 w-3/4 mb-3" />
                 <Skeleton className="h-4 w-full max-w-2xl" />
@@ -88,7 +88,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
           <Alert
             variant="error"
             action={
-              <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              <Button variant="outlined" size="sm" onClick={() => refetch()}>
                 Retry
               </Button>
             }
@@ -101,7 +101,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
             title="Radar is empty."
             description={
               <>
-                Click <strong className="text-spruce-green">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
+                Click <strong className="text-primary">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
               </>
             }
           />

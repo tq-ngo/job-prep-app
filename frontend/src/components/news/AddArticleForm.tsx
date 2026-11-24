@@ -31,9 +31,9 @@ export default function AddArticleForm() {
   };
 
   return (
-    <Card as="section" tone="muted" padding="sm" className="mb-8" aria-labelledby="add-article-heading">
-      <h2 id="add-article-heading" className="text-xs font-sans font-medium text-slate-ink mb-3 flex items-center gap-2">
-        <Radio size={14} aria-hidden="true" className="text-spruce-green" /> Add Article to Radar
+    <Card as="section" tone="filled" padding="sm" className="mb-8" aria-labelledby="add-article-heading">
+      <h2 id="add-article-heading" className="text-label-medium font-sans font-medium text-on-surface mb-3 flex items-center gap-2">
+        <Radio size={14} aria-hidden="true" className="text-primary" /> Add Article to Radar
       </h2>
       <form onSubmit={handleSubmit} className="flex gap-2 items-start">
         <Field label="Article URL" labelVisible={false} className="flex-1">
@@ -46,7 +46,7 @@ export default function AddArticleForm() {
             placeholder="https://techcrunch.com/article..."
           />
         </Field>
-        <Button type="submit" size="sm" loading={scrape.busy}>
+        <Button type="submit" variant="filled" size="sm" loading={scrape.busy}>
           {scrape.busy ? "Analyzing…" : "Analyze"}
         </Button>
       </form>
@@ -61,7 +61,7 @@ export default function AddArticleForm() {
           variant="error"
           className="mt-3"
           action={
-            <Button variant="ghost" size="sm" onClick={scrape.dismissError}>
+            <Button variant="text" size="sm" onClick={scrape.dismissError}>
               Dismiss
             </Button>
           }

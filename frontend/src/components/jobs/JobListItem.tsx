@@ -44,6 +44,8 @@ export default function JobListItem({
     onSelect(job, e);
   };
 
+  const isActive = selected || defaultSelected;
+
   return (
     <li>
       <a
@@ -51,27 +53,36 @@ export default function JobListItem({
         data-job-link
         data-job-id={job.id}
         tabIndex={tabbable ? 0 : -1}
-        aria-current={selected || defaultSelected ? "true" : undefined}
+        aria-current={isActive ? "true" : undefined}
         onClick={handleClick}
         onMouseEnter={() => onPrefetch(job.id)}
         onFocus={() => onPrefetch(job.id)}
         className={cn(
-          "group flex gap-3 px-4 py-3.5 border-l-4 transition-all duration-150 hover:bg-neutral-soft -outline-offset-2",
-          selected || defaultSelected
-            ? "border-l-tech-blue bg-tech-blue/8 shadow-xs"
-            : "border-l-transparent",
+          "group flex gap-3 px-4 py-3.5 border-l-4 transition-all duration-150 -outline-offset-2",
+          isActive
+            ? "border-l-primary bg-secondary-container"
+            : "border-l-transparent hover:bg-on-surface/8 focus-visible:bg-on-surface/12",
         )}
       >
         <CompanyAvatar company={job.company} companyDomain={job.company_domain} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-ink leading-snug line-clamp-2 group-hover:text-tech-blue transition-colors">
+          <p
+            className={cn(
+              "text-title-small font-medium leading-snug line-clamp-2 transition-colors",
+              isActive ? "text-on-secondary-container" : "text-on-surface group-hover:text-primary",
+            )}
+          >
             {job.title}
           </p>
-          <p className="mt-0.5 text-xs text-foreground-muted truncate">{job.company}</p>
-          <p className="text-xs text-foreground-subtle truncate">{formatLocation(job, "—")}</p>
+          <p className={cn("mt-0.5 text-body-small truncate", isActive ? "text-on-secondary-container" : "text-on-surface-variant")}>
+            {job.company}
+          </p>
+          <p className={cn("text-body-small truncate", isActive ? "text-on-secondary-container" : "text-on-surface-variant")}>
+            {formatLocation(job, "—")}
+          </p>
 
           {(job.is_remote || sponsorship?.label) && (
-            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-foreground">
+            <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
               {sponsorship?.label && (
                 <Badge
@@ -100,7 +111,7 @@ export default function JobListItem({
           )}
 
           {job.posted_at && (
-            <p className="mt-2 flex items-center font-mono text-2xs text-foreground-subtle">
+            <p className={cn("mt-2 flex items-center font-mono text-label-small", isActive ? "text-on-secondary-container" : "text-on-surface-variant")}>
               <time dateTime={job.posted_at} suppressHydrationWarning>
                 {formatPostedAgo(job.posted_at)}
               </time>

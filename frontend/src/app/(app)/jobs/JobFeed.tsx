@@ -179,7 +179,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
   const filtered = hasActiveFilters(filters);
 
   return (
-    <div className="bg-background text-foreground font-sans flex flex-col lg:h-[calc(100dvh-3rem)]">
+    <div className="bg-surface text-on-surface font-sans flex flex-col lg:h-[calc(100dvh-3rem)]">
       {/* Below lg the open job replaces the list, filters included. */}
       <JobFeedToolbar
         className={activeJobId ? "hidden lg:block" : undefined}
@@ -189,12 +189,12 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
         liveConnected={sseConnected}
       />
 
-      <div className="flex-1 min-h-0 w-full lg:flex border-t border-slate-soft">
+      <div className="flex-1 min-h-0 w-full lg:flex border-t border-outline-variant">
         <section
           ref={listPaneRef}
           aria-label="Results"
           className={cn(
-            "flex-col lg:flex lg:w-[400px] xl:w-[440px] lg:shrink-0 lg:border-r border-slate-soft lg:overflow-y-auto",
+            "flex-col lg:flex lg:w-[400px] xl:w-[440px] lg:shrink-0 lg:border-r border-outline-variant lg:overflow-y-auto",
             activeJobId ? "hidden" : "flex",
           )}
         >
@@ -203,7 +203,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
               variant="error"
               className="m-4"
               action={
-                <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                <Button variant="outlined" size="sm" onClick={() => refetch()}>
                   Retry
                 </Button>
               }
@@ -232,7 +232,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
               }
               action={
                 filtered && (
-                  <Button variant="secondary" size="sm" onClick={clearFilters}>
+                  <Button variant="outlined" size="sm" onClick={clearFilters}>
                     Clear filters
                   </Button>
                 )

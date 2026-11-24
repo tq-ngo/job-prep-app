@@ -15,16 +15,16 @@ export default function JobListPagination({
 }) {
   if (pages <= 1) return null;
   return (
-    <nav aria-label="Pagination" className="flex items-center justify-between gap-2 px-4 py-3 border-t border-slate-soft">
-      <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider">
+    <nav aria-label="Pagination" className="flex items-center justify-between gap-2 px-4 py-3 border-t border-outline-variant">
+      <span className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider">
         Page {page} of {pages} ({total}
         {capped ? "+" : ""} total)
       </span>
       <div className="flex gap-2">
-        <Button variant="secondary" size="sm" className="rounded-full" onClick={() => onPage(page - 1)} disabled={page <= 1}>
+        <Button variant="outlined" size="sm" onClick={() => onPage(page - 1)} disabled={page <= 1}>
           Prev
         </Button>
-        <Button variant="secondary" size="sm" className="rounded-full" onClick={() => onPage(page + 1)} disabled={page >= pages}>
+        <Button variant="outlined" size="sm" onClick={() => onPage(page + 1)} disabled={page >= pages}>
           Next
         </Button>
       </div>

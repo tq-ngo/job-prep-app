@@ -152,8 +152,8 @@ function SkillAutocompleteInput({
           onKeyDown={handleKeyDown}
           placeholder="Filter by skill…"
           aria-label="Filter by skill"
-          leadingIcon={<Sparkles size={13} className="text-tech-blue" />}
-          className={cn("pr-7 text-xs", value && "border-tech-blue/50 bg-tech-blue/5")}
+          leadingIcon={<Sparkles size={13} className="text-primary" />}
+          className={cn("pr-7 text-body-small", value && "border-primary bg-primary-container text-on-primary-container")}
         />
         {value && (
           <button
@@ -163,7 +163,7 @@ function SkillAutocompleteInput({
               onSelectSkill("");
             }}
             aria-label="Clear skill"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-foreground-subtle hover:text-foreground"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8"
           >
             <X size={12} />
           </button>
@@ -174,7 +174,7 @@ function SkillAutocompleteInput({
         <ul
           role="listbox"
           aria-label="Suggested skills"
-          className="absolute z-50 left-0 top-full mt-1.5 w-60 max-h-56 overflow-y-auto rounded-card border border-slate-soft bg-surface-container-lowest dark:bg-surface-container p-1.5 shadow-pop"
+          className="absolute z-50 left-0 top-full mt-1.5 w-60 max-h-56 overflow-y-auto rounded-md border border-outline-variant bg-surface-container-lowest dark:bg-surface-container-default p-1.5 shadow-level-3"
         >
           {suggestions.map((skill, index) => {
             const isSelected = skill.toLowerCase() === value.toLowerCase();
@@ -187,15 +187,15 @@ function SkillAutocompleteInput({
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => handleSelect(skill)}
                 className={cn(
-                  "flex items-center justify-between gap-3 px-3 py-2 rounded-control text-xs cursor-pointer transition-colors",
+                  "flex items-center justify-between gap-3 px-3 py-2 rounded-sm text-label-medium cursor-pointer transition-colors",
                   isActive
-                    ? "bg-neutral-soft dark:bg-surface-container-high text-slate-ink"
-                    : "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft dark:hover:bg-surface-container-high",
-                  isSelected ? "text-tech-blue font-semibold bg-tech-blue/10" : "font-medium",
+                    ? "bg-on-surface/8 text-on-surface"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8",
+                  isSelected ? "text-on-primary-container font-semibold bg-primary-container" : "font-medium",
                 )}
               >
                 <span>{skill}</span>
-                {isSelected && <Check size={13} className="text-tech-blue shrink-0" />}
+                {isSelected && <Check size={13} className="text-on-primary-container shrink-0" />}
               </li>
             );
           })}
@@ -246,19 +246,19 @@ export default function JobFeedToolbar({
   };
 
   return (
-    <div className={cn("sticky top-12 z-30 bg-background/95 backdrop-blur-md border-b border-slate-soft shadow-xs transition-colors", className)}>
+    <div className={cn("sticky top-12 z-30 bg-surface/95 backdrop-blur-md border-b border-outline-variant transition-colors", className)}>
       <div className="w-full px-4 sm:px-6 lg:px-8 py-2.5 space-y-2">
         {/* Primary Controls Row */}
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-base font-serif font-medium text-slate-ink tracking-tight mr-1">Job Board</h1>
-          <span className="font-mono text-2xs text-foreground-subtle uppercase tracking-wider mr-1.5 whitespace-nowrap">
+          <h1 className="text-title-medium font-serif font-medium text-on-surface tracking-tight mr-1">Job Board</h1>
+          <span className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider mr-1.5 whitespace-nowrap">
             {totalLabel}
           </span>
           <span
-            className="inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-soft border border-slate-soft text-foreground-subtle mr-auto select-none"
+            className="inline-flex items-center gap-1.5 font-mono text-label-small uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-surface-container-low border border-outline-variant text-on-surface-variant mr-auto select-none"
             title={liveConnected ? "Live updates connected" : "Live updates disconnected"}
           >
-            <span aria-hidden="true" className={cn("w-1.5 h-1.5 rounded-full", liveConnected ? "bg-tech-blue animate-pulse" : "bg-slate-soft")} />
+            <span aria-hidden="true" className={cn("w-1.5 h-1.5 rounded-full", liveConnected ? "bg-primary animate-pulse" : "bg-outline-variant")} />
             <span className="hidden sm:inline">{liveConnected ? "Live" : "Offline"}</span>
           </span>
 
@@ -270,12 +270,12 @@ export default function JobFeedToolbar({
             onChange={(val) => onFilter("sort_by", val)}
             options={SORT_OPTIONS}
             placeholder="Sort by"
-            leadingIcon={<ArrowUpDown size={12} className="text-foreground-subtle" />}
+            leadingIcon={<ArrowUpDown size={12} className="text-on-surface-variant" />}
             ariaLabel="Sort by"
           />
         </div>
 
-        {/* Refined Filter Chips Row */}
+        {/* M3 Filter Chips Row */}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {/* Sponsorship Filter */}
           <FilterDropdown
@@ -311,20 +311,20 @@ export default function JobFeedToolbar({
           <SkillAutocompleteInput value={filters.skill} onSelectSkill={onSkill} />
         </div>
 
-        {/* Active Filters Badges & Clear Affordance */}
+        {/* Active Filters Chips & Clear Affordance */}
         {activeFilters.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="font-mono text-2xs uppercase tracking-wider text-foreground-subtle mr-1">
+            <span className="font-mono text-label-small uppercase tracking-wider text-on-surface-variant mr-1">
               Active Filters:
             </span>
             {activeFilters.map((af) => (
-              <Badge key={af.key} variant="neutral" className="pl-2.5 pr-1 py-0.5 text-2xs gap-1 bg-surface-container border-slate-soft">
+              <Badge key={af.key} variant="filter" className="pl-2.5 pr-1 py-0.5 gap-1">
                 <span>{af.label}</span>
                 <button
                   type="button"
                   onClick={() => onFilter(af.key, "")}
                   aria-label={`Remove filter ${af.label}`}
-                  className="rounded-full hover:bg-slate-ink/10 p-0.5 text-foreground-muted hover:text-slate-ink"
+                  className="rounded-full hover:bg-on-primary-container/12 p-0.5 text-on-primary-container"
                 >
                   <X size={10} />
                 </button>
@@ -333,7 +333,7 @@ export default function JobFeedToolbar({
             <button
               type="button"
               onClick={clearAll}
-              className="text-2xs font-mono text-tech-blue hover:underline ml-1.5"
+              className="text-label-small font-mono text-primary hover:underline ml-1.5 cursor-pointer"
             >
               Clear all
             </button>

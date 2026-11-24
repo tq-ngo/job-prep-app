@@ -75,7 +75,7 @@ export default function SkillsEditor({ autoFocus = false }: { autoFocus?: boolea
                   onClick={() => save(skills.filter((s) => s !== skill))}
                   disabled={saving}
                   aria-label={`Remove ${skill}`}
-                  className="-my-1 inline-flex h-6 w-6 items-center justify-center rounded-control hover:bg-spruce-green/15 disabled:cursor-not-allowed"
+                  className="-my-1 inline-flex h-6 w-6 items-center justify-center rounded-full hover:bg-on-primary-container/12 disabled:cursor-not-allowed"
                 >
                   <X size={11} aria-hidden="true" />
                 </button>
@@ -84,7 +84,7 @@ export default function SkillsEditor({ autoFocus = false }: { autoFocus?: boolea
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-foreground-muted">No skills yet. Add the technologies you want job alerts for.</p>
+        <p className="text-body-small text-on-surface-variant">No skills yet. Add the technologies you want job alerts for.</p>
       )}
 
       <form onSubmit={handleAdd} className="mt-3 flex gap-2 items-start">
@@ -101,12 +101,12 @@ export default function SkillsEditor({ autoFocus = false }: { autoFocus?: boolea
             maxLength={MAX_SKILL_LENGTH + 10}
           />
         </Field>
-        <Button type="submit" size="sm" variant="secondary" loading={saving} icon={<Plus size={13} aria-hidden="true" />}>
+        <Button type="submit" size="sm" variant="tonal" loading={saving} icon={<Plus size={13} aria-hidden="true" />}>
           Add
         </Button>
       </form>
       {error && (
-        <p role="alert" className="mt-2 text-xs font-medium text-amber-clay">
+        <p role="alert" className="mt-2 text-body-small font-medium text-error">
           {error}
         </p>
       )}

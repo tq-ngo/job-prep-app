@@ -74,7 +74,7 @@ export default function JobDetailPane({
   }, [jobId, focusTitleRequestRef]);
 
   const backButton = (
-    <Button variant="ghost" size="sm" onClick={onBack} icon={<ArrowLeft size={14} aria-hidden="true" />} className="lg:hidden -ml-2">
+    <Button variant="text" size="sm" onClick={onBack} icon={<ArrowLeft size={14} aria-hidden="true" />} className="lg:hidden -ml-2">
       Back to results
     </Button>
   );
@@ -117,13 +117,13 @@ export default function JobDetailPane({
   const metrics = [
     {
       label: "Work Type",
-      value: <span className="font-sans font-medium text-slate-ink">{workType}</span>,
+      value: <span className="font-sans font-medium text-on-surface">{workType}</span>,
     },
     { label: "Posted", value: job.posted_at ? formatDate(job.posted_at) : "Unknown" },
     {
       label: "Status",
       value: (
-        <span className={job.is_active !== false ? "text-tech-blue" : "text-amber-clay"}>
+        <span className={job.is_active !== false ? "text-primary" : "text-error"}>
           {job.is_active !== false ? "Active" : "Closed"}
         </span>
       ),
@@ -134,30 +134,34 @@ export default function JobDetailPane({
         <span
           className={
             sponsorship.status === "citizenship" || sponsorship.status === "no_sponsorship"
-              ? "text-amber-clay font-medium"
-              : "text-tech-blue font-medium"
+              ? "text-error font-medium"
+              : "text-primary font-medium"
           }
         >
           {sponsorship.label}
         </span>
       ) : (
-        <span className="text-foreground-subtle">Not specified</span>
+        <span className="text-on-surface-variant">Not specified</span>
       ),
     },
   ];
 
   return (
-    <section ref={paneRef} aria-labelledby={titleId} className={cn("flex-col min-w-0 lg:flex-1 lg:overflow-y-auto", className)}>
-      <header className="sticky top-12 lg:top-0 z-10 bg-background/95 backdrop-blur-md border-b border-slate-soft px-4 sm:px-6 lg:px-8 py-4 shadow-xs">
+    <section
+      ref={paneRef}
+      aria-labelledby={titleId}
+      className={cn("flex-col min-w-0 lg:flex-1 lg:overflow-y-auto bg-surface-container-low/40", className)}
+    >
+      <header className="sticky top-12 lg:top-0 z-10 bg-surface-container-lowest/95 dark:bg-surface-container-low/95 backdrop-blur-md border-b border-outline-variant px-4 sm:px-6 lg:px-8 py-4 shadow-level-1">
         <div className="mb-2 lg:hidden">{backButton}</div>
         <div className="flex items-start gap-4">
           <CompanyAvatar company={job.company} companyDomain={job.company_domain} size="lg" />
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-xl font-serif font-medium text-slate-ink leading-tight">
+            <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-headline-small font-serif font-medium text-on-surface leading-tight">
               {job.title}
             </h2>
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-foreground-muted font-sans text-xs mt-1.5">
-              <span className="font-medium text-slate-ink">{job.company}</span>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-on-surface-variant font-sans text-body-small mt-1.5">
+              <span className="font-medium text-on-surface">{job.company}</span>
               <span aria-hidden="true">•</span>
               <span>{formatLocation(job)}</span>
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
@@ -176,27 +180,27 @@ export default function JobDetailPane({
               )}
             </p>
           </div>
-          <ButtonLink href={job.apply_url} external size="sm" className="shrink-0 rounded-full px-4 shadow-xs">
+          <ButtonLink href={job.apply_url} external variant="filled" size="sm" className="shrink-0 px-5">
             Apply <ExternalLink size={13} aria-hidden="true" />
           </ButtonLink>
         </div>
       </header>
 
-      {/* Detail pane stretches to right edge with comfortable reading line length on JD */}
+      {/* Detail pane stretches to right edge with comfortable M3 contained reading surface */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3.5">
           {metrics.map(({ label, value }) => (
-            <div key={label} className="border border-slate-soft/80 rounded-xl p-3.5 bg-neutral-soft shadow-xs">
-              <dt className="text-2xs font-mono text-foreground-subtle uppercase tracking-wider mb-1">{label}</dt>
-              <dd className="text-xs font-sans font-medium text-slate-ink truncate">{value}</dd>
+            <div key={label} className="border border-outline-variant rounded-md p-3.5 bg-surface-container-lowest dark:bg-surface-container-low shadow-level-1">
+              <dt className="text-label-small font-mono text-on-surface-variant uppercase tracking-wider mb-1">{label}</dt>
+              <dd className="text-body-small font-sans font-medium text-on-surface truncate">{value}</dd>
             </div>
           ))}
         </dl>
 
         {job.skills && job.skills.length > 0 && (
-          <section className="border-t border-slate-soft pt-4">
-            <h3 className="text-xs font-mono uppercase tracking-wider text-foreground-subtle mb-2.5 flex items-center gap-1.5">
-              <Sparkles size={12} aria-hidden="true" className="text-tech-blue" /> Extracted skills
+          <section className="border-t border-outline-variant pt-4">
+            <h3 className="text-label-medium font-mono uppercase tracking-wider text-on-surface-variant mb-2.5 flex items-center gap-1.5">
+              <Sparkles size={12} aria-hidden="true" className="text-primary" /> Extracted skills
             </h3>
             <ul className="flex flex-wrap gap-1.5">
               {job.skills.map((skill) => (
@@ -210,20 +214,22 @@ export default function JobDetailPane({
           </section>
         )}
 
-        <section className="border-t border-slate-soft pt-4">
-          <h3 className="text-xs font-mono uppercase tracking-wider text-foreground-subtle mb-3">Job description</h3>
+        <section className="border-t border-outline-variant pt-4">
+          <h3 className="text-label-medium font-mono uppercase tracking-wider text-on-surface-variant mb-3">Job description</h3>
           {descriptionLoading ? (
             <DescriptionSkeleton />
           ) : description ? (
-            <JobDescription markdown={description} />
+            <div className="rounded-lg border border-outline-variant bg-surface-container-lowest dark:bg-surface-container-low p-5 sm:p-6 shadow-level-1">
+              <JobDescription markdown={description} />
+            </div>
           ) : (
-            <div className="py-10 text-center border border-dashed border-slate-soft rounded-2xl p-8 bg-neutral-soft/40">
-              <p className="font-sans text-sm text-foreground-muted mb-3">The full description isn&apos;t available here yet.</p>
+            <div className="py-10 text-center border border-dashed border-outline-variant rounded-lg p-8 bg-surface-container-low">
+              <p className="font-sans text-body-medium text-on-surface-variant mb-3">The full description isn&apos;t available here yet.</p>
               <a
                 href={job.apply_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-tech-blue hover:underline"
+                className="inline-flex items-center gap-1.5 text-label-medium font-medium text-primary hover:underline"
               >
                 View the posting on the company site <ExternalLink size={12} aria-hidden="true" />
               </a>

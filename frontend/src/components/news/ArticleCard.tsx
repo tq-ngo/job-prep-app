@@ -22,10 +22,10 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
       target="_blank"
       rel="noopener noreferrer"
       className={cardClasses({
-        tone: "muted",
+        tone: "elevated",
         padding: "lg",
         interactive: true,
-        className: "block group shadow-xs hover:shadow-m3-1 transition-all duration-200",
+        className: "block group",
       })}
     >
       <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -36,21 +36,21 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
           </Badge>
         ))}
         {article.published_at && (
-          <span className="ml-auto font-mono text-2xs text-foreground-subtle flex items-center gap-1">
+          <span className="ml-auto font-mono text-label-small text-on-surface-variant flex items-center gap-1">
             <Clock size={11} aria-hidden="true" />
             <time dateTime={article.published_at}>{formatDate(article.published_at)}</time>
           </span>
         )}
       </div>
 
-      <h2 className="text-xl font-serif font-medium text-slate-ink group-hover:text-spruce-green transition-colors mb-3 flex items-start gap-2">
+      <h2 className="text-title-large font-serif font-medium text-on-surface group-hover:text-primary transition-colors mb-3 flex items-start gap-2">
         {article.title || article.url}
-        <ExternalLink size={14} aria-hidden="true" className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-spruce-green" />
+        <ExternalLink size={14} aria-hidden="true" className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-primary" />
       </h2>
 
-      <p className="font-sans text-sm text-foreground-muted leading-relaxed line-clamp-3">{article.summary || "No summary available."}</p>
+      <p className="font-sans text-body-medium text-on-surface-variant leading-relaxed line-clamp-3">{article.summary || "No summary available."}</p>
       {!article.enriched_at && (
-        <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider text-foreground-subtle">
+        <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-label-small uppercase tracking-wider text-on-surface-variant">
           <Spinner size={11} /> AI summary pending
         </p>
       )}
@@ -63,7 +63,7 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
         ))}
         {article.scraped_at && (
           // Relative to now, so the server render and hydration can differ.
-          <span suppressHydrationWarning className="ml-auto font-mono text-2xs text-foreground-subtle">
+          <span suppressHydrationWarning className="ml-auto font-mono text-label-small text-on-surface-variant">
             Analyzed {timeAgo(article.scraped_at)}
           </span>
         )}
