@@ -51,6 +51,12 @@ from app.core.security import (
     new_token_family,
     verify_password_async,
 )
+from app.core.user_cache import (
+    check_revocation_and_get_profile,
+    invalidate_user_profile,
+    set_cached_user_profile,
+    to_user_model,
+)
 from app.models.users import User
 from app.schemas.user import UserCreate, UserRead, UserUpdate, normalize_email
 
@@ -93,14 +99,22 @@ async def get_current_user(
     except TokenError:
         raise _CREDENTIALS_EXC
 
-    # Revocation check: the token itself, or its whole sign-in family.
-    if await is_payload_revoked(payload):
+    # Check revocation and `user:profile:{sub}` in a single Redis round-trip.
+    is_revoked, cached_profile = await check_revocation_and_get_profile(payload)
+    if is_revoked:
         raise _CREDENTIALS_EXC
+
+    if cached_profile is not None:
+        if not cached_profile.is_active:
+            raise _CREDENTIALS_EXC
+        return to_user_model(cached_profile)
 
     result = await session.execute(select(User).where(User.email == payload["sub"]))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
+        await invalidate_user_profile(payload["sub"])
         raise _CREDENTIALS_EXC
+    await set_cached_user_profile(user)
     return user
 
 
@@ -185,6 +199,7 @@ async def _issue_session(response: Response, user: User, session: AsyncSession) 
     user.last_login_at = utc_now()
     session.add(user)
     await session.commit()
+    await set_cached_user_profile(user)
 
     # Body no longer carries the token — it lives only in the HttpOnly cookie.
     return {"status": "ok", "csrf_token": csrf}
@@ -404,8 +419,10 @@ async def _rotate_refresh(
     result = await session.execute(select(User).where(User.email == payload["sub"]))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
+        await invalidate_user_profile(payload["sub"])
         raise _RefreshFailed("User not found or disabled")
 
+    await set_cached_user_profile(user)
     tokens = _mint(user.email, family)
     await store_rotation_result(jti, tokens, _ROTATION_GRACE_SECONDS)
     return tokens
@@ -480,6 +497,7 @@ async def logout(
 ):
     """Revoke both tokens and the sign-in family, and clear the cookies."""
     now = datetime.now(timezone.utc).timestamp()
+    subjects = set()
     for raw, kind in ((access_token, TOKEN_TYPE_ACCESS), (refresh_token, TOKEN_TYPE_REFRESH)):
         if not raw:
             continue
@@ -493,6 +511,10 @@ async def logout(
         # the grace window, and tokens another tab may have just minted.
         if payload.get("fam"):
             await revoke_family(payload["fam"], settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
+        subjects.add(payload["sub"])
+
+    for sub in subjects:
+        await invalidate_user_profile(sub)
 
     clear_auth_cookies(response)
     return {"status": "logged_out"}
@@ -512,8 +534,16 @@ async def update_skills(
     session: AsyncSession = Depends(get_session),
     _: None = Depends(require_csrf),
 ):
-    current_user.skills = skills_in.skills  # normalized and bounded by UserUpdate
-    session.add(current_user)
+    # `current_user` may be a transient model hydrated from Redis, so fetch the
+    # persistent row before mutating to avoid an accidental INSERT.
+    user = await session.get(User, current_user.id)
+    if user is None or not user.is_active:
+        await invalidate_user_profile(current_user.email)
+        raise _CREDENTIALS_EXC
+
+    user.skills = skills_in.skills  # normalized and bounded by UserUpdate
+    session.add(user)
     await session.commit()
-    await session.refresh(current_user)
-    return current_user
+    await session.refresh(user)
+    await set_cached_user_profile(user)
+    return user

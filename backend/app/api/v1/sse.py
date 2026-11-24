@@ -26,11 +26,16 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from app.core.auth_cookies import ACCESS_COOKIE, is_payload_revoked
+from app.core.auth_cookies import ACCESS_COOKIE
 from app.core.database import AsyncSessionLocal, get_session
 from app.core.events import JOBS_STREAM, KIND_ENRICHED, publish_job_event  # noqa: F401 (re-export)
 from app.core.redis import create_worker_redis, get_redis_pool
 from app.core.security import TOKEN_TYPE_ACCESS, TokenError, decode_token
+from app.core.user_cache import (
+    check_revocation_and_get_profile,
+    invalidate_user_profile,
+    set_cached_user_profile,
+)
 from app.models.users import User
 
 logger = logging.getLogger(__name__)
@@ -74,7 +79,11 @@ async def _is_active_user(session: AsyncSession, email: str) -> bool:
     user = (
         await session.execute(select(User).where(User.email == email))
     ).scalar_one_or_none()
-    return user is not None and user.is_active
+    if user is None or not user.is_active:
+        await invalidate_user_profile(email)
+        return False
+    await set_cached_user_profile(user)
+    return True
 
 
 async def _register_stream(redis, user_key: str, stream_id: str) -> bool:
@@ -141,13 +150,18 @@ async def job_event_generator(
             if now - last_auth_check > AUTH_RECHECK_SECONDS:
                 try:
                     payload = decode_token(raw_token, TOKEN_TYPE_ACCESS)
-                    if await is_payload_revoked(payload):
+                    is_revoked, cached_profile = await check_revocation_and_get_profile(payload)
+                    if is_revoked:
                         raise TokenError("revoked")
-                    # A token can outlive its account: disabling a user
-                    # used to leave their streams running until expiry.
-                    async with _session_factory() as session:
-                        if not await _is_active_user(session, payload["sub"]):
+                    if cached_profile is not None:
+                        if not cached_profile.is_active:
                             raise TokenError("user disabled")
+                    else:
+                        # A token can outlive its account: disabling a user
+                        # used to leave their streams running until expiry.
+                        async with _session_factory() as session:
+                            if not await _is_active_user(session, payload["sub"]):
+                                raise TokenError("user disabled")
                 except TokenError:
                     # Tell the client WHY before closing. EventSource can't
                     # see HTTP status codes, so without this a routine 15-min
@@ -229,9 +243,13 @@ async def stream_job_alerts(
     `{ withCredentials: true }`.
     """
     payload = _authorize(access_token)
-    if await is_payload_revoked(payload):
+    is_revoked, cached_profile = await check_revocation_and_get_profile(payload)
+    if is_revoked:
         raise HTTPException(status_code=401, detail="Token revoked")
-    if not await _is_active_user(session, payload["sub"]):
+    if cached_profile is not None:
+        if not cached_profile.is_active:
+            raise HTTPException(status_code=401, detail="Account unavailable")
+    elif not await _is_active_user(session, payload["sub"]):
         raise HTTPException(status_code=401, detail="Account unavailable")
 
     stream_id = uuid.uuid4().hex
