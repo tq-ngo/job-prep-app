@@ -112,13 +112,19 @@ async def revoke_family(family: str, ttl_seconds: int) -> None:
     await redis.setex(f"{_FAMILY_REVOKED_PREFIX}{family}", ttl_seconds, "1")
 
 
-async def is_payload_revoked(payload: Dict[str, Any]) -> bool:
-    """True if this token's jti, or its whole family, has been revoked."""
+def revocation_keys(payload: Dict[str, Any]) -> list[str]:
+    """Return the Redis denylist/family-revocation keys for a decoded JWT."""
     keys = []
     if payload.get("jti"):
         keys.append(f"{_DENYLIST_PREFIX}{payload['jti']}")
     if payload.get("fam"):
         keys.append(f"{_FAMILY_REVOKED_PREFIX}{payload['fam']}")
+    return keys
+
+
+async def is_payload_revoked(payload: Dict[str, Any]) -> bool:
+    """True if this token's jti, or its whole family, has been revoked."""
+    keys = revocation_keys(payload)
     if not keys:
         return False
     redis = await get_redis_pool()

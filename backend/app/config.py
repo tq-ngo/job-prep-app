@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # bound the damage from a leaked one; the refresh token carries longevity.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    USER_PROFILE_CACHE_TTL_SECONDS: int = Field(default=900, ge=0)
 
     # ── Cookies ──────────────────────────────────────────────────────────
     # Tokens move from localStorage (readable by any XSS) into HttpOnly
