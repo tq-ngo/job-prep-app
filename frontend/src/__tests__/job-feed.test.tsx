@@ -210,6 +210,8 @@ describe("JobFeed list", () => {
     renderFeed({ data: null });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't load jobs/i);
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
     expect(screen.queryByText("No positions found")).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));

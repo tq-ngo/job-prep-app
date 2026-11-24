@@ -14,7 +14,7 @@ from app.core.redis import get_redis_pool
 from app.api.v1.auth import get_current_user, require_csrf
 from app.core.task_owner import record_task_owner
 from app.scraping.sponsorship import classify_sponsorship
-from sqlalchemy import or_, and_, case, Text
+from sqlalchemy import or_, and_, case, Text, inspect as sa_inspect
 from sqlalchemy.orm import defer
 import hashlib
 import uuid
@@ -31,13 +31,21 @@ POPULAR_TECH_SKILLS = [
 ]
 
 
+def _loaded_description(j: Job) -> str:
+    """Return description only if already loaded in memory; never trigger a deferred lazy load."""
+    state = sa_inspect(j, raiseerr=False)
+    if state is not None:
+        return state.dict.get("description") or ""
+    return getattr(j, "description", None) or ""
+
+
 def to_job_list_item(j: Job) -> JobListItem:
     """Safely build a JobListItem using loaded attributes and persisted sponsorship status."""
     if j.sponsorship_status is not None or j.sponsorship_label is not None:
         spons_status = j.sponsorship_status
         spons_label = j.sponsorship_label
     else:
-        spons = classify_sponsorship(j.title, getattr(j, "description", None) or "")
+        spons = classify_sponsorship(j.title, _loaded_description(j))
         spons_status = spons["status"]
         spons_label = spons["label"]
     loc = (j.location or "").lower()

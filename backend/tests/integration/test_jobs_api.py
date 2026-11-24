@@ -61,6 +61,46 @@ async def test_job_feed_hides_duplicates_and_defers_heavy_columns(
 
 
 @pytest.mark.integration
+async def test_job_feed_untagged_job_with_deferred_description(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict,
+):
+    """Untagged jobs (sponsorship_status=None) must serialize without lazy-loading deferred description."""
+    untagged = Job(
+        id=uuid.uuid4(),
+        external_id="vercel-untagged-1",
+        source="github",
+        title="Software Engineer Intern",
+        company="Vercel",
+        category="Others",
+        apply_url="https://vercel.com/careers/1",
+        is_active=True,
+        canonical_id=None,
+        sponsorship_status=None,
+        sponsorship_label=None,
+        description="Build developer tools with Next.js and Rust.",
+    )
+    mock_db_session.add(untagged)
+    await mock_db_session.commit()
+
+    # Evict from the identity map so defer(Job.description) truly leaves
+    # `description` unloaded, matching production request sessions.
+    mock_db_session.expunge_all()
+
+    res = await client.get("/api/v1/jobs/", cookies=auth_headers["cookies"])
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    item = data["items"][0]
+    assert item["external_id"] == "vercel-untagged-1"
+    assert item["sponsorship_status"] is None
+    assert item["sponsorship_label"] is None
+    assert "description" not in item
+
+
+@pytest.mark.integration
 async def test_job_feed_filtering_and_search_escaping(
     client: AsyncClient,
     mock_db_session: AsyncSession,

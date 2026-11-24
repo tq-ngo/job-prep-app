@@ -175,7 +175,11 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
     document.querySelector<HTMLElement>(`a[data-job-id="${CSS.escape(prev)}"]`)?.focus({ preventScroll: true });
   }, [activeJobId, isDesktop]);
 
-  const totalLabel = data ? `${data.total}${data.capped ? "+" : ""} roles` : "Loading…";
+  const totalLabel = data
+    ? `${data.total}${data.capped ? "+" : ""} roles`
+    : isError
+      ? "Unavailable"
+      : "Loading…";
   const filtered = hasActiveFilters(filters);
 
   return (
