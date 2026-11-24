@@ -39,11 +39,11 @@ export default async function ProtectedLayout({ children }: { children: React.Re
 
   return (
     <AuthProvider initialUser={initialUser}>
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-screen flex flex-col bg-surface">
         <SkipLink />
         <DashboardNavbar />
         {/* Skip-link target; programmatic focus only, so no ring around the page. */}
-        <main id="main" tabIndex={-1} className="flex-1 w-full bg-background transition-colors duration-200 focus:outline-none">
+        <main id="main" tabIndex={-1} className="flex-1 w-full bg-surface transition-colors duration-200 focus:outline-none">
           {children}
         </main>
       </div>

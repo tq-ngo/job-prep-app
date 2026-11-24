@@ -49,7 +49,7 @@ export default function RegisterForm({ nextPath }: { nextPath: string }) {
       footer={
         <>
           Already have an account?{" "}
-          <Link href={withNext("/login")} className="text-spruce-green hover:text-spruce-green-hover font-medium">
+          <Link href={withNext("/login")} className="text-primary hover:text-primary-hover font-medium underline-offset-4 hover:underline">
             Sign in
           </Link>
         </>
@@ -76,7 +76,7 @@ export default function RegisterForm({ nextPath }: { nextPath: string }) {
             required
           />
         </Field>
-        <Button type="submit" size="lg" block loading={isLoading}>
+        <Button type="submit" variant="filled" size="lg" block loading={isLoading}>
           {isLoading ? "Creating account..." : "Create Account"}
         </Button>
       </form>

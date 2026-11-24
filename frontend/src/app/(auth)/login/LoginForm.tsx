@@ -64,7 +64,7 @@ export default function LoginForm({
       footer={
         <>
           Don&apos;t have an account?{" "}
-          <Link href={registerHref} className="text-spruce-green hover:text-spruce-green-hover font-medium">
+          <Link href={registerHref} className="text-primary hover:text-primary-hover font-medium underline-offset-4 hover:underline">
             Create one
           </Link>
         </>
@@ -87,7 +87,7 @@ export default function LoginForm({
         <Field label="Password">
           <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
-        <Button type="submit" size="lg" block loading={isLoading}>
+        <Button type="submit" variant="filled" size="lg" block loading={isLoading}>
           {isLoading ? "Signing in..." : "Sign In"}
         </Button>
       </form>

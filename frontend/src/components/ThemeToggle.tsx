@@ -15,16 +15,16 @@ export default function ThemeToggle({ className = "" }: { className?: string }) 
 
   return (
     <Button
-      variant="secondary"
+      variant="outlined"
       size="icon"
       onClick={toggleTheme}
       aria-label="Dark mode"
       aria-pressed={theme === "dark"}
       title="Toggle dark mode"
-      className={cn("rounded-full transition-transform active:scale-95", className)}
+      className={cn("transition-transform active:scale-95", className)}
     >
-      <Moon size={15} aria-hidden="true" className="text-slate-ink transition-transform hover:-rotate-12 dark:hidden" />
-      <Sun size={15} aria-hidden="true" className="text-amber-clay transition-transform hover:rotate-45 hidden dark:block" />
+      <Moon size={15} aria-hidden="true" className="text-on-surface transition-transform hover:-rotate-12 dark:hidden" />
+      <Sun size={15} aria-hidden="true" className="text-primary transition-transform hover:rotate-45 hidden dark:block" />
     </Button>
   );
 }

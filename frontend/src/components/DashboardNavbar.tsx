@@ -28,10 +28,10 @@ export default function DashboardNavbar() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <header ref={headerRef} className="sticky top-0 z-40 w-full bg-background/90 backdrop-blur-md border-b border-slate-soft transition-colors duration-200">
+    <header ref={headerRef} className="sticky top-0 z-40 w-full bg-surface/95 backdrop-blur-md border-b border-outline-variant transition-colors duration-200">
       <div className="w-full px-4 sm:px-6 lg:px-8 h-12 flex items-center justify-between gap-4">
         <div className="flex items-center gap-6 min-w-0">
-          <Link href="/" className="font-serif text-xl font-medium tracking-tight text-slate-ink hover:text-tech-blue transition-colors">
+          <Link href="/" className="font-serif text-title-large font-medium tracking-tight text-on-surface hover:text-primary transition-colors">
             JobPrep
           </Link>
 
@@ -42,10 +42,10 @@ export default function DashboardNavbar() {
                 href={href}
                 aria-current={isActive(href) ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all duration-150",
+                  "flex items-center gap-2 px-4 py-1.5 rounded-full text-label-medium transition-all duration-150",
                   isActive(href)
-                    ? "bg-tech-blue/10 text-tech-blue font-semibold shadow-xs"
-                    : "text-foreground-muted hover:text-slate-ink hover:bg-neutral-soft",
+                    ? "bg-secondary-container text-on-secondary-container font-semibold"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12 font-medium",
                 )}
               >
                 <Icon size={14} aria-hidden="true" />
@@ -61,25 +61,25 @@ export default function DashboardNavbar() {
           {isLoading ? (
             // Session unknown (server couldn't resolve it): a neutral
             // placeholder, never a "Sign In" button that then flips.
-            <Skeleton className="w-40 h-6" />
+            <Skeleton className="w-40 h-6 rounded-full" />
           ) : user ? (
-            <div className="flex items-center gap-2 pl-2.5 py-0.5 pr-1 border border-slate-soft rounded-full bg-neutral-soft/80">
-              <span className="hidden sm:inline font-sans text-xs text-foreground-muted truncate max-w-40" title={user.email}>
+            <div className="flex items-center gap-2 pl-3 py-0.5 pr-1 border border-outline-variant rounded-full bg-surface-container-low">
+              <span className="hidden sm:inline font-sans text-label-medium text-on-surface-variant truncate max-w-40" title={user.email}>
                 {user.email}
               </span>
               <Button
-                variant="ghost"
+                variant="text"
                 size="icon"
                 onClick={logout}
                 title="Sign out"
                 aria-label="Sign out"
-                className="h-7 w-7 rounded-full text-foreground-subtle hover:text-slate-ink hover:bg-surface-container"
+                className="h-7 w-7 text-on-surface-variant hover:text-on-surface"
               >
                 <LogOut size={14} aria-hidden="true" />
               </Button>
             </div>
           ) : (
-            <ButtonLink href="/login" size="sm" icon={<LogIn size={13} aria-hidden="true" />}>
+            <ButtonLink href="/login" variant="filled" size="sm" icon={<LogIn size={13} aria-hidden="true" />}>
               Sign In
             </ButtonLink>
           )}
@@ -88,9 +88,9 @@ export default function DashboardNavbar() {
               only below md, so md–lg had neither skills nor a menu. */}
           <Button
             ref={menuButtonRef}
-            variant="ghost"
+            variant="text"
             size="icon"
-            className="lg:hidden rounded-full"
+            className="lg:hidden"
             aria-label="Menu"
             aria-expanded={menuOpen}
             aria-controls="app-menu"
@@ -102,7 +102,7 @@ export default function DashboardNavbar() {
       </div>
 
       {menuOpen && (
-        <div id="app-menu" className="lg:hidden border-t border-slate-soft px-4 py-3 bg-neutral-soft/95 backdrop-blur-md shadow-card space-y-3">
+        <div id="app-menu" className="lg:hidden border-t border-outline-variant px-4 py-3 bg-surface-container-low shadow-level-2 space-y-3">
           <nav aria-label="Main menu" className="md:hidden space-y-1">
             {NAV_LINKS.map(({ href, label, icon: Icon }) => (
               <Link
@@ -111,8 +111,10 @@ export default function DashboardNavbar() {
                 onClick={closeMenu}
                 aria-current={isActive(href) ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 px-3.5 py-2 rounded-full text-sm font-medium transition-colors",
-                  isActive(href) ? "bg-tech-blue/10 text-tech-blue font-semibold" : "text-foreground-muted hover:bg-surface-container",
+                  "flex items-center gap-2.5 px-4 py-2 rounded-full text-label-large transition-colors",
+                  isActive(href)
+                    ? "bg-secondary-container text-on-secondary-container font-semibold"
+                    : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12 font-medium",
                 )}
               >
                 <Icon size={16} aria-hidden="true" />
