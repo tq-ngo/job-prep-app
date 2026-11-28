@@ -13,6 +13,10 @@ on:
       - ".github/workflows/docker.yml"
   pull_request:
     paths: *docker_paths
+  schedule:
+    # Weekly CVE scan of base images, OS packages, and application lockfiles.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,11 +27,13 @@ concurrency:
 
 jobs:
   build:
-    name: Compose build
+    name: Compose build & image security scan
     runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: jobprep
     steps:
       - uses: actions/checkout@v4
-      # Compose's env_file and ${VAR} interpolation both read .env.
+      # Compose's ${VAR} interpolation reads .env.
       - run: cp .env.example .env
       - name: Validate compose (dev = base + override, and production)
         run: |
@@ -43,12 +49,32 @@ jobs:
           -v "$PWD/infra/nginx/templates:/etc/nginx/templates:ro"
           -v "$PWD/infra/nginx/snippets:/etc/nginx/snippets:ro"
           nginx:alpine nginx -t
-      - run: docker compose build backend frontend
-      - name: Scan repository and dependencies with Trivy
+      - name: Build production backend and frontend images
+        run: docker compose -f docker-compose.yml build backend frontend
+      - name: Scan repository files with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+      - name: Scan built backend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'image'
+          image-ref: 'jobprep-backend:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+      - name: Scan built frontend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'image'
+          image-ref: 'jobprep-frontend:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
