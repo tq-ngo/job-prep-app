@@ -45,7 +45,11 @@ class Settings(BaseSettings):
     # under the free tier's 5/min. 0 disables the shared budget.
     GEMINI_REQUESTS_PER_MINUTE: int = Field(default=4, ge=0)
 
-    SECRET_KEY: str = Field(...)
+    # Service role scopes secret & HTTP validation:
+    # - "api" (default): requires SECRET_KEY and HTTP cookie/CORS invariants.
+    # - "worker" / "migrate": runs Celery or Alembic without auth/OAuth secrets.
+    SERVICE_ROLE: str = Field(default="api")
+    SECRET_KEY: str = Field(default="")
 
     APP_ENV: str = Field(default="development")
     CORS_ORIGINS: str = Field(default="http://localhost")
@@ -84,44 +88,53 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _require_secure_cookies_off_localhost(self) -> "Settings":
         self.APP_ENV = (self.APP_ENV or "development").strip().lower()
+        self.SERVICE_ROLE = (self.SERVICE_ROLE or "api").strip().lower()
+        if self.SERVICE_ROLE not in ("api", "worker", "migrate"):
+            raise ValueError("SERVICE_ROLE must be one of: api, worker, migrate")
+
         non_dev = self.APP_ENV != "development"
+        is_api = self.SERVICE_ROLE == "api"
 
-        # A Secure=false session cookie on an HTTPS site is sent over any
-        # plain-HTTP request to the same host (e.g. a downgrade), so refuse to
-        # boot rather than run that way silently.
-        if not self.COOKIE_SECURE and (
-            non_dev or self.FRONTEND_URL.startswith("https://")
-        ):
-            raise ValueError(
-                "COOKIE_SECURE must be true when APP_ENV is non-development or "
-                "FRONTEND_URL is https://"
-            )
-        # HS256 keys shorter than the hash output are brute-forceable
-        # (RFC 7518 §3.2), and the same key now also signs-checks at the edge.
-        if non_dev and (
-            len(self.SECRET_KEY) < 32
-            or "change_me" in self.SECRET_KEY.lower()
-            or len(set(self.SECRET_KEY)) < 8
-        ):
-            raise ValueError(
-                "SECRET_KEY must be a high-entropy secret of at least 32 characters off development"
-            )
+        if is_api:
+            if not self.SECRET_KEY.strip():
+                raise ValueError("SECRET_KEY is required when SERVICE_ROLE=api")
 
-        # Credentialed CORS with a wildcard makes Starlette echo back any
-        # Origin, so every site on the internet could make cookie-carrying
-        # requests and read the responses.
-        if "*" in self.cors_origins:
-            raise ValueError(
-                "CORS_ORIGINS must list explicit origins; '*' is not allowed "
-                "because credentials (cookies) are enabled"
-            )
+            # A Secure=false session cookie on an HTTPS site is sent over any
+            # plain-HTTP request to the same host (e.g. a downgrade), so refuse to
+            # boot rather than run that way silently.
+            if not self.COOKIE_SECURE and (
+                non_dev or self.FRONTEND_URL.startswith("https://")
+            ):
+                raise ValueError(
+                    "COOKIE_SECURE must be true when APP_ENV is non-development or "
+                    "FRONTEND_URL is https://"
+                )
+            # HS256 keys shorter than the hash output are brute-forceable
+            # (RFC 7518 §3.2), and the same key now also signs-checks at the edge.
+            if non_dev and (
+                len(self.SECRET_KEY) < 32
+                or "change_me" in self.SECRET_KEY.lower()
+                or len(set(self.SECRET_KEY)) < 8
+            ):
+                raise ValueError(
+                    "SECRET_KEY must be a high-entropy secret of at least 32 characters off development"
+                )
 
-        self.COOKIE_SAMESITE = self.COOKIE_SAMESITE.lower()
-        if self.COOKIE_SAMESITE not in ("lax", "strict", "none"):
-            raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none")
-        if self.COOKIE_SAMESITE == "none" and not self.COOKIE_SECURE:
-            # Browsers reject SameSite=None cookies without Secure outright.
-            raise ValueError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true")
+            # Credentialed CORS with a wildcard makes Starlette echo back any
+            # Origin, so every site on the internet could make cookie-carrying
+            # requests and read the responses.
+            if "*" in self.cors_origins:
+                raise ValueError(
+                    "CORS_ORIGINS must list explicit origins; '*' is not allowed "
+                    "because credentials (cookies) are enabled"
+                )
+
+            self.COOKIE_SAMESITE = self.COOKIE_SAMESITE.lower()
+            if self.COOKIE_SAMESITE not in ("lax", "strict", "none"):
+                raise ValueError("COOKIE_SAMESITE must be one of: lax, strict, none")
+            if self.COOKIE_SAMESITE == "none" and not self.COOKIE_SECURE:
+                # Browsers reject SameSite=None cookies without Secure outright.
+                raise ValueError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true")
         return self
 
     @property

@@ -144,6 +144,38 @@ def test_settings_reject_placeholder_secret_off_dev():
         )
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("role", ["worker", "migrate"])
+def test_settings_allow_worker_and_migrate_without_secret_key(monkeypatch, role):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    s = Settings(
+        _env_file=None,
+        SERVICE_ROLE=role,
+        APP_ENV="production",
+        DATABASE_URL="postgresql+asyncpg://x/y",
+        REDIS_URL="redis://x",
+        CELERY_BROKER_URL="redis://x",
+        CELERY_RESULT_BACKEND="redis://x",
+    )
+    assert s.SERVICE_ROLE == role
+    assert s.SECRET_KEY == ""
+
+
+@pytest.mark.unit
+def test_settings_require_secret_key_for_api_role(monkeypatch):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(
+            _env_file=None,
+            SERVICE_ROLE="api",
+            APP_ENV="development",
+            DATABASE_URL="postgresql+asyncpg://x/y",
+            REDIS_URL="redis://x",
+            CELERY_BROKER_URL="redis://x",
+            CELERY_RESULT_BACKEND="redis://x",
+        )
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "path",
