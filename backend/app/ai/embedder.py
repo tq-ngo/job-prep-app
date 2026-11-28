@@ -1,46 +1,48 @@
 import logging
-from google import genai
+import math
+from google.genai import types
 from app.config import settings
+from app.ai.gemini_client import _classify, _get_client
 
 logger = logging.getLogger(__name__)
-# Reuse the shared per-event-loop client. A module-level genai.Client binds
-# its async transport to the first event loop that touches it, and Celery's
-# async_to_sync creates a new loop per task -> "Event loop is closed" on the
-# second and every later task.
-from app.ai.gemini_client import _classify, _get_client
+
+
+def _l2_normalize(values: list[float]) -> list[float]:
+    """L2-normalize a truncated Matryoshka embedding for cosine similarity."""
+    norm = math.sqrt(sum(v * v for v in values))
+    if norm <= 0.0:
+        return list(values)
+    return [v / norm for v in values]
 
 
 async def generate_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
     """
-    Generate a 768-dimensional text embedding using text-embedding-004.
-    
-    What is an embedding?
-    A vector is a list of numbers that represents the "meaning" of text
-    in a high-dimensional space. Two pieces of text with similar meaning
-    will have vectors that are close together (high cosine similarity).
-    
-    This is what powers "find jobs similar to my resume":
-    1. Embed the user's resume
-    2. Find job embeddings nearest to the resume embedding
-    3. Those are the most semantically relevant jobs
-    
-    text-embedding-004 produces 768-dimensional vectors.
-    (768 floats × 4 bytes each = ~3KB per embedding)
+    Generate a 768-dimensional L2-normalized text embedding using
+    settings.EMBEDDING_MODEL (default: gemini-embedding-001).
 
-    `task_type` is RETRIEVAL_DOCUMENT for the jobs being indexed and
-    RETRIEVAL_QUERY for a search query matched against them; the model
-    embeds the two sides asymmetrically.
+    `output_dimensionality` is pinned to settings.EMBEDDING_DIMENSIONS (768)
+    so vectors match the PostgreSQL pgvector `Vector(768)` column even on
+    models whose native output is 3072-dim. Truncated embeddings are
+    L2-normalized per Google's embedding documentation.
 
-    SDK errors are mapped onto the Gemini error taxonomy, so a 429 surfaces
-    as GeminiTransientError (with Google's retry delay) and a bad key as
-    GeminiConfigError, the same as the generation calls.
+    `task_type` is RETRIEVAL_DOCUMENT for indexed jobs and RETRIEVAL_QUERY
+    for search queries.
     """
+    dims = settings.EMBEDDING_DIMENSIONS
     try:
         response = await _get_client().aio.models.embed_content(
             model=settings.EMBEDDING_MODEL,
             contents=text[:8000],  # Model has an input token limit
-            config={"task_type": task_type},
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=dims,
+            ),
         )
     except Exception as exc:
         raise _classify(exc) from exc
-    return response.embeddings[0].values
+    values = list(response.embeddings[0].values)
+    if len(values) != dims:
+        raise RuntimeError(
+            f"Expected {dims}-dim embedding from {settings.EMBEDDING_MODEL!r}, got {len(values)}"
+        )
+    return _l2_normalize(values)

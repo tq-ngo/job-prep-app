@@ -47,15 +47,32 @@ services:
     logging: *logging
     mem_limit: 256m
     networks: [app]
-    # Redis had no password: anything that could reach it (any container on
-    # the network, or a host-published port) could read sessions, the JWT
-    # denylist and the Celery queue. The password comes from the container
-    # environment, so it isn't written into the compose command line.
+    # Durable state & queue Redis: holds JWT denylist/family revocations, OAuth
+    # state, locks, SSE stream, and Celery broker/backend. Uses noeviction so
+    # security keys can never be evicted by cache pressure.
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
-    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    command: ["sh", "-c", "exec redis-server --appendonly yes --maxmemory 192mb --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: job-prep-redis-cache
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 192m
+    networks: [app]
+    # Evictable cache Redis: holds jobs_count, popular_skills, public:stats,
+    # query embeddings, user profile cache, and dedup ZSETs with LRU eviction.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru --requirepass \"$$REDIS_PASSWORD\""]
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 5s
@@ -71,10 +88,13 @@ services:
       # used to pass --forwarded-allow-ips=*, so any caller that reached
       # uvicorn directly could claim any client IP and scheme.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.30.0.10}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      redis-cache:
         condition: service_healthy
     # Migrations run here (single owner) before uvicorn starts. Celery
     # services deliberately do NOT migrate, to avoid concurrent upgrades.
@@ -85,10 +105,14 @@ services:
     <<: *backend-image
     container_name: job-prep-celery-worker
     mem_limit: 1g
+    environment:
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      redis-cache:
         condition: service_healthy
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 -Q default,scraping,ai
     # Replaces the image's HTTP healthcheck, which a worker can't answer.

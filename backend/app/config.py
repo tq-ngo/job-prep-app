@@ -15,12 +15,16 @@ class Settings(BaseSettings):
         description="PostgreSQL connection URL (asyncpg dialect)",
     )
     REDIS_URL: str = Field(...)
+    # Dedicated evictable cache Redis (allkeys-lru). Falls back to REDIS_URL
+    # in local dev/tests when unset so single-Redis setups keep working.
+    REDIS_CACHE_URL: str = Field(default="")
     CELERY_BROKER_URL: str = Field(...)
     CELERY_RESULT_BACKEND: str = Field(...)
 
     GEMINI_API_KEY: str = Field(default="")
     GEMINI_MODEL: str = Field(default="gemini-3.8-flash")
-    EMBEDDING_MODEL: str = Field(default="text-embedding-004")
+    EMBEDDING_MODEL: str = Field(default="gemini-embedding-001")
+    EMBEDDING_DIMENSIONS: int = Field(default=768, ge=1)
     # Celery rate limit for enrich_job_with_ai. Each job costs TWO Gemini
     # calls (skill extraction + embedding).
     #
@@ -54,7 +58,7 @@ class Settings(BaseSettings):
     # bound the damage from a leaked one; the refresh token carries longevity.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
-    USER_PROFILE_CACHE_TTL_SECONDS: int = Field(default=900, ge=0)
+    USER_PROFILE_CACHE_TTL_SECONDS: int = Field(default=120, ge=0)
 
     # ── Cookies ──────────────────────────────────────────────────────────
     # Tokens move from localStorage (readable by any XSS) into HttpOnly
@@ -79,20 +83,29 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_secure_cookies_off_localhost(self) -> "Settings":
+        self.APP_ENV = (self.APP_ENV or "development").strip().lower()
+        non_dev = self.APP_ENV != "development"
+
         # A Secure=false session cookie on an HTTPS site is sent over any
         # plain-HTTP request to the same host (e.g. a downgrade), so refuse to
         # boot rather than run that way silently.
         if not self.COOKIE_SECURE and (
-            self.APP_ENV == "production" or self.FRONTEND_URL.startswith("https://")
+            non_dev or self.FRONTEND_URL.startswith("https://")
         ):
             raise ValueError(
-                "COOKIE_SECURE must be true when APP_ENV=production or "
+                "COOKIE_SECURE must be true when APP_ENV is non-development or "
                 "FRONTEND_URL is https://"
             )
         # HS256 keys shorter than the hash output are brute-forceable
         # (RFC 7518 §3.2), and the same key now also signs-checks at the edge.
-        if self.APP_ENV == "production" and len(self.SECRET_KEY) < 32:
-            raise ValueError("SECRET_KEY must be at least 32 characters in production")
+        if non_dev and (
+            len(self.SECRET_KEY) < 32
+            or "change_me" in self.SECRET_KEY.lower()
+            or len(set(self.SECRET_KEY)) < 8
+        ):
+            raise ValueError(
+                "SECRET_KEY must be a high-entropy secret of at least 32 characters off development"
+            )
 
         # Credentialed CORS with a wildcard makes Starlette echo back any
         # Origin, so every site on the internet could make cookie-carrying
@@ -112,12 +125,16 @@ class Settings(BaseSettings):
         return self
 
     @property
+    def effective_redis_cache_url(self) -> str:
+        return self.REDIS_CACHE_URL.strip() or self.REDIS_URL
+
+    @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     @property
     def is_production(self) -> bool:
-        return self.APP_ENV == "production"
+        return (self.APP_ENV or "").strip().lower() == "production"
 
     @property
     def google_oauth_configured(self) -> bool:
