@@ -59,8 +59,8 @@ export default function LoginForm({
 
   return (
     <AuthCard
-      title="Welcome back"
-      subtitle="Sign in to your JobPrep account"
+      title="Sign in to JobPrep"
+      subtitle="Access the live internship feed and your tracked skills"
       footer={
         <>
           Don&apos;t have an account?{" "}
@@ -88,7 +88,7 @@ export default function LoginForm({
           <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         <Button type="submit" variant="filled" size="lg" block loading={isLoading}>
-          {isLoading ? "Signing in..." : "Sign In"}
+          {isLoading ? "Signing in…" : "Sign In"}
         </Button>
       </form>
     </AuthCard>

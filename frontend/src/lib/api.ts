@@ -70,10 +70,16 @@ apiClient.interceptors.response.use(
         }
         await refreshPromise;
         return apiClient(original);
-      } catch {
-        // Never redirect if this was an identity check (/auth/me) or if we are already
-        // on a public or auth route (/login, /register, /).
-        if (!isMeCall && typeof window !== "undefined") {
+      } catch (refreshError) {
+        const refreshStatus = (refreshError as { response?: { status?: number } })?.response?.status;
+        // Only redirect to /login when /auth/refresh actually rejects the session
+        // (401/403). Transient 5xx/429/network errors should surface inline so
+        // the user can retry without losing their current state.
+        if (
+          (refreshStatus === 401 || refreshStatus === 403) &&
+          !isMeCall &&
+          typeof window !== "undefined"
+        ) {
           const currentPath = window.location.pathname;
           if (
             currentPath !== "/login" &&

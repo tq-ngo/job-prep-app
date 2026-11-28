@@ -55,7 +55,17 @@ export function useScrapePolling(taskId: string | null, handlers: ScrapePollingH
         networkErrors = 0;
 
         if (result.status === "SUCCESS") {
+          const payload = result.result as { status?: string; error?: string; message?: string } | null;
+          if (payload && typeof payload === "object" && (payload.status === "failed" || payload.status === "error")) {
+            const detail = payload.error || payload.message || "Unknown error";
+            fail(`The task failed: ${detail}`);
+            return;
+          }
           handlersRef.current.onSuccess(result.result);
+          return;
+        }
+        if (result.status === "PARTIAL_FAILURE") {
+          fail(result.error ? `The task partially failed: ${result.error}` : "Some items could not be processed.");
           return;
         }
         if (result.status === "FAILURE" || result.status === "REVOKED") {

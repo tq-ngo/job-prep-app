@@ -1,113 +1,100 @@
 "use client";
 
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { Plus, X } from "lucide-react";
-import { authApi, type User } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { authApi } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/errors";
-import { ME_QUERY_KEY, useAuth } from "@/context/AuthContext";
-import Badge from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import Field from "@/components/ui/Field";
-import { Input } from "@/components/ui/Input";
+import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
 
-// Mirror the API's limits (schemas/user.py) so mistakes are caught here,
-// with a specific message, instead of as a generic 422.
-const MAX_SKILLS = 30;
-const MAX_SKILL_LENGTH = 40;
-
-/**
- * Add and remove tracked skills (live job alerts are matched against them).
- * Shared by the desktop popover and the mobile menu.
- *
- * Saves are optimistic: the change shows at once, and is rolled back with an
- * error if the server rejects it. Saves used to fail silently, leaving the
- * list showing a change that hadn't been stored.
- */
 export default function SkillsEditor({ autoFocus = false }: { autoFocus?: boolean }) {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
+  const { user, refreshUser } = useAuth();
   const [input, setInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const skills = user?.skills ?? [];
 
-  const save = async (next: string[]) => {
-    const previous = queryClient.getQueryData<User | null>(ME_QUERY_KEY);
-    if (!previous) return false;
-    setError(null);
+  const persist = async (next: string[]) => {
     setSaving(true);
-    queryClient.setQueryData<User>(ME_QUERY_KEY, { ...previous, skills: next });
+    setError(null);
     try {
-      // The server normalizes (lowercases, de-duplicates); keep its version.
-      queryClient.setQueryData(ME_QUERY_KEY, await authApi.updateSkills(next));
-      return true;
+      await authApi.updateSkills(next);
+      await refreshUser();
     } catch (err) {
-      queryClient.setQueryData(ME_QUERY_KEY, previous);
-      setError(apiErrorMessage(err, { fallback: "Couldn't save your skills. Try again." }));
-      return false;
+      setError(apiErrorMessage(err, { fallback: "Couldn't save your skills. Please try again." }));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleAdd = async (e: React.FormEvent) => {
+  const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
-    const skill = input.trim();
-    if (!skill) return;
-    if (skill.length > MAX_SKILL_LENGTH) return setError(`Skills can be at most ${MAX_SKILL_LENGTH} characters.`);
-    if (skills.some((s) => s.toLowerCase() === skill.toLowerCase())) return setError(`“${skill}” is already in your list.`);
-    if (skills.length >= MAX_SKILLS) return setError(`You can track up to ${MAX_SKILLS} skills.`);
-    if (await save([...skills, skill])) setInput("");
+    const cleaned = input.trim();
+    if (!cleaned) return;
+    if (skills.some((s) => s.toLowerCase() === cleaned.toLowerCase())) {
+      setInput("");
+      return;
+    }
+    const next = [...skills, cleaned];
+    setInput("");
+    await persist(next);
+  };
+
+  const handleRemove = async (skill: string) => {
+    await persist(skills.filter((s) => s !== skill));
   };
 
   return (
-    <div>
+    <div className="space-y-3">
+      <form onSubmit={handleAdd} className="flex items-center gap-2">
+        <Input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Add a skill (e.g. Python)"
+          aria-label="Add a skill"
+          autoFocus={autoFocus}
+          disabled={saving}
+          className="flex-1"
+          inputClassName="h-9 text-body-small"
+        />
+        <Button type="submit" variant="tonal" size="sm" disabled={saving || !input.trim()} loading={saving}>
+          <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
+          <span>Add</span>
+        </Button>
+      </form>
+
+      {error && (
+        <p role="alert" className="text-body-small text-error">
+          {error}
+        </p>
+      )}
+
       {skills.length > 0 ? (
-        <ul aria-label="Tracked skills" className="flex flex-wrap gap-1.5">
+        <ul aria-label="Tracked skills list" className="flex flex-wrap gap-1.5">
           {skills.map((skill) => (
-            <li key={skill}>
-              <Badge variant="skill" className="pr-0.5">
-                {skill}
-                {/* 24px target (WCAG 2.5.8), pulled into the badge's line height. */}
-                <button
-                  type="button"
-                  onClick={() => save(skills.filter((s) => s !== skill))}
-                  disabled={saving}
-                  aria-label={`Remove ${skill}`}
-                  className="-my-1 inline-flex h-6 w-6 items-center justify-center rounded-full hover:bg-on-primary-container/12 disabled:cursor-not-allowed"
-                >
-                  <X size={11} aria-hidden="true" />
-                </button>
-              </Badge>
+            <li
+              key={skill}
+              className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-xs bg-surface-container-low border border-outline-variant font-mono text-label-small text-on-surface"
+            >
+              <span>{skill}</span>
+              <button
+                type="button"
+                onClick={() => handleRemove(skill)}
+                disabled={saving}
+                aria-label={`Remove ${skill}`}
+                className="w-6 h-6 inline-flex items-center justify-center rounded-xs text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 disabled:opacity-50 transition-colors cursor-pointer"
+              >
+                <X size={12} strokeWidth={1.5} aria-hidden="true" />
+              </button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-body-small text-on-surface-variant">No skills yet. Add the technologies you want job alerts for.</p>
-      )}
-
-      <form onSubmit={handleAdd} className="mt-3 flex gap-2 items-start">
-        <Field label="Add a skill" labelVisible={false} className="flex-1">
-          <Input
-            size="sm"
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              setError(null);
-            }}
-            placeholder="Add a skill, e.g. React"
-            autoFocus={autoFocus}
-            maxLength={MAX_SKILL_LENGTH + 10}
-          />
-        </Field>
-        <Button type="submit" size="sm" variant="tonal" loading={saving} icon={<Plus size={13} aria-hidden="true" />}>
-          Add
-        </Button>
-      </form>
-      {error && (
-        <p role="alert" className="mt-2 text-body-small font-medium text-error">
-          {error}
+        <p className="text-body-small text-on-surface-variant">
+          No skills tracked yet. Add languages or frameworks to prioritize alerts.
         </p>
       )}
     </div>

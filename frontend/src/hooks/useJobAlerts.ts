@@ -59,7 +59,7 @@ export function useJobAlerts({ skills = "", onEvent }: UseJobAlertsOptions = {})
         await authApi.refresh();
       } catch (err: unknown) {
         const status = (err as { response?: { status?: number } })?.response?.status;
-        if (status === 401) sessionAlive = false;
+        if (status === 401 || status === 403) sessionAlive = false;
         // Anything else (network down, 5xx): keep reconnecting with backoff.
       }
     };

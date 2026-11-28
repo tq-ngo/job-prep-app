@@ -45,7 +45,7 @@ export default function RegisterForm({ nextPath }: { nextPath: string }) {
   return (
     <AuthCard
       title="Create Account"
-      subtitle="Join JobPrep to track job listings"
+      subtitle="Follow hourly SWE internship listings and tech news"
       footer={
         <>
           Already have an account?{" "}
@@ -77,7 +77,7 @@ export default function RegisterForm({ nextPath }: { nextPath: string }) {
           />
         </Field>
         <Button type="submit" variant="filled" size="lg" block loading={isLoading}>
-          {isLoading ? "Creating account..." : "Create Account"}
+          {isLoading ? "Creating account…" : "Create Account"}
         </Button>
       </form>
     </AuthCard>

@@ -1,30 +1,25 @@
 "use client";
 
+import { Moon, Sun } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { Sun, Moon } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { cn } from "@/components/ui/cn";
 
-/**
- * Both icons are rendered and CSS (`dark:` bound to the <html> class) shows
- * the right one, so the server HTML is already correct. The toggle used to
- * render an invisible placeholder until mount and only then pick an icon.
- */
-export default function ThemeToggle({ className = "" }: { className?: string }) {
+export default function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
+  const isDark = theme === "dark";
 
   return (
-    <Button
-      variant="outlined"
-      size="icon"
+    <button
+      type="button"
       onClick={toggleTheme}
-      aria-label="Dark mode"
-      aria-pressed={theme === "dark"}
-      title="Toggle dark mode"
-      className={cn("transition-transform active:scale-95", className)}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className="w-10 h-10 inline-flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 transition-colors cursor-pointer"
     >
-      <Moon size={15} aria-hidden="true" className="text-on-surface transition-transform hover:-rotate-12 dark:hidden" />
-      <Sun size={15} aria-hidden="true" className="text-primary transition-transform hover:rotate-45 hidden dark:block" />
-    </Button>
+      {isDark ? (
+        <Sun size={18} strokeWidth={1.5} aria-hidden="true" />
+      ) : (
+        <Moon size={18} strokeWidth={1.5} aria-hidden="true" />
+      )}
+    </button>
   );
 }
