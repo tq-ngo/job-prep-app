@@ -11,9 +11,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Patch OS package security updates (e.g. libzstd1) in the slim base image.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --only-binary=:all: -r requirements.txt
+    pip install --only-binary=:all: -r requirements.txt \
+ && python -m pip uninstall -y setuptools wheel pip
 
 # Run as a non-root user. Application source stays owned by root:root so
 # runtime processes (API and Celery workers) cannot modify code in /app.
