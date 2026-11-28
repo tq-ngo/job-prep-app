@@ -5,17 +5,20 @@
    inline script in layout.tsx), so bind the variant to that class. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ── Design System Architecture: Google Material Design 3 (M3) ──────────────
+/* ── Design System Architecture: Hybrid Material Design 3 (M3) ────────────
    JobPrep implements Google Material Design 3 strictly via Tailwind CSS v4
    `@theme` tokens (no external UI libraries like @mui/material).
 
    - Tonal Palettes: Light and dark M3 color roles derived from Google Tech
      Blue (#0b57d0), surface container hierarchy (lowest -> highest), and
      WCAG 2.1 AA-compliant foreground/container pairings.
-   - Shape Scale: M3 corner radii (`rounded-xs` 4px -> `rounded-full`).
-   - Type Scale: M3 typography roles (`text-display-*`, `text-headline-*`,
-     `text-title-*`, `text-body-*`, `text-label-*`, plus `text-2xs`).
-   - Elevation: M3 shadow levels (`shadow-level-1`..`shadow-level-3`).
+   - Hybrid Shape Scale: `rounded-full` for primary actions/nav pills,
+     `rounded-sm` (8px) for inputs/filters, `rounded-xs` (4px) for tags.
+   - Type Scale: Two self-hosted fonts (Plus Jakarta Sans + Fira Code) across
+     M3 typography roles (`text-display-*`, `text-headline-*`, `text-title-*`,
+     `text-body-*`, `text-label-*`, plus `text-2xs`).
+   - Elevation: M3 shadow levels (`shadow-level-1`..`shadow-level-3`, omitted
+     in dark mode in favor of tonal surface hierarchy).
 
    Every foreground/background pair is verified by `npm run check:contrast`
    (scripts/contrast-pairs.mjs, also run as a unit test). Never hardcode hex
@@ -55,23 +58,8 @@
   --error-container: #f9dedc;
   --on-error-container: #410e0b;
 
-  /* ── Legacy Compatibility Aliases (preserved until TSX migration) ────── */
-  --background: #f8fafd;
-  --foreground: #2d2e30;
-  --foreground-heading: #1f1f1f;
-  --foreground-muted: #444746;
-  --foreground-subtle: #5f6368;
-  --tech-blue: #0b57d0;
-  --tech-blue-hover: #0842a0;
-  --amber-clay: #b45309;
-  /* #b45309 is < 4.5:1 on its own 10% tint, so tinted badges and alerts
-     use this darker clay instead. */
-  --amber-clay-on-tint: #9a4a0a;
-  --border-soft: #c4c7c5;
-  --border-strong: #747775;
-  --focus-ring: #0b57d0;
-  --neutral-soft: #f0f4f9;
-  --surface-container: #e9eef6;
+  /* ── Shared Layout Dimension ─────────────────────────────────────────── */
+  --app-nav-height: 3.5rem;
 }
 
 .dark {
@@ -106,23 +94,6 @@
   --on-error: #601410;
   --error-container: #8c1d18;
   --on-error-container: #f9dedc;
-
-  /* ── Legacy Compatibility Aliases (preserved until TSX migration) ────── */
-  --background: #131314;
-  --foreground: #d2d4d3;
-  --foreground-heading: #e3e3e3;
-  /* Muted sits between body text and subtle to preserve dark-mode hierarchy. */
-  --foreground-muted: #c4c7c5;
-  --foreground-subtle: #9aa0a6;
-  --tech-blue: #a8c7fa;
-  --tech-blue-hover: #d3e3fd;
-  --amber-clay: #f0a03c;
-  --amber-clay-on-tint: #f0a03c;
-  --border-soft: #444746;
-  --border-strong: #8e918f;
-  --focus-ring: #a8c7fa;
-  --neutral-soft: #1b1b1d;
-  --surface-container: #202124;
 }
 
 @theme inline {
@@ -155,41 +126,23 @@
   --color-error-container: var(--error-container);
   --color-on-error-container: var(--on-error-container);
 
-  /* ── Legacy Color Role Utilities ─────────────────────────────────────── */
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-warm-ivory: var(--background);
-  --color-slate-ink: var(--foreground-heading);
-  --color-tech-blue: var(--tech-blue);
-  --color-tech-blue-hover: var(--tech-blue-hover);
-  --color-amber-clay: var(--amber-clay);
-  --color-amber-clay-on-tint: var(--amber-clay-on-tint);
-  --color-slate-soft: var(--border-soft);
-  --color-border-strong: var(--border-strong);
-  --color-focus-ring: var(--focus-ring);
-  --color-foreground-muted: var(--foreground-muted);
-  --color-foreground-subtle: var(--foreground-subtle);
-  --color-neutral-soft: var(--neutral-soft);
-
-  /* next/font exposes its faces as --font-jakarta/--font-lora/--font-fira.
-     Keeping distinct @theme font names avoids cyclic self-references. */
+  /* next/font exposes its faces as --font-jakarta and --font-fira. */
   --font-sans: var(--font-jakarta), system-ui, sans-serif;
-  --font-serif: var(--font-lora), Georgia, serif;
   --font-mono: var(--font-fira), ui-monospace, monospace;
 
-  --animate-fadeSlideIn: fadeSlideIn 0.3s cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-fadeSlideIn: fadeSlideIn 0.2s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 /* ── M3 Type, Shape, Elevation & Layout Scale Tokens ────────────────────── */
 @theme {
-  /* M3 Type Scale */
-  --text-display-large: 3.5625rem;
+  /* M3 Type Scale (negative tracking reserved for >= 40px display headings) */
+  --text-display-large: 3.5rem;
   --text-display-large--line-height: 4rem;
-  --text-display-large--letter-spacing: -0.015625rem;
+  --text-display-large--letter-spacing: -0.025em;
 
-  --text-display-medium: 2.8125rem;
+  --text-display-medium: 2.75rem;
   --text-display-medium--line-height: 3.25rem;
-  --text-display-medium--letter-spacing: 0rem;
+  --text-display-medium--letter-spacing: -0.02em;
 
   --text-display-small: 2.25rem;
   --text-display-small--line-height: 2.75rem;
@@ -213,72 +166,61 @@
 
   --text-title-medium: 1rem;
   --text-title-medium--line-height: 1.5rem;
-  --text-title-medium--letter-spacing: 0.009375rem;
+  --text-title-medium--letter-spacing: 0rem;
 
   --text-title-small: 0.875rem;
   --text-title-small--line-height: 1.25rem;
-  --text-title-small--letter-spacing: 0.00625rem;
+  --text-title-small--letter-spacing: 0rem;
 
   --text-body-large: 1rem;
   --text-body-large--line-height: 1.5rem;
-  --text-body-large--letter-spacing: 0.03125rem;
+  --text-body-large--letter-spacing: 0rem;
 
   --text-body-medium: 0.875rem;
   --text-body-medium--line-height: 1.25rem;
-  --text-body-medium--letter-spacing: 0.015625rem;
+  --text-body-medium--letter-spacing: 0rem;
 
   --text-body-small: 0.75rem;
   --text-body-small--line-height: 1rem;
-  --text-body-small--letter-spacing: 0.025rem;
+  --text-body-small--letter-spacing: 0rem;
 
   --text-label-large: 0.875rem;
   --text-label-large--line-height: 1.25rem;
-  --text-label-large--letter-spacing: 0.00625rem;
+  --text-label-large--letter-spacing: 0rem;
 
   --text-label-medium: 0.75rem;
   --text-label-medium--line-height: 1rem;
-  --text-label-medium--letter-spacing: 0.03125rem;
+  --text-label-medium--letter-spacing: 0rem;
 
   --text-label-small: 0.6875rem;
   --text-label-small--line-height: 1rem;
-  --text-label-small--letter-spacing: 0.03125rem;
+  --text-label-small--letter-spacing: 0rem;
 
-  /* `text-2xs`: compact mono labels and pills. */
+  /* `text-2xs`: compact mono metadata tags. */
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
 
   /* M3 Shape Scale */
-  --radius-xs: 0.25rem;     /* 4px */
-  --radius-sm: 0.5rem;      /* 8px */
-  --radius-md: 0.75rem;     /* 12px */
-  --radius-lg: 1rem;        /* 16px */
-  --radius-xl: 1.75rem;     /* 28px */
-  --radius-full: 9999px;    /* pills, chips, FABs */
+  --radius-xs: 0.25rem;     /* 4px — metadata tags */
+  --radius-sm: 0.5rem;      /* 8px — inputs, filters */
+  --radius-md: 0.75rem;     /* 12px — menus, metric cards */
+  --radius-lg: 1rem;        /* 16px — cards, panels */
+  --radius-xl: 1.5rem;      /* 24px — showcase frames */
+  --radius-full: 9999px;    /* pills, primary actions */
 
-  /* Legacy Shape Aliases */
-  --radius-control: 0.5rem;
-  --radius-card: 0.75rem;
-  --radius-pill: 9999px;
+  /* M3 Elevation Shadows (light mode) */
+  --shadow-level-1: 0 1px 2px 0 rgb(0 0 0 / 0.10), 0 1px 3px 1px rgb(0 0 0 / 0.06);
+  --shadow-level-2: 0 1px 2px 0 rgb(0 0 0 / 0.12), 0 2px 6px 2px rgb(0 0 0 / 0.08);
+  --shadow-level-3: 0 1px 3px 0 rgb(0 0 0 / 0.14), 0 4px 8px 3px rgb(0 0 0 / 0.10);
 
-  /* M3 Elevation Shadows */
-  --shadow-level-1: 0 1px 2px 0 rgb(0 0 0 / 0.14), 0 1px 3px 1px rgb(0 0 0 / 0.08);
-  --shadow-level-2: 0 1px 2px 0 rgb(0 0 0 / 0.16), 0 2px 6px 2px rgb(0 0 0 / 0.10);
-  --shadow-level-3: 0 1px 3px 0 rgb(0 0 0 / 0.18), 0 4px 8px 3px rgb(0 0 0 / 0.12);
-
-  /* Legacy Elevation Aliases */
-  --shadow-card: 0 1px 3px 0 rgb(20 20 19 / 0.06), 0 1px 2px -1px rgb(20 20 19 / 0.04);
-  --shadow-m3-1: 0 1px 3px 1px rgb(20 20 19 / 0.08), 0 1px 2px 0 rgb(20 20 19 / 0.05);
-  --shadow-m3-2: 0 2px 6px 2px rgb(20 20 19 / 0.08), 0 1px 2px 0 rgb(20 20 19 / 0.05);
-  --shadow-pop: 0 12px 32px -8px rgb(20 20 19 / 0.20), 0 4px 12px -2px rgb(20 20 19 / 0.08);
-
-  /* `max-w-app`: the signed-in app's content width (navbar and pages). */
+  /* `max-w-app`: the app's content width (navbar and pages). */
   --container-app: 1500px;
 }
 
 @keyframes fadeSlideIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -296,8 +238,7 @@
   }
 
   /* One visible focus indicator for every focusable element, keyboard
-     only (:focus-visible), >= 3:1 against surfaces. Don't remove it with
-     `outline-none`; adjust the offset if it collides with a neighbour. */
+     only (:focus-visible), >= 3:1 against surfaces. */
   *,
   ::before,
   ::after {
@@ -310,7 +251,7 @@
   }
 }
 
-/* Hide a scrollbar on a horizontally scrolling strip (pill rows). */
+/* Hide a scrollbar on a horizontally scrolling strip. */
 @utility no-scrollbar {
   scrollbar-width: none;
   &::-webkit-scrollbar {
@@ -336,9 +277,7 @@
   background: var(--on-surface-variant);
 }
 
-/* Users who ask the OS for less motion get none: pulses, spins, slide-ins
-   and colour fades all finish instantly. Outside any layer so it beats
-   the utilities that set durations. */
+/* Users who ask the OS for less motion get none. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

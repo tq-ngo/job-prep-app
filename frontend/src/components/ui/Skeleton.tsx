@@ -3,7 +3,13 @@ import { cn } from "./cn";
 
 /** A pulsing placeholder block. Hidden from screen readers; see SkeletonGroup. */
 export default function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
-  return <div aria-hidden="true" style={style} className={cn("animate-pulse rounded-sm bg-surface-container-high", className)} />;
+  return (
+    <div
+      aria-hidden="true"
+      style={style}
+      className={cn("animate-pulse motion-reduce:animate-none rounded-sm bg-surface-container-high", className)}
+    />
+  );
 }
 
 /**

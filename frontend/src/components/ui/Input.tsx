@@ -11,25 +11,27 @@ export type ControlSize = "sm" | "md";
 // Focus uses the global :focus-visible ring, pulled in tight to hug the border.
 const control =
   "w-full bg-surface-container-lowest dark:bg-surface-container-low border border-outline rounded-sm text-on-surface font-sans " +
-  "placeholder:text-on-surface-variant transition-all duration-150 focus-visible:outline-offset-0 " +
+  "placeholder:text-on-surface-variant transition-[background-color,border-color,color] duration-150 focus-visible:outline-offset-0 " +
   "hover:border-on-surface focus:bg-surface-container-lowest dark:focus:bg-surface-container-default focus:border-primary " +
   "aria-invalid:border-error disabled:cursor-not-allowed disabled:bg-surface-container-default disabled:text-on-surface-variant";
 
 const sizes: Record<ControlSize, string> = {
   sm: "h-8 px-3 text-body-small",
-  md: "h-11 px-4 text-body-medium",
+  md: "h-10 px-4 text-body-medium",
 };
 
 type InputProps = Omit<ComponentProps<"input">, "size"> & {
   size?: ControlSize;
   /** Decorative icon inside the left edge (e.g. a search glass). */
   leadingIcon?: ReactNode;
-  /** Pill shape for M3 search bars. */
+  /** Pill shape when explicitly requested; default is Hybrid `rounded-sm`. */
   pill?: boolean;
+  /** Classes applied directly to the `<input>` element (always works, even with `leadingIcon`). */
+  inputClassName?: string;
 };
 
 /** Text input. Inside a <Field> it picks up its id, label and descriptions. */
-export function Input({ size = "md", leadingIcon, pill, className, ...props }: InputProps) {
+export function Input({ size = "md", leadingIcon, pill, className, inputClassName, ...props }: InputProps) {
   const field = useFieldControl();
   const input = (
     <input
@@ -41,6 +43,7 @@ export function Input({ size = "md", leadingIcon, pill, className, ...props }: I
         pill && "rounded-full",
         leadingIcon ? (size === "sm" ? "pl-8" : "pl-10") : undefined,
         !leadingIcon && className,
+        inputClassName,
       )}
     />
   );
@@ -76,7 +79,8 @@ export function Select({ size = "md", className, children, ...props }: SelectPro
         {children}
       </select>
       <ChevronDown
-        size={size === "sm" ? 13 : 16}
+        size={size === "sm" ? 14 : 16}
+        strokeWidth={1.5}
         aria-hidden="true"
         className={cn(
           "pointer-events-none absolute top-1/2 -translate-y-1/2 text-on-surface-variant",
@@ -113,11 +117,11 @@ export function PasswordInput({ size = "md", className, ...props }: Omit<InputPr
         aria-controls={inputId}
         onClick={() => setVisible((v) => !v)}
         className={cn(
-          "absolute top-1/2 -translate-y-1/2 flex items-center justify-center rounded-sm text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12",
-          size === "sm" ? "right-1 h-6 w-7" : "right-1.5 h-8 w-9",
+          "absolute top-1/2 -translate-y-1/2 flex items-center justify-center rounded-sm text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12 transition-colors cursor-pointer",
+          size === "sm" ? "right-1 h-6 w-6" : "right-1.5 h-8 w-8",
         )}
       >
-        {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+        {visible ? <EyeOff size={16} strokeWidth={1.5} aria-hidden="true" /> : <Eye size={16} strokeWidth={1.5} aria-hidden="true" />}
       </button>
     </div>
   );

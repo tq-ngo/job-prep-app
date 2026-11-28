@@ -16,16 +16,16 @@ interface EmptyStateProps {
 export default function EmptyState({ icon, title, description, action, headingLevel = 2, className }: EmptyStateProps) {
   const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
-    <div className={cn("flex flex-col items-center justify-center py-24 text-center", className)}>
+    <div className={cn("flex flex-col items-center justify-center py-20 px-4 text-center", className)}>
       {icon && (
         <div
           aria-hidden="true"
-          className="w-14 h-14 rounded-full bg-primary-container text-on-primary-container border border-primary/20 flex items-center justify-center mb-4 shadow-level-1"
+          className="w-12 h-12 rounded-full bg-surface-container-low text-on-surface-variant border border-outline-variant flex items-center justify-center mb-4"
         >
           {icon}
         </div>
       )}
-      <Heading className="text-title-large font-serif text-on-surface mb-1.5">{title}</Heading>
+      <Heading className="text-title-large font-semibold text-on-surface mb-1.5">{title}</Heading>
       {description && <p className="text-on-surface-variant max-w-sm font-sans text-body-small leading-relaxed">{description}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>

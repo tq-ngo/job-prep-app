@@ -5,17 +5,15 @@ export type CardTone = "default" | "muted" | "elevated" | "outlined" | "filled";
 export type CardPadding = "none" | "sm" | "md" | "lg";
 
 const outlinedStyles = "bg-surface border border-outline-variant";
-const filledStyles = "bg-surface-container-low border border-outline-variant";
-const elevatedStyles = "bg-surface-container-lowest dark:bg-surface-container-default border border-outline-variant shadow-level-1";
+const filledStyles = "bg-surface-container-low";
+const elevatedStyles =
+  "bg-surface-container-lowest dark:bg-surface-container-default shadow-level-1 dark:shadow-none dark:border dark:border-outline-variant";
 
 const tones: Record<CardTone, string> = {
-  // M3 Outlined Card
   default: outlinedStyles,
   outlined: outlinedStyles,
-  // M3 Filled Card
   muted: filledStyles,
   filled: filledStyles,
-  // M3 Elevated Card
   elevated: elevatedStyles,
 };
 
@@ -28,6 +26,8 @@ const paddings: Record<CardPadding, string> = {
 
 interface CardStyle {
   tone?: CardTone;
+  /** Alias for `tone` for ergonomic call sites. */
+  variant?: CardTone;
   padding?: CardPadding;
   /** Hover affordance, for cards that are links or buttons. */
   interactive?: boolean;
@@ -35,19 +35,21 @@ interface CardStyle {
 }
 
 /** The class string, for a card that has to be another element (e.g. an <a>). */
-export function cardClasses({ tone = "default", padding = "md", interactive, className }: CardStyle = {}) {
+export function cardClasses({ tone, variant, padding = "md", interactive, className }: CardStyle = {}) {
+  const resolvedTone = variant ?? tone ?? "default";
   return cn(
-    "rounded-md",
-    tones[tone],
+    "rounded-lg",
+    tones[resolvedTone],
     paddings[padding],
-    interactive && "transition-all duration-200 hover:border-primary/40 hover:shadow-level-2 hover:bg-surface-container-low",
+    interactive &&
+      "transition-[background-color,border-color,box-shadow] duration-150 hover:bg-surface-container-low hover:shadow-level-2 dark:hover:shadow-none dark:hover:border-outline",
     className,
   );
 }
 
 type CardProps = HTMLAttributes<HTMLElement> & CardStyle & { as?: "div" | "section" | "article" | "li" };
 
-/** Bordered surface for grouped content. */
-export default function Card({ as: Tag = "div", tone, padding, interactive, className, ...props }: CardProps) {
-  return <Tag className={cardClasses({ tone, padding, interactive, className })} {...props} />;
+/** Surface container for grouped content. */
+export default function Card({ as: Tag = "div", tone, variant, padding, interactive, className, ...props }: CardProps) {
+  return <Tag className={cardClasses({ tone, variant, padding, interactive, className })} {...props} />;
 }

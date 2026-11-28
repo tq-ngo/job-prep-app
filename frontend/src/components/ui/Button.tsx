@@ -16,16 +16,17 @@ export type ButtonSize = "xs" | "sm" | "md" | "lg" | "icon";
 
 const base =
   "inline-flex items-center justify-center font-sans font-medium rounded-full whitespace-nowrap " +
-  "transition-all duration-150 cursor-pointer disabled:cursor-not-allowed aria-disabled:cursor-not-allowed select-none " +
-  "active:scale-[0.98] disabled:active:scale-100";
+  "transition-[background-color,border-color,color,box-shadow,transform] duration-150 cursor-pointer " +
+  "disabled:cursor-not-allowed aria-disabled:cursor-not-allowed select-none " +
+  "active:scale-[0.98] disabled:active:scale-100 motion-reduce:active:scale-100";
 
 const filledStyles =
-  "bg-primary text-on-primary shadow-level-1 hover:bg-primary-hover hover:shadow-level-2 " +
+  "bg-primary text-on-primary shadow-level-1 dark:shadow-none hover:bg-primary-hover hover:shadow-level-2 dark:hover:shadow-none " +
   "focus-visible:bg-primary-hover active:bg-primary-hover " +
   "disabled:bg-surface-container-highest disabled:text-on-surface-variant disabled:shadow-none";
 
 const tonalStyles =
-  "bg-secondary-container text-on-secondary-container hover:shadow-level-1 hover:bg-primary-container hover:text-on-primary-container " +
+  "bg-secondary-container text-on-secondary-container hover:shadow-level-1 dark:hover:shadow-none hover:bg-primary-container hover:text-on-primary-container " +
   "focus-visible:bg-primary-container focus-visible:text-on-primary-container active:bg-primary-container " +
   "aria-pressed:bg-primary-container aria-pressed:text-on-primary-container " +
   "disabled:bg-surface-container-highest disabled:text-on-surface-variant disabled:shadow-none";
@@ -42,18 +43,13 @@ const textStyles =
   "disabled:text-on-surface-variant disabled:hover:bg-transparent";
 
 const variants: Record<ButtonVariant, string> = {
-  // M3 Filled Button: high-emphasis solid container with elevation
   primary: filledStyles,
   filled: filledStyles,
-  // M3 Filled Tonal Button: medium-emphasis tonal container
   tonal: tonalStyles,
-  // M3 Outlined Button: medium-emphasis bordered container with state layers
   secondary: outlinedStyles,
   outlined: outlinedStyles,
-  // M3 Text Button: low-emphasis flat interaction with state layers
   ghost: textStyles,
   text: textStyles,
-  // M3 Error Tonal Button
   danger:
     "bg-error-container text-on-error-container border border-error/30 hover:bg-error hover:text-on-error " +
     "focus-visible:bg-error focus-visible:text-on-error active:bg-error active:text-on-error " +
@@ -64,7 +60,7 @@ const sizes: Record<ButtonSize, string> = {
   xs: "h-6 px-2.5 gap-1 text-label-small",
   sm: "h-8 px-3.5 gap-1.5 text-label-medium",
   md: "h-10 px-5 gap-2 text-label-large",
-  lg: "h-11 px-6 gap-2.5 text-label-large",
+  lg: "h-12 px-6 gap-2 text-label-large",
   icon: "h-8 w-8 shrink-0",
 };
 
@@ -109,7 +105,7 @@ export function Button({
       className={buttonClasses({ variant, size, block, className })}
       {...props}
     >
-      {loading ? <Spinner size={size === "xs" ? 11 : 14} /> : icon}
+      {loading ? <Spinner size={size === "xs" ? 12 : 14} /> : icon}
       {children}
     </button>
   );

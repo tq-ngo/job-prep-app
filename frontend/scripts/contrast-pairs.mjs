@@ -3,10 +3,8 @@
 // src/__tests__/check-contrast.test.ts, so the two can't drift apart.
 
 // Each pair: [foreground, background, minimum ratio].
-// A colour is a CSS variable name from globals.css (not the utility name:
-// `--border-soft`, not `slate-soft`), or "token/NN" for it at NN% opacity,
-// alpha-composited over the surface it sits on (`background` unless the
-// pair says `on`). That is how Tailwind's `bg-amber-clay/10` renders.
+// A colour is a CSS variable name from globals.css, or "token/NN" for it at
+// NN% opacity alpha-composited over `surface` (or "token/NN@base" over `base`).
 //   4.5 = text (1.4.3 AA)   3 = UI boundaries and focus rings (1.4.11)
 export const PAIRS = [
   // ── M3 On-Surface text hierarchy across all surface tiers ─────────────
@@ -40,6 +38,8 @@ export const PAIRS = [
   ["on-secondary-container", "secondary-container", 4.5],
   ["on-surface", "secondary-container", 4.5],
   ["on-surface-variant", "secondary-container", 4.5],
+  ["on-surface", "primary-container/35", 4.5],
+  ["on-surface-variant", "primary-container/35", 4.5],
   ["on-error", "error", 4.5],
   ["on-error-container", "error-container", 4.5],
   ["error", "surface", 4.5],
@@ -47,11 +47,18 @@ export const PAIRS = [
   ["error", "surface-container-low", 4.5],
   ["error", "surface-container-default", 4.5],
 
-  // ── M3 State-layer overlays (hover 8%, focus-visible 12%) ─────────────
+  // ── M3 State-layer overlays (hover 8%, focus-visible 12%) across tiers ─
   ["on-surface", "on-surface/8", 4.5],
   ["on-surface-variant", "on-surface/8", 4.5],
   ["on-surface", "on-surface/12", 4.5],
   ["on-surface-variant", "on-surface/12", 4.5],
+  ["on-surface", "on-surface/8@surface-container-low", 4.5],
+  ["on-surface-variant", "on-surface/8@surface-container-low", 4.5],
+  ["on-surface", "on-surface/12@surface-container-low", 4.5],
+  ["on-surface-variant", "on-surface/12@surface-container-low", 4.5],
+  ["on-surface", "on-surface/8@surface-container-default", 4.5],
+  ["on-surface-variant", "on-surface/8@surface-container-default", 4.5],
+  ["on-primary-container", "on-primary-container/12@primary-container", 4.5],
   ["primary", "primary/8", 4.5],
   ["primary", "primary/12", 4.5],
 
@@ -65,33 +72,6 @@ export const PAIRS = [
   ["primary", "surface", 3],
   ["primary", "surface-container-low", 3],
   ["primary", "surface-container-default", 3],
-
-  // ── Legacy compatibility pairs (checked until TSX migration) ──────────
-  ["foreground-heading", "background", 4.5],
-  ["foreground", "background", 4.5],
-  ["foreground-muted", "background", 4.5],
-  ["foreground-subtle", "background", 4.5],
-  ["foreground-muted", "neutral-soft", 4.5],
-  ["foreground-subtle", "neutral-soft", 4.5],
-  ["foreground-heading", "neutral-soft", 4.5],
-  ["foreground-heading", "surface-container", 4.5],
-  ["foreground", "surface-container", 4.5],
-  ["foreground-muted", "surface-container", 4.5],
-  ["foreground-heading", "surface-container-high", 4.5],
-  ["foreground", "surface-container-high", 4.5],
-
-  ["amber-clay", "background", 4.5],
-  ["amber-clay-on-tint", "neutral-soft", 4.5],
-
-  ["amber-clay-on-tint", "amber-clay/10", 4.5],
-  ["foreground-heading", "border-soft/40", 4.5],
-
-  ["foreground-subtle", "border-soft/30", 4.5],
-
-  ["border-strong", "background", 3],
-  ["border-strong", "neutral-soft", 3],
-  ["focus-ring", "background", 3],
-  ["focus-ring", "neutral-soft", 3],
 ];
 
 /** `--name: #rrggbb` declarations inside the first `selector { ... }` block. */
@@ -125,12 +105,16 @@ export function composite(top, alpha, bottom) {
   return toHex(t.map((c, i) => c * alpha + b[i] * (1 - alpha)));
 }
 
-/** Resolve "token" or "token/NN" to an opaque hex over `surface`. */
-function resolve(tokens, ref, surface) {
-  const [name, pct] = ref.split("/");
+/** Resolve "token", "token/NN", or "token/NN@base" to an opaque hex. */
+function resolve(tokens, ref, defaultSurface) {
+  const [tokenPart, baseName] = ref.split("@");
+  const [name, pct] = tokenPart.split("/");
   const hex = tokens[name];
   if (!hex) return { missing: name };
-  return { hex: pct ? composite(hex, Number(pct) / 100, surface) : hex };
+  if (!pct) return { hex };
+  const baseHex = baseName ? tokens[baseName] : defaultSurface;
+  if (!baseHex) return { missing: baseName ?? "surface" };
+  return { hex: composite(hex, Number(pct) / 100, baseHex) };
 }
 
 /** Light and dark token maps; dark inherits anything it doesn't redefine. */
@@ -144,7 +128,7 @@ export function evaluate(css, pairs = PAIRS) {
   const results = [];
   for (const [theme, tokens] of Object.entries(themes(css))) {
     for (const [fg, bg, min] of pairs) {
-      const surface = tokens.background;
+      const surface = tokens.surface;
       const back = resolve(tokens, bg, surface);
       const front = back.hex ? resolve(tokens, fg, back.hex) : back;
       if (back.missing || front.missing) {
