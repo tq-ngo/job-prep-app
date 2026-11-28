@@ -22,6 +22,12 @@ JOBS_STREAM_MAXLEN = 10_000
 KIND_CREATED = "created"
 KIND_ENRICHED = "enriched"
 
+NEWS_STREAM = "news:events"
+NEWS_STREAM_MAXLEN = 500
+NEWS_KIND_CREATED = "created"
+NEWS_KIND_SUMMARIZED = "summarized"
+NEWS_KIND_PRUNED = "pruned"
+
 
 async def publish_job_event(redis, payload: dict) -> str:
     """Append an event to the stream. Returns its id."""
@@ -31,6 +37,33 @@ async def publish_job_event(redis, payload: dict) -> str:
         maxlen=JOBS_STREAM_MAXLEN,
         approximate=True,
     )
+
+
+async def publish_news_event(redis, payload: dict) -> str:
+    """Append a news lifecycle event to the news Redis stream."""
+    return await redis.xadd(
+        NEWS_STREAM,
+        {"data": json.dumps(payload)},
+        maxlen=NEWS_STREAM_MAXLEN,
+        approximate=True,
+    )
+
+
+def news_event_payload(article, kind: str) -> dict:
+    """Serialize a NewsArticle row into an SSE event payload."""
+    return {
+        "kind": kind,
+        "id": str(article.id),
+        "title": article.title,
+        "url": article.url,
+        "source_domain": article.source_domain,
+        "published_at": article.published_at.isoformat() if getattr(article, "published_at", None) else None,
+        "scraped_at": article.scraped_at.isoformat() if getattr(article, "scraped_at", None) else None,
+        "summary": article.summary,
+        "categories": list(article.categories or []) if article.categories is not None else None,
+        "tags": list(article.tags or []) if article.tags is not None else None,
+        "enriched_at": article.enriched_at.isoformat() if getattr(article, "enriched_at", None) else None,
+    }
 
 
 def job_event_payload(job, kind: str, skills=None) -> dict:

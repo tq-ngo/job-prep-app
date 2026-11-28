@@ -18,6 +18,12 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def utc_today_start() -> datetime:
+    """Return 00:00:00 UTC of the current calendar day as a timezone-aware datetime."""
+    now = utc_now()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def as_utc(value: datetime | None) -> datetime | None:
     """Attach UTC to a naive datetime, or convert an aware one to UTC.
 

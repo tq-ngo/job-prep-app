@@ -1,23 +1,26 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { Newspaper, RefreshCw } from "lucide-react";
-import { newsApi, type NewsArticle } from "@/lib/api";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Newspaper } from "lucide-react";
+import { newsApi, type NewsArticle, type NewsEvent } from "@/lib/api";
+import { useNewsAlerts } from "@/hooks/useNewsAlerts";
 import Alert from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
+import { cn } from "@/components/ui/cn";
 import EmptyState from "@/components/ui/EmptyState";
 import Skeleton, { SkeletonGroup } from "@/components/ui/Skeleton";
-import Spinner from "@/components/ui/Spinner";
 import AddArticleForm from "@/components/news/AddArticleForm";
 import ArticleCard from "@/components/news/ArticleCard";
-import { useNewsScrape } from "@/components/news/useNewsScrape";
 
 export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initialData?: NewsArticle[]; initialDataUpdatedAt?: number }) {
+  const queryClient = useQueryClient();
+
   const { data: articles, isLoading, isError, refetch } = useQuery({
     queryKey: ["news"],
     queryFn: newsApi.list,
-    // Seeded by the server render, so the first paint already has articles.
+    // Seeded by the server render, so the first paint already has today's articles.
     initialData,
     initialDataUpdatedAt,
     staleTime: 60_000,
@@ -26,9 +29,39 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
       query.state.data?.some((article) => !article.enriched_at) ? 5000 : false,
   });
 
-  const linkedin = useNewsScrape(() => newsApi.triggerLinkedInNews(), {
-    queuedMessage: "Fetching LinkedIn daily headlines…",
-    failureMessage: "Couldn't fetch LinkedIn headlines.",
+  const { connected: sseConnected } = useNewsAlerts({
+    onEvent: useCallback(
+      (event: NewsEvent) => {
+        if (event.kind === "pruned") {
+          queryClient.invalidateQueries({ queryKey: ["news"] });
+          return;
+        }
+        if (event.id && (event.kind === "created" || event.kind === "summarized")) {
+          queryClient.setQueryData<NewsArticle[]>(["news"], (old) => {
+            if (!old) return old;
+            const incoming: NewsArticle = {
+              id: event.id!,
+              title: event.title ?? null,
+              url: event.url ?? "",
+              source_domain: event.source_domain ?? "",
+              published_at: event.published_at ?? null,
+              scraped_at: event.scraped_at ?? new Date().toISOString(),
+              summary: event.summary ?? null,
+              categories: event.categories ?? null,
+              tags: event.tags ?? null,
+              enriched_at: event.enriched_at ?? null,
+            };
+            const exists = old.some((a) => a.id === incoming.id);
+            if (exists) {
+              return old.map((a) => (a.id === incoming.id ? { ...a, ...incoming } : a));
+            }
+            return [incoming, ...old];
+          });
+          queryClient.invalidateQueries({ queryKey: ["news"] });
+        }
+      },
+      [queryClient],
+    ),
   });
 
   const count = articles?.length ?? 0;
@@ -40,38 +73,17 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
           <div>
             <h1 className="text-headline-medium font-semibold text-on-surface tracking-tight">Tech News Radar</h1>
             <p className="font-mono text-label-small text-on-surface-variant mt-1 tabular-nums">
-              {count > 0 ? `${count} article${count !== 1 ? "s" : ""} · Summarized industry coverage` : "Summarized industry coverage"}
+              {count > 0 ? `${count} article${count !== 1 ? "s" : ""} · Today's Google tech news` : "Today's Google tech news"}
             </p>
           </div>
-          <Button
-            variant="filled"
-            size="sm"
-            onClick={() => linkedin.run(undefined).catch(() => {})}
-            loading={linkedin.busy}
-            icon={<RefreshCw size={14} strokeWidth={1.5} aria-hidden="true" />}
+          <span
+            className="inline-flex items-center gap-1.5 font-mono text-label-small px-2.5 py-0.5 rounded-full bg-surface-container-low border border-outline-variant text-on-surface-variant select-none"
+            title={sseConnected ? "Live news updates connected" : "Live news updates disconnected"}
           >
-            {linkedin.busy ? "Fetching…" : "Refresh News"}
-          </Button>
+            <span aria-hidden="true" className={cn("w-1.5 h-1.5 rounded-full", sseConnected ? "bg-primary" : "bg-outline-variant")} />
+            <span>{sseConnected ? "Live" : "Offline"}</span>
+          </span>
         </div>
-
-        {linkedin.progress && (
-          <Alert icon={<Spinner />} className="mb-6">
-            {linkedin.progress}
-          </Alert>
-        )}
-        {linkedin.error && (
-          <Alert
-            variant="error"
-            className="mb-6"
-            action={
-              <Button variant="text" size="sm" onClick={linkedin.dismissError}>
-                Dismiss
-              </Button>
-            }
-          >
-            {linkedin.error}
-          </Alert>
-        )}
 
         <AddArticleForm />
 
@@ -99,12 +111,8 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
         ) : count === 0 ? (
           <EmptyState
             icon={<Newspaper size={20} strokeWidth={1.5} />}
-            title="No articles yet"
-            description={
-              <>
-                Click <strong className="text-primary">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.
-              </>
-            }
+            title="No articles yet today"
+            description="Today's Google tech news updates automatically, or paste any article URL above to summarize it now."
           />
         ) : (
           <div className="space-y-6">

@@ -34,21 +34,35 @@ async def lifespan(app: FastAPI):
     await assert_schema_current()
     await verify_model()
 
-    # Automatically bootstrap initial postings if the database is empty on startup,
-    # guarded by a Redis NX lock so concurrent replicas only enqueue once.
+    # Automatically bootstrap initial postings and today's Google top news if empty,
+    # guarded by Redis NX locks so concurrent replicas only enqueue once.
     try:
+        from app.core.datetime_utils import utc_today_start
         from app.models.job import Job
+        from app.models.news import NewsArticle
         from sqlmodel import select, func
 
         async with AsyncSessionLocal() as session:
-            count = await session.scalar(select(func.count(Job.id)))
-        if count == 0:
+            job_count = await session.scalar(select(func.count(Job.id)))
+            today_news_count = await session.scalar(
+                select(func.count(NewsArticle.id)).where(
+                    NewsArticle.scraped_at >= utc_today_start()
+                )
+            )
+        if job_count == 0:
             redis = await get_redis_pool()
             if await acquire_lock(redis, "bootstrap:initial_github_scrape", 300):
                 logger.info("Jobs table is empty; enqueuing initial GitHub scrape bootstrap...")
                 from app.tasks.job_tasks import scrape_github
 
                 await asyncio.to_thread(scrape_github.delay)
+        if today_news_count == 0:
+            redis = await get_redis_pool()
+            if await acquire_lock(redis, "bootstrap:daily_google_news", 300):
+                logger.info("No news for today; enqueuing daily Google News bootstrap...")
+                from app.tasks.news_tasks import scrape_google_news
+
+                await asyncio.to_thread(scrape_google_news.delay)
     except Exception as exc:
         logger.warning("Could not check or enqueue startup scrape bootstrap: %s", exc)
 

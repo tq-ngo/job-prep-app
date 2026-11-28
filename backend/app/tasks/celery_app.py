@@ -29,7 +29,7 @@ celery_app.conf.update(
         "app.tasks.job_tasks.backfill_descriptions": {"queue": "scraping"},
         "app.tasks.news_tasks.crawl_news_site": {"queue": "scraping"},
         "app.tasks.news_tasks.summarize_article": {"queue": "ai"},
-        "app.tasks.news_tasks.scrape_linkedin_news": {"queue": "scraping"},
+        "app.tasks.news_tasks.scrape_google_news": {"queue": "scraping"},
     },
     
     # Serialization: JSON is readable and cross-language compatible
@@ -109,9 +109,9 @@ celery_app.conf.update(
             "schedule": 60 * 60,
             "kwargs": {"batch_size": 50},
         },
-        # LinkedIn News: crawl top daily headlines at 07:00 UTC
-        "scrape-linkedin-news-daily": {
-            "task": "app.tasks.news_tasks.scrape_linkedin_news",
+        # Google Daily Top News: fetch today's top stories and prune older days at 07:00 UTC
+        "scrape-google-news-daily": {
+            "task": "app.tasks.news_tasks.scrape_google_news",
             "schedule": crontab(hour=7, minute=0),
         },
     },

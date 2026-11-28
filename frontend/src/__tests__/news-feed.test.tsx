@@ -36,18 +36,19 @@ afterEach(() => {
 });
 
 describe("NewsFeed", () => {
-  it("renders the server-seeded articles without refetching", () => {
+  it("renders the server-seeded articles without refetching or a manual refresh button", () => {
     renderFeed();
     expect(screen.getByRole("link", { name: /chipmakers expand ai capacity/i })).toHaveAttribute("href", article.url);
+    expect(screen.queryByRole("button", { name: /refresh news/i })).not.toBeInTheDocument();
     expect(newsApi.list).not.toHaveBeenCalled();
   });
 
-  it("shows an error with Retry, not 'Radar is empty', when the list can't load", async () => {
+  it("shows an error with Retry, not empty state, when the list can't load", async () => {
     vi.mocked(newsApi.list).mockRejectedValue(new Error("offline"));
     const user = renderFeed(null);
 
     expect(await screen.findByText(/couldn't load the news radar/i)).toBeInTheDocument();
-    expect(screen.queryByText("Radar is empty.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/no articles yet today/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(newsApi.list).toHaveBeenCalledTimes(2);
   });
@@ -67,36 +68,21 @@ describe("NewsFeed", () => {
     expect(screen.getByRole("button", { name: "Analyze" })).toBeEnabled();
   });
 
-  it("tracks the two scrapes separately", async () => {
-    vi.spyOn(newsApi, "triggerLinkedInNews").mockResolvedValue({ task_id: "t-linkedin", status: "accepted" });
+  it("tracks user-submitted URL analysis and handles task failure cleanly", async () => {
     vi.spyOn(newsApi, "triggerScrape").mockResolvedValue({ task_id: "t-url" });
-    vi.spyOn(tasksApi, "getStatus").mockImplementation(async (id) =>
-      id === "t-url" ? { status: "SUCCESS", result: null, error: null } : { status: "PENDING", result: null, error: null },
-    );
+    vi.spyOn(tasksApi, "getStatus").mockResolvedValue({
+      status: "FAILURE",
+      result: null,
+      error: "Publisher blocked the request",
+    });
     const user = renderFeed();
-
-    await user.click(screen.getByRole("button", { name: "Refresh News" }));
-    expect(await screen.findByText(/fetching linkedin daily headlines/i)).toBeInTheDocument();
 
     await user.type(screen.getByRole("textbox", { name: "Article URL" }), "https://news.example/new");
     await user.click(screen.getByRole("button", { name: "Analyze" }));
 
-    // The URL task finished; the LinkedIn one is still running and still says so.
-    expect(await screen.findByRole("button", { name: "Analyze" })).toBeEnabled();
-    expect(screen.getByText(/fetching linkedin daily headlines/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Fetching…" })).toBeDisabled();
-  });
-
-  it("reports a failed refresh and resets the button", async () => {
-    vi.spyOn(newsApi, "triggerLinkedInNews").mockResolvedValue({ task_id: "t-1", status: "accepted" });
-    vi.spyOn(tasksApi, "getStatus").mockResolvedValue({ status: "FAILURE", result: null, error: "LinkedIn blocked the request" });
-    const user = renderFeed();
-
-    await user.click(screen.getByRole("button", { name: "Refresh News" }));
-
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't fetch LinkedIn headlines. The task failed: LinkedIn blocked the request");
-    expect(screen.getByRole("button", { name: "Refresh News" })).toBeEnabled();
+    expect(alert).toHaveTextContent("Couldn't analyze that article. The task failed: Publisher blocked the request");
+    expect(screen.getByRole("button", { name: "Analyze" })).toBeEnabled();
     await user.click(within(alert).getByRole("button", { name: "Dismiss" }));
     await act(async () => {});
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

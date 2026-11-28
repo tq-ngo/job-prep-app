@@ -7,7 +7,7 @@ import logging
 import re
 import time
 import uuid
-from typing import Optional
+from typing import Optional, Tuple
 
 from fastapi import APIRouter, Cookie, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -16,7 +16,7 @@ from sqlmodel import select
 
 from app.core.auth_cookies import ACCESS_COOKIE
 from app.core.database import AsyncSessionLocal
-from app.core.events import JOBS_STREAM, KIND_ENRICHED, publish_job_event  # noqa: F401
+from app.core.events import JOBS_STREAM, KIND_ENRICHED, NEWS_STREAM, publish_job_event  # noqa: F401
 from app.core.rate_limit import limiter
 from app.core.redis import create_sse_redis, get_redis_pool
 from app.core.security import TOKEN_TYPE_ACCESS, TokenError, decode_token
@@ -187,24 +187,8 @@ async def job_event_generator(
         await redis.aclose(close_connection_pool=True)
 
 
-@router.get("/jobs/alerts")
-@limiter.limit("30/minute")
-async def stream_job_alerts(
-    request: Request,
-    skills: str = Query("", max_length=2000, description="Comma-separated skills to track"),
-    last_event_id: Optional[str] = Query(
-        None, max_length=64, description="Resume cursor from last received event ID"
-    ),
-    access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
-):
-    """
-    Live job feed authenticated by the HttpOnly access-token cookie.
-
-    NOTE: Deliberately does NOT inject `Depends(get_session)`: in FastAPI
-    >=0.118, yield dependencies stay open until StreamingResponse completes,
-    which held a Postgres connection open for the entire lifetime of every
-    SSE stream on a profile cache miss.
-    """
+async def _verify_sse_caller(access_token: Optional[str]) -> Tuple[dict, str]:
+    """Authenticate an SSE caller, verify active status, and register a stream slot."""
     payload = _authorize(access_token)
     token_ver = payload.get("ver")
     is_revoked, cached_profile = await check_revocation_and_get_profile(payload)
@@ -223,6 +207,114 @@ async def stream_job_alerts(
     stream_id = uuid.uuid4().hex
     if not await _register_stream(await get_redis_pool(), payload["sub"], stream_id):
         raise HTTPException(status_code=429, detail="Too many open live-update streams")
+    return payload, stream_id
+
+
+async def news_event_generator(
+    request: Request,
+    raw_token: str,
+    last_event_id: Optional[str],
+    user_key: str,
+    stream_id: str,
+):
+    """Yield SSE frames from the news Redis stream, resuming after `last_event_id`."""
+    redis = create_sse_redis(SSE_KEEPALIVE_SECONDS)
+    streams_key = _STREAMS_PREFIX + user_key
+    cursor = last_event_id or "$"
+    loop = asyncio.get_running_loop()
+    last_auth_check = loop.time()
+    last_heartbeat = 0.0
+
+    try:
+        yield "retry: 3000\n\n"
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            now = loop.time()
+            if now - last_heartbeat >= SSE_KEEPALIVE_SECONDS:
+                async with redis.pipeline(transaction=False) as pipe:
+                    pipe.zadd(streams_key, {stream_id: time.time()})
+                    pipe.expire(streams_key, _STREAM_STALE_SECONDS)
+                    await pipe.execute()
+                last_heartbeat = now
+
+            if now - last_auth_check > AUTH_RECHECK_SECONDS:
+                try:
+                    payload = decode_token(raw_token, TOKEN_TYPE_ACCESS)
+                    token_ver = payload.get("ver")
+                    is_revoked, cached_profile = await check_revocation_and_get_profile(payload)
+                    if is_revoked:
+                        raise TokenError("revoked")
+                    if cached_profile is not None:
+                        if not cached_profile.is_active:
+                            raise TokenError("user disabled")
+                        if token_ver is not None and cached_profile.token_version != token_ver:
+                            raise TokenError("token version mismatch")
+                    else:
+                        async with _session_factory() as session:
+                            if not await _is_active_user(session, payload["sub"], token_ver):
+                                raise TokenError("user disabled")
+                except TokenError:
+                    logger.info("News SSE closing: token expired or revoked")
+                    yield "event: auth-expired\ndata: {}\n\n"
+                    break
+                last_auth_check = now
+
+            try:
+                entries = await redis.xread(
+                    {NEWS_STREAM: cursor},
+                    count=50,
+                    block=SSE_KEEPALIVE_SECONDS * 1000,
+                )
+            except Exception as exc:
+                logger.warning("News SSE stream read failed: %s", exc)
+                break
+
+            if not entries:
+                yield ": ping\n\n"
+                continue
+
+            for _stream, messages in entries:
+                for message_id, fields in messages:
+                    cursor = message_id
+                    try:
+                        news_data = json.loads(fields["data"])
+                    except (ValueError, KeyError):
+                        logger.warning("Skipping malformed news SSE entry %s", message_id)
+                        continue
+                    yield f"id: {message_id}\nevent: news\ndata: {json.dumps(news_data)}\n\n"
+
+    except asyncio.CancelledError:
+        logger.info("News SSE connection closed by client")
+    finally:
+        try:
+            await redis.zrem(streams_key, stream_id)
+        except Exception:
+            pass
+        await redis.aclose(close_connection_pool=True)
+
+
+@router.get("/jobs/alerts")
+@limiter.limit("30/minute")
+async def stream_job_alerts(
+    request: Request,
+    skills: str = Query("", max_length=2000, description="Comma-separated skills to track"),
+    last_event_id: Optional[str] = Query(
+        None, max_length=64, description="Resume cursor from last received event ID"
+    ),
+    access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
+):
+    """
+    Live job feed authenticated by the HttpOnly access-token cookie.
+
+    NOTE: Deliberately does NOT inject `Depends(get_session)`: in FastAPI
+    >=0.118, yield dependencies stay open until StreamingResponse completes,
+    which held a Postgres connection open for the entire lifetime of every
+    SSE stream on a profile cache miss.
+    """
+    payload, stream_id = await _verify_sse_caller(access_token)
 
     parsed_skills = set(
         [s.strip().lower() for s in skills.split(",") if s.strip()][:MAX_SSE_SKILLS]
@@ -235,6 +327,31 @@ async def stream_job_alerts(
         job_event_generator(
             request, parsed_skills, access_token, effective_last_id, payload["sub"], stream_id
         ),
+        media_type="text/event-stream",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "private, no-cache, no-store",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.get("/news")
+@limiter.limit("30/minute")
+async def stream_news_events(
+    request: Request,
+    last_event_id: Optional[str] = Query(
+        None, max_length=64, description="Resume cursor from last received event ID"
+    ),
+    access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
+):
+    """Live daily news feed authenticated by the HttpOnly access-token cookie."""
+    payload, stream_id = await _verify_sse_caller(access_token)
+    effective_last_id = sanitize_last_event_id(
+        request.headers.get("last-event-id") or last_event_id
+    )
+    return StreamingResponse(
+        news_event_generator(request, access_token, effective_last_id, payload["sub"], stream_id),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",

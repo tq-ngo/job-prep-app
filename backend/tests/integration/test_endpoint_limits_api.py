@@ -124,7 +124,7 @@ async def test_sse_refuses_disabled_user(client: AsyncClient, auth_headers, test
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "path",
-    ["/api/v1/jobs/scrape/github", "/api/v1/news/scrape?url=https://example.com", "/api/v1/news/scrape/linkedin"],
+    ["/api/v1/jobs/scrape/github", "/api/v1/news/scrape?url=https://example.com"],
 )
 async def test_scrape_routes_require_csrf(client: AsyncClient, auth_headers, path):
     res = await client.post(path, cookies=auth_headers["cookies"])  # no X-CSRF-Token

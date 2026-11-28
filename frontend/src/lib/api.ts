@@ -266,6 +266,21 @@ export interface NewsArticle {
   enriched_at: string | null;
 }
 
+export interface NewsEvent {
+  kind: "created" | "summarized" | "pruned";
+  id?: string;
+  title?: string | null;
+  url?: string;
+  source_domain?: string;
+  published_at?: string | null;
+  scraped_at?: string | null;
+  summary?: string | null;
+  categories?: string[] | null;
+  tags?: string[] | null;
+  enriched_at?: string | null;
+  count?: number;
+}
+
 export const newsApi = {
   list: async (): Promise<NewsArticle[]> => {
     const { data } = await apiClient.get("/api/v1/news/");
@@ -273,10 +288,6 @@ export const newsApi = {
   },
   triggerScrape: async (url: string) => {
     const { data } = await apiClient.post("/api/v1/news/scrape", null, { params: { url } });
-    return data;
-  },
-  triggerLinkedInNews: async (): Promise<{ task_id: string; status: string }> => {
-    const { data } = await apiClient.post("/api/v1/news/scrape/linkedin");
     return data;
   },
 };
