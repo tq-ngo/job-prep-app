@@ -56,7 +56,7 @@ async def seed():
                 "apply_url": "https://careers.google.com/jobs/1",
                 "description": "Google is looking for Software Engineer Interns to join our team for Summer 2026.",
                 "is_active": True,
-                "scrape_status": "completed",
+                "scrape_status": "enriched",
                 "posted_at": utc_now(),
             },
             {
@@ -73,7 +73,7 @@ async def seed():
                 "apply_url": "https://janestreet.com/jobs/1",
                 "description": "Jane Street is looking for Quantitative Trading Interns.",
                 "is_active": True,
-                "scrape_status": "completed",
+                "scrape_status": "enriched",
                 "posted_at": utc_now(),
             },
         ]

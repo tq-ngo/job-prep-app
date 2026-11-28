@@ -3,6 +3,7 @@ from app.core.datetime_utils import utc_now
 from typing import Optional, List
 from sqlmodel import Field, SQLModel, Column
 from sqlalchemy import (
+    CheckConstraint,
     JSON,
     ForeignKey,
     Index,
@@ -31,25 +32,32 @@ class Job(SQLModel, table=True):
     # for them.
     __table_args__ = (
         UniqueConstraint("external_id", "source", name="uq_jobs_external_id_source"),
+        CheckConstraint(
+            "canonical_id IS NULL OR canonical_id <> id",
+            name="ck_jobs_no_self_canonical",
+        ),
+        CheckConstraint(
+            "salary_min IS NULL OR salary_max IS NULL OR salary_min <= salary_max",
+            name="ck_jobs_salary_range",
+        ),
+        CheckConstraint(
+            "scrape_status IN ('raw', 'queued', 'enriched', 'failed')",
+            name="ck_jobs_scrape_status",
+        ),
         # The job feed: WHERE is_active AND canonical_id IS NULL
-        # ORDER BY posted_at DESC NULLS LAST, id. Partial on exactly the feed
-        # predicate (the old ix_jobs_active_posted left canonical_id IS NULL
-        # as a heap filter). Trailing `id` matches the pagination tiebreaker
-        # so offset paging is deterministic.
+        # ORDER BY posted_at DESC NULLS LAST, id.
         Index(
             "ix_jobs_feed",
             text("posted_at DESC NULLS LAST"),
             "id",
             postgresql_where=text("is_active AND canonical_id IS NULL"),
         ),
-        # Backs the scrape_status='raw' claim query in process_raw_jobs_batch.
+        # Backs the active-canonical newest-first claim query in process_raw_jobs_batch.
         Index(
             "ix_jobs_scrape_status",
-            "scrape_status",
-            postgresql_where=text("scrape_status = 'raw'"),
+            text("first_seen_at DESC"),
+            postgresql_where=text("scrape_status = 'raw' AND is_active AND canonical_id IS NULL"),
         ),
-        # pg_trgm is installed by the baseline migration but nothing used it,
-        # so the `q` filter's ILIKE '%...%' was a full table scan.
         Index(
             "ix_jobs_title_trgm",
             "title",
@@ -62,16 +70,15 @@ class Job(SQLModel, table=True):
             postgresql_using="gin",
             postgresql_ops={"company": "gin_trgm_ops"},
         ),
-        # Semantic search orders by `embedding <=> :q` (cosine distance);
-        # without an ANN index that was a sequential scan over every vector.
+        # Partial HNSW index over only feed-visible embedded rows so post-filtering
+        # never degrades recall or wastes ef_search budget on inactive/duplicate rows.
         Index(
             "ix_jobs_embedding_hnsw",
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_where=text("is_active AND canonical_id IS NULL AND embedding IS NOT NULL"),
         ),
-        # Backs the reaper (queued AND queued_at < cutoff) and the queue-depth
-        # count in process_raw_jobs_batch.
         Index(
             "ix_jobs_queued",
             "queued_at",
