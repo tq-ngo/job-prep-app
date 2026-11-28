@@ -15,7 +15,7 @@ concurrency:
 jobs:
   e2e:
     name: Playwright E2E Smoke Suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -94,7 +94,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npm install --no-save @playwright/test@1.51.1
+          npm install --no-save @playwright/test@^1.51.1
           npx playwright install --with-deps chromium
 
       - name: Run Playwright E2E tests
