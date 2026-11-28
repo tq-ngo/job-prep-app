@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useCallback, useEffect } from "react";
+import React, { createContext, useContext, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi, User } from "@/lib/api";
@@ -41,6 +41,9 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
   const queryClient = useQueryClient();
 
   const hasInitialUser = initialUser !== undefined;
+  const [initialDataUpdatedAt] = useState<number | undefined>(() =>
+    hasInitialUser ? Date.now() : undefined,
+  );
 
   const {
     data: user,
@@ -59,7 +62,7 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
         throw err;
       }
     },
-    ...(hasInitialUser ? { initialData: initialUser, initialDataUpdatedAt: Date.now() } : {}),
+    ...(hasInitialUser ? { initialData: initialUser, initialDataUpdatedAt } : {}),
     enabled: !hasInitialUser && (typeof window === "undefined" || authApi.hasSessionHint()),
     staleTime: 5 * 60 * 1000,
     retry: false,

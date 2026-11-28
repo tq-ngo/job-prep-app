@@ -170,15 +170,16 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
 
   // ── Selection ──────────────────────────────────────────────────────────
   // With nothing selected, desktop shows the first result without writing to
-  // the URL. Pin that default id per filter/page signature so an SSE prepend
-  // doesn't yank the reader out of the description they're currently viewing.
+  // the URL. Track the first seen job per filter signature during render (same
+  // pattern as SearchBox) so an SSE prepend doesn't yank a reader mid-read and
+  // avoids calling setState inside an effect.
   const filterSignature = JSON.stringify(listParams);
+  const firstJobId = jobs[0]?.id ?? null;
   const [pinnedDefault, setPinnedDefault] = useState<{ sig: string; id: string | null }>({
     sig: filterSignature,
-    id: jobs[0]?.id ?? null,
+    id: firstJobId,
   });
 
-  const firstJobId = jobs[0]?.id ?? null;
   const pinnedStillVisible =
     pinnedDefault.sig === filterSignature &&
     pinnedDefault.id !== null &&
@@ -186,11 +187,9 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
 
   const stableFirstId = pinnedStillVisible ? pinnedDefault.id : firstJobId;
 
-  useEffect(() => {
-    if (pinnedDefault.sig !== filterSignature || (!pinnedStillVisible && pinnedDefault.id !== firstJobId)) {
-      setPinnedDefault({ sig: filterSignature, id: firstJobId });
-    }
-  }, [filterSignature, firstJobId, pinnedDefault.id, pinnedDefault.sig, pinnedStillVisible]);
+  if (pinnedDefault.sig !== filterSignature || (!pinnedStillVisible && pinnedDefault.id !== firstJobId)) {
+    setPinnedDefault({ sig: filterSignature, id: firstJobId });
+  }
 
   const defaultJobId = !activeJobId && isDesktop ? stableFirstId : null;
   const shownId = activeJobId ?? stableFirstId;
