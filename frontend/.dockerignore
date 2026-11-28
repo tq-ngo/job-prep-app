@@ -1,10 +1,8 @@
 # frontend/.dockerignore
 #
-# Files listed here are EXCLUDED from the Docker build context.
-# Docker sends all non-ignored files to the daemon when building.
-# Without .dockerignore, it would send node_modules (~200MB+) every time.
+# Files excluded from the Docker build context.
 
-# Dependencies — the container installs its own via npm ci
+# Dependencies — installed cleanly via npm ci
 node_modules
 
 # Next.js build output — built fresh inside the container
@@ -15,12 +13,10 @@ out
 .git
 .gitignore
 
-# Environment files — secrets never go into the image
+# Environment files — secrets never enter the build context
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
 # Editor config
 .vscode
@@ -36,11 +32,17 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Test output
+# Tests & local tooling artifacts
 coverage
 .nyc_output
+e2e
+playwright.config.ts
+playwright-report
+test-results
+vitest.config.mts
+src/__tests__
 
-# This file itself
+# Build metadata & docs
 Dockerfile
 .dockerignore
 README.md

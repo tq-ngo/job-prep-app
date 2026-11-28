@@ -1,6 +1,6 @@
 # Local development layer, merged automatically by `docker compose up`.
 # Adds what production must not have: host ports on loopback for local
-# tools, the source tree bind-mounted with auto-reload, and Flower.
+# tools, source bind-mounts with auto-reload, and Flower.
 # Production: `docker compose -f docker-compose.yml up -d` skips this file.
 
 services:
@@ -13,42 +13,54 @@ services:
       - "127.0.0.1:6379:6379"
 
   backend:
+    read_only: false
     volumes:
       - ./backend:/app
     ports:
       - "127.0.0.1:8000:8000"
-    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --reload"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--reload"]
 
-  celery-worker:
+  celery-worker-scraping:
+    read_only: false
+    volumes:
+      - ./backend:/app
+
+  celery-worker-ai:
+    read_only: false
     volumes:
       - ./backend:/app
 
   celery-beat:
+    read_only: false
     volumes:
       - ./backend:/app
 
   frontend:
     ports:
       - "127.0.0.1:3000:3000"
+    environment:
+      ENABLE_API_REWRITES: "true"
 
   celery-flower:
-    # Upstream image: flower isn't in backend/requirements.txt, so it
-    # doesn't ship in every app container.
     image: mher/flower:2.0
-    container_name: job-prep-flower
     restart: unless-stopped
-    networks: [app]
-    # Read from the environment rather than passed as --broker / --basic_auth
-    # flags, which put the Redis password and Flower credentials in the
-    # process list and `docker inspect` output. No default credential: the
-    # old fallback admin:jobprep2026 was published in this repo.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    networks: [data, edge]
     environment:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?set CELERY_RESULT_BACKEND in .env}
       FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?set FLOWER_BASIC_AUTH in .env (user:password)}
       FLOWER_PORT: "5555"
-    command: celery flower
+    command: ["celery", "flower"]
     ports:
       - "127.0.0.1:5555:5555"
     depends_on:
-      celery-worker:
+      celery-worker-scraping:
         condition: service_healthy

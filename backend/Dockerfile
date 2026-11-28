@@ -1,10 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # Single stage. Every pinned dependency ships a manylinux wheel for both
-# amd64 and arm64, so the old builder stage (build-essential + libpq-dev,
-# ~200 MB of toolchain layers) only ever repacked wheels. --only-binary
-# makes that an enforced invariant: a dependency that would need a compiler
-# now fails the build instead of silently requiring one.
+# amd64 and arm64, so --only-binary enforces reproducible builds without
+# shipping compilers in the runtime image.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -17,21 +15,24 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --only-binary=:all: -r requirements.txt
 
-# Run as a non-root user.
+# Run as a non-root user. Application source stays owned by root:root so
+# runtime processes (API and Celery workers) cannot modify code in /app.
+# /var/lib/celery is pre-created for the named Beat schedule volume.
 RUN groupadd --system --gid 1001 appuser \
- && useradd --system --uid 1001 --gid appuser appuser
+ && useradd --system --uid 1001 --gid appuser appuser \
+ && mkdir -p /var/lib/celery \
+ && chown appuser:appuser /var/lib/celery
 
-COPY --chown=appuser:appuser . .
+COPY . .
 
 USER appuser
 
 EXPOSE 8000
 
-# Python stdlib instead of curl, so the image needs no apt packages at all.
+# Readiness probe via Python stdlib (verifies Postgres + Redis connectivity).
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=4).status == 200 else 1)"]
 
 # Trusted proxies come from FORWARDED_ALLOW_IPS in the environment (uvicorn
-# reads it natively; compose sets nginx's address). It used to be
-# --forwarded-allow-ips=*, which trusted forwarded headers from anyone.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# reads it natively; compose sets nginx's address).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--timeout-graceful-shutdown", "25"]

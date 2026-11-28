@@ -18,7 +18,8 @@ venv/
 celerybeat-schedule
 celerybeat-schedule.db
 
-# Test / tooling caches
+# Test / tooling caches & test suite
+tests/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

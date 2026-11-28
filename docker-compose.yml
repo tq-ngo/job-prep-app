@@ -1,32 +1,46 @@
 # Production-shaped stack: only nginx publishes a port, nothing is
-# bind-mounted, and every secret is required. Local development layers
-# docker-compose.override.yml on top automatically (`docker compose up`);
-# deploy with `docker compose -f docker-compose.yml up -d` to leave it out.
+# bind-mounted, networks are segmented (edge / internal data / egress),
+# and secrets are scoped strictly to the services that need them.
+# Local development layers docker-compose.override.yml automatically
+# (`docker compose up`); deploy with `docker compose -f docker-compose.yml up -d`.
 
 x-logging: &logging
-  # json-file with no limits grew without bound on a long-running host.
   driver: json-file
   options:
     max-size: "10m"
     max-file: "3"
 
-x-backend-image: &backend-image
+x-hardening: &hardening
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-backend-build: &backend-build
   build:
     context: ./backend
     dockerfile: Dockerfile
-  env_file: .env
-  restart: unless-stopped
   logging: *logging
-  networks: [app]
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: job-prep-postgres
     restart: unless-stopped
     logging: *logging
+    <<: *hardening
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     mem_limit: 1g
-    networks: [app]
+    cpus: 1.5
+    pids_limit: 256
+    shm_size: 256m
+    stop_grace_period: 30s
+    networks: [data]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -42,14 +56,19 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: job-prep-redis
     restart: unless-stopped
     logging: *logging
+    <<: *hardening
+    cap_add:
+      - SETGID
+      - SETUID
     mem_limit: 256m
-    networks: [app]
+    cpus: 0.5
+    pids_limit: 128
+    stop_grace_period: 15s
+    networks: [data]
     # Durable state & queue Redis: holds JWT denylist/family revocations, OAuth
-    # state, locks, SSE stream, and Celery broker/backend. Uses noeviction so
-    # security keys can never be evicted by cache pressure.
+    # state, locks, SSE stream, and Celery broker/backend with noeviction.
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
     command: ["sh", "-c", "exec redis-server --appendonly yes --maxmemory 192mb --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
@@ -63,11 +82,17 @@ services:
 
   redis-cache:
     image: redis:7-alpine
-    container_name: job-prep-redis-cache
     restart: unless-stopped
     logging: *logging
+    <<: *hardening
+    cap_add:
+      - SETGID
+      - SETUID
     mem_limit: 192m
-    networks: [app]
+    cpus: 0.5
+    pids_limit: 128
+    stop_grace_period: 15s
+    networks: [data]
     # Evictable cache Redis: holds jobs_count, popular_skills, public:stats,
     # query embeddings, user profile cache, and dedup ZSETs with LRU eviction.
     environment:
@@ -79,106 +104,250 @@ services:
       timeout: 3s
       retries: 5
 
-  backend:
-    <<: *backend-image
-    container_name: job-prep-backend
-    mem_limit: 512m
+  migrate:
+    <<: [*backend-build, *hardening]
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    networks: [data]
     environment:
-      # Trust X-Forwarded-* only from nginx (fixed address below). The image
-      # used to pass --forwarded-allow-ips=*, so any caller that reached
-      # uvicorn directly could claim any client IP and scheme.
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.30.0.10}
+      SERVICE_ROLE: migrate
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?set CELERY_RESULT_BACKEND in .env}
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-cache:
-        condition: service_healthy
-    # Migrations run here (single owner) before uvicorn starts. Celery
-    # services deliberately do NOT migrate, to avoid concurrent upgrades.
-    # Healthcheck: the image's own (Python urllib; there is no curl).
-    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
+    command: ["alembic", "upgrade", "head"]
 
-  celery-worker:
-    <<: *backend-image
-    container_name: job-prep-celery-worker
-    mem_limit: 1g
+  backend:
+    <<: [*backend-build, *hardening]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 30s
+    networks: [edge, data, egress]
     environment:
+      SERVICE_ROLE: api
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?set CELERY_RESULT_BACKEND in .env}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost/api/v1/auth/google/callback}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      GEMINI_REQUESTS_PER_MINUTE: ${GEMINI_REQUESTS_PER_MINUTE:-4}
+      GEMINI_RATE_LIMIT: ${GEMINI_RATE_LIMIT:-2/m}
+      # Trust X-Forwarded-* only from nginx (fixed address on edge network).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.30.0.10}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       redis-cache:
         condition: service_healthy
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 -Q default,scraping,ai
-    # Replaces the image's HTTP healthcheck, which a worker can't answer.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--timeout-graceful-shutdown", "25"]
+
+  celery-worker-scraping:
+    <<: [*backend-build, *hardening]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    mem_limit: 768m
+    cpus: 1.5
+    pids_limit: 256
+    stop_grace_period: 60s
+    networks: [data, egress]
+    # Scoped env: no SECRET_KEY, GOOGLE_CLIENT_SECRET, or GEMINI_API_KEY.
+    environment:
+      SERVICE_ROLE: worker
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?set CELERY_RESULT_BACKEND in .env}
+      LINKEDIN_LI_AT: ${LINKEDIN_LI_AT:-}
+      GEMINI_RATE_LIMIT: ${GEMINI_RATE_LIMIT:-2/m}
+      GEMINI_REQUESTS_PER_MINUTE: ${GEMINI_REQUESTS_PER_MINUTE:-4}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=3", "--max-tasks-per-child=100", "-Q", "scraping,default", "-n", "scraping@%h"]
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d scraping@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+
+  celery-worker-ai:
+    <<: [*backend-build, *hardening]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 60s
+    networks: [data, egress]
+    # Scoped env: Gemini credentials only; no SECRET_KEY, OAuth secret, or LINKEDIN_LI_AT.
+    environment:
+      SERVICE_ROLE: worker
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?set CELERY_RESULT_BACKEND in .env}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      GEMINI_RATE_LIMIT: ${GEMINI_RATE_LIMIT:-2/m}
+      GEMINI_REQUESTS_PER_MINUTE: ${GEMINI_REQUESTS_PER_MINUTE:-4}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--max-tasks-per-child=100", "-Q", "ai", "-n", "ai@%h"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d ai@$$HOSTNAME --timeout 10 | grep -q pong"]
       interval: 30s
       timeout: 20s
       retries: 3
       start_period: 30s
 
   celery-beat:
-    <<: *backend-image
-    container_name: job-prep-celery-beat
+    <<: [*backend-build, *hardening]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
     mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    stop_grace_period: 15s
+    networks: [data]
+    # Scoped env: scheduler needs only DB/Redis/broker URLs — zero auth, OAuth, AI, or scrape secrets.
+    environment:
+      SERVICE_ROLE: worker
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:?set CELERY_BROKER_URL in .env}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:?set CELERY_RESULT_BACKEND in .env}
+      GEMINI_RATE_LIMIT: ${GEMINI_RATE_LIMIT:-2/m}
+      GEMINI_REQUESTS_PER_MINUTE: ${GEMINI_REQUESTS_PER_MINUTE:-4}
+    volumes:
+      - celerybeat_data:/var/lib/celery
     depends_on:
-      celery-worker:
+      migrate:
+        condition: service_completed_successfully
+      celery-worker-scraping:
         condition: service_healthy
-    # /app belongs to root in the image and beat runs as appuser, so its
-    # schedule file can't live in the working directory (it only worked
-    # before because the source tree was bind-mounted over /app).
-    command: celery -A app.tasks.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+      celery-worker-ai:
+        condition: service_healthy
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info", "--schedule", "/var/lib/celery/celerybeat-schedule"]
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-c", "import pathlib; ok = any(p.name.isdigit() and 'beat' in (p / 'cmdline').read_bytes().decode('utf-8', 'ignore') for p in pathlib.Path('/proc').iterdir()); raise SystemExit(0 if ok else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # Inlined into the client bundle at BUILD time (see frontend/Dockerfile).
-        # Empty = same-origin (relative /api/... behind nginx), the supported setup
-        # so SameSite=Lax auth cookies work without cross-site issues.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
-    container_name: job-prep-frontend
+        SITE_URL: ${SITE_URL:-http://localhost}
     restart: unless-stopped
     logging: *logging
+    <<: *hardening
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+      - /app/.next/cache:size=64m,uid=1001,gid=1001
     mem_limit: 512m
-    networks: [app]
+    cpus: 1.0
+    pids_limit: 128
+    stop_grace_period: 15s
+    networks: [edge]
     environment:
-      # Server-side only (RSC / route handlers), resolved on the compose network.
-      - INTERNAL_API_URL=http://backend:8000
-      - JWT_SECRET=${SECRET_KEY:?set SECRET_KEY in .env}
-    # Healthcheck: defined in frontend/Dockerfile.
+      INTERNAL_API_URL: http://backend:8000
+      SITE_URL: ${SITE_URL:-http://localhost}
+      JWT_SECRET: ${SECRET_KEY:?set SECRET_KEY in .env}
     depends_on:
       backend:
         condition: service_healthy
 
   nginx:
     image: nginx:alpine
-    container_name: job-prep-nginx
     restart: unless-stopped
     logging: *logging
+    <<: *hardening
+    cap_add:
+      - CHOWN
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+      - /var/cache/nginx:size=32m
+      - /var/run:size=8m
+      - /etc/nginx/conf.d:size=4m
     mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 128
+    stop_grace_period: 15s
     networks:
-      app:
-        # Fixed so the backend can trust exactly this address for
-        # X-Forwarded-For (FORWARDED_ALLOW_IPS above).
+      edge:
+        # Fixed so the backend trusts exactly this address for X-Forwarded-For.
         ipv4_address: 172.30.0.10
     ports:
       - "80:80"
     environment:
-      # Hostnames the app answers to; any other Host header gets no response.
-      # Set to your domain in production.
       SERVER_NAME: ${SERVER_NAME:-localhost 127.0.0.1}
-      # Substitute only SERVER_NAME into the templates, never nginx's own
-      # $host / $remote_addr style variables.
       NGINX_ENVSUBST_FILTER: "^SERVER_NAME$$"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -196,11 +365,15 @@ services:
         condition: service_healthy
 
 networks:
-  app:
+  edge:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  data:
+    internal: true
+  egress:
 
 volumes:
   postgres_data:
   redis_data:
+  celerybeat_data:

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Node 20 reached end-of-life in April 2026; 22 is the active LTS.
+# Node 22 is the active LTS.
 FROM node:22-alpine AS builder
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -11,19 +11,16 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 
-# NEXT_PUBLIC_* values are inlined into the CLIENT bundle at BUILD time, so
-# supplying this only at runtime (as docker-compose previously did) had no
-# effect: the browser fell back to the hardcoded "http://localhost:8000"
-# default in src/lib/api.ts, which works on a localhost demo and silently
-# breaks on any other host. It must be a build arg.
-# Empty = same-origin (relative /api/... behind nginx), the supported setup.
+# NEXT_PUBLIC_* values are inlined into the CLIENT bundle at BUILD time.
+# Empty = same-origin (relative /api/... behind nginx), the supported setup
+# so SameSite=Lax auth cookies work without cross-site issues.
 ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-# Destination of the /api rewrite in next.config.ts (resolved at build time).
+# Destination of the dev /api rewrite in next.config.ts.
 ARG INTERNAL_API_URL=http://backend:8000
 ENV INTERNAL_API_URL=${INTERNAL_API_URL}
-# The landing page is prerendered at build time, so its absolute metadata
-# URLs (metadataBase, og:image) need the public origin now, not just at runtime.
+# The landing page is prerendered at build time, so metadataBase / og:image
+# need the public origin at build time as well as runtime.
 ARG SITE_URL=http://localhost
 ENV SITE_URL=${SITE_URL}
 
@@ -39,24 +36,22 @@ ENV HOSTNAME="0.0.0.0"
 
 WORKDIR /app
 
-# Run as a non-root user (the canonical Next standalone setup).
+# Run as a non-root user. Application code stays owned by root:root (read-only
+# to nextjs); only .next/cache is writable so ISR page caching works.
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 
-# Copy the standalone output (includes server + minimal deps)
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-# Copy static assets and public directory
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next/cache
 
 USER nextjs
 
 EXPOSE 3000
 
-# Node's built-in fetch, so the check doesn't depend on busybox tools.
-# Any HTTP response counts as up; the marketing page is static (ISR) and
-# answers without the backend.
+# Lightweight internal health route (never touches `/` ISR or backend stats).
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.status < 500 ? 0 : 1), () => process.exit(1))"]
+    CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))"]
 
 CMD ["node", "server.js"]
