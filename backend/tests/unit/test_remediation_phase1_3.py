@@ -181,8 +181,7 @@ def test_settings_require_secret_key_for_api_role(monkeypatch):
     "path",
     [
         "/api/v1/jobs/scrape/github",
-        "/api/v1/news/scrape?url=https://example.com/post",
-        "/api/v1/news/scrape/linkedin",
+        "/api/v1/jobs/scrape/linkedin",
     ],
 )
 async def test_non_admin_cannot_trigger_scrapes(client: AsyncClient, auth_headers, path):
@@ -394,3 +393,50 @@ def test_news_parser_preserves_full_iso_timestamp():
     dt = _parse_iso_datetime("2026-11-27T14:35:00Z")
     assert dt is not None
     assert dt.hour == 14 and dt.minute == 35
+
+
+@pytest.mark.unit
+async def test_requeue_stuck_jobs_handles_integer_minutes_without_interval_cast(mock_db_session):
+    from datetime import timedelta
+    from app.core.datetime_utils import utc_now
+    from app.models.job import Job
+    from app.tasks.job_tasks import _requeue_stuck_jobs
+
+    stale_job = Job(
+        external_id="stale-1",
+        source="github",
+        title="SWE Intern",
+        company="Acme",
+        apply_url="https://acme.com/1",
+        scrape_status="queued",
+        queued_at=utc_now() - timedelta(minutes=120),
+    )
+    fresh_job = Job(
+        external_id="fresh-1",
+        source="github",
+        title="ML Intern",
+        company="Acme",
+        apply_url="https://acme.com/2",
+        scrape_status="queued",
+        queued_at=utc_now() - timedelta(minutes=5),
+    )
+    mock_db_session.add(stale_job)
+    mock_db_session.add(fresh_job)
+    await mock_db_session.commit()
+
+    class _Ctx:
+        async def __aenter__(self):
+            return mock_db_session
+
+        async def __aexit__(self, *args):
+            return False
+
+    with patch("app.tasks.job_tasks.create_worker_session_ctx", return_value=_Ctx()):
+        out = await _requeue_stuck_jobs(None, 60)
+
+    assert out == "Requeued 1"
+    await mock_db_session.refresh(stale_job)
+    await mock_db_session.refresh(fresh_job)
+    assert stale_job.scrape_status == "raw"
+    assert stale_job.queued_at is None
+    assert fresh_job.scrape_status == "queued"

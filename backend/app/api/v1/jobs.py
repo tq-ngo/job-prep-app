@@ -156,18 +156,21 @@ async def list_skills(
             select(Job.skills)
             .where(Job.is_active == True, Job.canonical_id.is_(None), Job.skills.is_not(None))  # noqa: E712
             .order_by(Job.scraped_at.desc(), Job.id)
-            .limit(200)
+            .limit(500)
         )
-        seen_skills = set(POPULAR_TECH_SKILLS)
+        seen_lower: dict[str, str] = {}
         for row in result.scalars().all():
             if isinstance(row, list):
                 for s in row:
-                    if isinstance(s, str) and len(s) <= 40:
-                        seen_skills.add(s.strip())
-        all_skills = sorted(seen_skills, key=lambda s: s.lower())
+                    if isinstance(s, str):
+                        cleaned = s.strip()
+                        if cleaned and len(cleaned) <= 40:
+                            seen_lower.setdefault(cleaned.lower(), cleaned)
+        all_skills = sorted(seen_lower.values(), key=lambda s: s.lower())
         if cache_redis is not None:
             try:
-                await cache_redis.setex(cache_key, 600, json.dumps(all_skills))
+                ttl = 300 if all_skills else 30
+                await cache_redis.setex(cache_key, ttl, json.dumps(all_skills))
             except RedisError as exc:
                 logger.warning("Skills cache write failed: %s", exc)
 

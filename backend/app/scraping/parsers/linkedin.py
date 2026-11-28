@@ -97,9 +97,9 @@ class LinkedInScraper:
                     company_el = card.select_one(".base-search-card__subtitle, .job-card-container__company-name, h4, .hidden-nested-link") if card else None
                     location_el = card.select_one(".job-search-card__location, .job-card-container__metadata-item") if card else None
 
-                    job_title = title_el.get_text(strip=True) if title_el else link_el.get_text(strip=True)
-                    company_name = company_el.get_text(strip=True) if company_el else "Unknown"
-                    location_text = location_el.get_text(strip=True) if location_el else ""
+                    job_title = title_el.get_text(" ", strip=True) if title_el else link_el.get_text(" ", strip=True)
+                    company_name = company_el.get_text(" ", strip=True) if company_el else "Unknown"
+                    location_text = location_el.get_text(" ", strip=True) if location_el else ""
                     
                     # Extract posted date from time element if available
                     date_el = card.select_one("time, .job-search-card__listdate, .job-search-card__listdate--new") if card else None

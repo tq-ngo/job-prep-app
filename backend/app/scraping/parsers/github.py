@@ -94,8 +94,12 @@ def _clean_location(loc_raw: str) -> tuple[str, bool]:
     clean = re.sub(r'<details>\s*<summary>.*?</summary>', '', loc_raw, flags=re.DOTALL | re.IGNORECASE)
     clean = re.sub(r'</details>', '', clean, flags=re.IGNORECASE)
     clean = re.sub(r'</?br\s*/?>', '; ', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'[\r\n]+', '; ', clean)
     clean = re.sub(r'<.*?>', '', clean)
     clean = re.sub(r'[*_`]', '', clean).strip()
+    clean = re.sub(r'^\d+\s+locations?\b[\s:;-]*', '', clean, flags=re.IGNORECASE)
+    parts = [re.sub(r'\s+', ' ', part).strip(' \t,;:') for part in clean.split(';')]
+    clean = '; '.join(part for part in parts if part)
     is_remote = "remote" in clean.lower()
     return clean, is_remote
 
@@ -158,6 +162,8 @@ class _HTMLTableExtractor(HTMLParser):
         elif tag == "a" and (self.in_td or self.in_th):
             href = attrs_dict.get("href", "")
             self.current_cell.append(f'<a href="{href}">')
+        elif tag in ("br", "details", "summary") and (self.in_td or self.in_th):
+            self.current_cell.append(f"<{tag}>")
 
     def handle_endtag(self, tag: str):
         if tag == "table":
@@ -174,6 +180,10 @@ class _HTMLTableExtractor(HTMLParser):
             self.current_row.append("".join(self.current_cell).strip())
         elif tag == "a" and (self.in_td or self.in_th):
             self.current_cell.append("</a>")
+        elif tag in ("details", "summary") and (self.in_td or self.in_th):
+            self.current_cell.append(f"</{tag}>")
+        elif tag in ("p", "li", "div") and (self.in_td or self.in_th):
+            self.current_cell.append("; ")
         elif tag == "tr":
             if self.current_row:
                 self.tables.append((list(self.current_headers), list(self.current_row)))

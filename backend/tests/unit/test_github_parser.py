@@ -161,3 +161,40 @@ def test_parse_markdown_tables_zshah_format():
     assert jobs[0].location == "Mountain View, CA"
     assert jobs[0].apply_url == "https://jobs.ashbyhq.com/rr/1"
     assert jobs[1].is_remote is True
+
+
+@pytest.mark.unit
+def test_parse_html_tables_preserves_multi_location_separators():
+    html = """
+    <table>
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Role</th>
+          <th>Location</th>
+          <th>Application</th>
+          <th>Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Atoms</td>
+          <td>Software Engineer Intern</td>
+          <td><details><summary>5 locations</summary>Seattle, WA<br>SF<br>LA<br>NYC<br>Mountain View, CA</details></td>
+          <td><a href="https://atoms.dev/jobs/1">Apply</a></td>
+          <td>1d</td>
+        </tr>
+        <tr>
+          <td>SambaNova Systems</td>
+          <td>Validation Intern</td>
+          <td>Austin, TX<br/>San Jose, CA</td>
+          <td><a href="https://sambanova.ai/jobs/2">Apply</a></td>
+          <td>2d</td>
+        </tr>
+      </tbody>
+    </table>
+    """
+    jobs, _ = _parse_html_tables(html, "https://github.com/test", include_inactive=False)
+    assert len(jobs) == 2
+    assert jobs[0].location == "Seattle, WA; SF; LA; NYC; Mountain View, CA"
+    assert jobs[1].location == "Austin, TX; San Jose, CA"

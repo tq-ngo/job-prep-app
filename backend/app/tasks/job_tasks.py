@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from pydantic import ValidationError
-from sqlalchemy import String, all_, bindparam, func, text, update
+from sqlalchemy import String, all_, bindparam, func, or_, text, update
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlmodel import select
 
@@ -491,18 +491,14 @@ def requeue_stuck_jobs(self, stale_after_minutes: int = STUCK_AFTER_MINUTES):
 
 
 async def _requeue_stuck_jobs(self, stale_after_minutes: int = STUCK_AFTER_MINUTES):
+    cutoff = utc_now() - timedelta(minutes=stale_after_minutes)
     async with create_worker_session_ctx() as session:
         result = await session.execute(
-            text(
-                """
-                UPDATE jobs SET scrape_status = 'raw', queued_at = NULL
-                WHERE scrape_status = 'queued'
-                  AND (queued_at IS NULL
-                       OR queued_at < NOW() - (:mins || ' minutes')::interval)
-                RETURNING id
-                """
-            ),
-            {"mins": stale_after_minutes},
+            update(Job)
+            .where(Job.scrape_status == "queued")
+            .where(or_(Job.queued_at.is_(None), Job.queued_at < cutoff))
+            .values(scrape_status="raw", queued_at=None)
+            .returning(Job.id)
         )
         count = len(result.fetchall())
         await session.commit()

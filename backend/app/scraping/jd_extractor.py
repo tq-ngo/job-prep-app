@@ -277,6 +277,64 @@ async def _from_jsonld(html: str) -> Optional[str]:
     return None
 
 
+_BOILERPLATE_PHRASES = (
+    "cookies allow websites",
+    "accept all cookies",
+    "manage cookie preferences",
+    "cookie settings",
+    "we use cookies to",
+    "this site uses cookies",
+    "enable javascript",
+    "javascript is required to",
+    "you need to enable javascript",
+)
+
+_JOB_SIGNAL_WORDS = (
+    "responsibilities",
+    "qualifications",
+    "requirements",
+    "intern",
+    "internship",
+    "experience",
+    "engineering",
+    "developer",
+    "skills",
+    "compensation",
+    "salary",
+)
+
+
+def _strip_cookie_and_chrome_nodes(html: str) -> str:
+    """Remove cookie consent banners and page chrome before Readability runs."""
+    soup = BeautifulSoup(html, "lxml")
+    for el in soup.find_all(["nav", "header", "footer", "aside", "script", "style", "noscript"]):
+        el.decompose()
+    for selector in (
+        "#onetrust-consent-sdk",
+        "#CybotCookiebotDialog",
+        "#cookie-banner",
+        "[id*='cookie' i]",
+        "[class*='cookie-banner' i]",
+        "[class*='cookie-consent' i]",
+        "[class*='consent-banner' i]",
+        "[aria-label*='cookie' i]",
+    ):
+        for el in soup.select(selector):
+            if el.name not in ("html", "body", "main", "article"):
+                el.decompose()
+    return str(soup)
+
+
+def _looks_like_boilerplate(md: str) -> bool:
+    """Return True when extracted text is cookie/JS interstitial boilerplate, not a JD."""
+    lower = md.lower()
+    has_boilerplate = any(phrase in lower for phrase in _BOILERPLATE_PHRASES)
+    if not has_boilerplate:
+        return False
+    job_signals = sum(1 for word in _JOB_SIGNAL_WORDS if word in lower)
+    return job_signals < 2
+
+
 async def _from_generic(apply_url: str) -> Tuple[Optional[str], Optional[str]]:
     html = await http_scraper.fetch_page(apply_url)
     if not html:
@@ -286,15 +344,18 @@ async def _from_generic(apply_url: str) -> Tuple[Optional[str], Optional[str]]:
     if via_jsonld:
         return via_jsonld, "jsonld"
 
+    cleaned_html = _strip_cookie_and_chrome_nodes(html)
     try:
         from readability import Document
 
-        summary_html = Document(html).summary(html_partial=True)
+        summary_html = Document(cleaned_html).summary(html_partial=True)
     except Exception as exc:
         logger.debug("readability failed for %s: %s", apply_url, exc)
         return None, None
     md = sanitize_html_to_markdown(summary_html)
-    return (md, "readability") if md else (None, None)
+    if not md or _looks_like_boilerplate(md):
+        return None, None
+    return md, "readability"
 
 
 # ── Public API ──────────────────────────────────────────────────────────────

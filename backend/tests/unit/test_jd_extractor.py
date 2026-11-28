@@ -122,3 +122,53 @@ async def test_enrich_with_descriptions_intra_batch_dedup():
     assert fetch_call_count == 1
 
 
+@pytest.mark.unit
+async def test_from_generic_rejects_cookie_banner_boilerplate():
+    from unittest.mock import AsyncMock, patch
+    from app.scraping.jd_extractor import _from_generic
+
+    cookie_only_html = """
+    <html><body>
+      <div id="onetrust-consent-sdk">
+        <p>Cookies allow websites to make your Internet experience better. Accept all cookies or manage cookie preferences.</p>
+      </div>
+      <div class="consent-banner">
+        <p>Cookies allow websites to make your Internet experience better and personalize content across our site. We use cookies to analyze traffic.</p>
+      </div>
+    </body></html>
+    """
+    with patch("app.scraping.jd_extractor.http_scraper.fetch_page", new=AsyncMock(return_value=cookie_only_html)):
+        md, strategy = await _from_generic("https://careers.waymo.com/jobs/123")
+    assert md is None
+    assert strategy is None
+
+
+@pytest.mark.unit
+async def test_from_generic_strips_cookie_banner_and_keeps_real_jd():
+    from unittest.mock import AsyncMock, patch
+    from app.scraping.jd_extractor import _from_generic
+
+    mixed_html = """
+    <html><body>
+      <div id="onetrust-consent-sdk">
+        <p>Cookies allow websites to make your Internet experience better. Accept all cookies.</p>
+      </div>
+      <main>
+        <h1>Software Engineering Intern</h1>
+        <p>Join our core infrastructure team to build distributed services in Python and Go.</p>
+        <h2>Responsibilities</h2>
+        <ul>
+          <li>Design and implement scalable backend APIs and data pipelines.</li>
+          <li>Collaborate with mentors across engineering teams during your internship.</li>
+        </ul>
+      </main>
+    </body></html>
+    """
+    with patch("app.scraping.jd_extractor.http_scraper.fetch_page", new=AsyncMock(return_value=mixed_html)):
+        md, strategy = await _from_generic("https://example.com/jobs/123")
+    assert strategy == "readability"
+    assert md is not None
+    assert "Cookies allow websites" not in md
+    assert "Software Engineering Intern" in md
+
+
