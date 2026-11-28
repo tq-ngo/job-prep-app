@@ -23,6 +23,8 @@ ENV INTERNAL_API_URL=${INTERNAL_API_URL}
 # need the public origin at build time as well as runtime.
 ARG SITE_URL=http://localhost
 ENV SITE_URL=${SITE_URL}
+ARG ENABLE_API_REWRITES=false
+ENV ENABLE_API_REWRITES=${ENABLE_API_REWRITES}
 
 RUN npm run build
 
@@ -39,7 +41,7 @@ WORKDIR /app
 # Run as a non-root user. Application code stays owned by root:root (read-only
 # to nextjs); only .next/cache is writable so ISR page caching works.
 RUN addgroup --system --gid 1001 nodejs \
- && adduser --system --uid 1001 nextjs
+ && adduser --system --uid 1001 -G nodejs nextjs
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

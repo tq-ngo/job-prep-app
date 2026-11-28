@@ -36,10 +36,11 @@ services:
       - ./backend:/app
 
   frontend:
+    build:
+      args:
+        ENABLE_API_REWRITES: "true"
     ports:
       - "127.0.0.1:3000:3000"
-    environment:
-      ENABLE_API_REWRITES: "true"
 
   celery-flower:
     image: mher/flower:2.0
