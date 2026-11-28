@@ -3,7 +3,7 @@
 # 1. Put certificates where the container can read them, e.g. mount
 #    /etc/letsencrypt/live/<domain>/ to /etc/nginx/certs/ (read-only).
 # 2. Copy this file to templates/default.conf.template (replacing the plain-HTTP
-#    one), keeping the location blocks from the original in the 443 server.
+#    one); all proxy headers and location blocks are shared via snippets/app.conf.
 # 3. Publish 443 in docker-compose.yml ("443:443"), set SERVER_NAME to the
 #    domain, and set in .env:
 #        FRONTEND_URL=https://<domain>
@@ -11,13 +11,27 @@
 #        CORS_ORIGINS=https://<domain>
 #        COOKIE_SECURE=true
 #        APP_ENV=production
-#    The backend refuses to start with an https FRONTEND_URL and insecure
-#    cookies, so these must change together.
 
-# Plain HTTP only redirects (and keeps the container healthcheck working).
+# Unknown Host on plain HTTP: drop immediately (never 301-redirect arbitrary
+# Host headers, which would create an open redirect on port 80).
 server {
     listen 80 default_server;
     server_name _;
+
+    location = /nginx-health {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 444;
+    }
+}
+
+# Allowlisted Host on plain HTTP: redirect permanently to HTTPS.
+server {
+    listen 80;
+    server_name ${SERVER_NAME};
 
     location = /nginx-health {
         access_log off;
@@ -29,8 +43,7 @@ server {
     }
 }
 
-# Unknown Host on HTTPS: refuse during the handshake, without presenting
-# the real certificate.
+# Unknown Host on HTTPS: refuse during TLS handshake without presenting a cert.
 server {
     listen 443 ssl default_server;
     server_name _;
@@ -48,29 +61,21 @@ server {
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
-    # Only meaningful over HTTPS: browsers ignore HSTS on plain HTTP. Start
-    # with a short max-age while testing; add `preload` only deliberately.
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    # Same CSP as the HTTP template plus upgrade-insecure-requests.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.googleusercontent.com; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.googleusercontent.com https://t2.gstatic.com; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header X-Frame-Options "DENY" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()" always;
 
     # ── Behind a load balancer or CDN ───────────────────────────────────
-    # Then $remote_addr is the balancer, so every client shares one rate
-    # limit bucket. Trust the balancer's forwarded header — and ONLY from
-    # the balancer's own addresses, or clients can forge it:
+    # Trust the balancer's X-Forwarded-For ONLY from the balancer's CIDR:
     #
-    #   set_real_ip_from 10.0.0.0/8;          # your balancer's range
+    #   set_real_ip_from 10.0.0.0/8;
     #   real_ip_header   X-Forwarded-For;
     #   real_ip_recursive on;
-    #
-    # $remote_addr (and so X-Forwarded-For sent to the backend) then holds
-    # the real client address.
 
-    # proxy_set_header block and every location from the HTTP template go
-    # here unchanged, with X-Forwarded-Proto now "https".
+    include /etc/nginx/snippets/app.conf;
 }

@@ -41,6 +41,7 @@ jobs:
           -e SERVER_NAME=localhost -e 'NGINX_ENVSUBST_FILTER=^SERVER_NAME$'
           -v "$PWD/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
           -v "$PWD/infra/nginx/templates:/etc/nginx/templates:ro"
+          -v "$PWD/infra/nginx/snippets:/etc/nginx/snippets:ro"
           nginx:alpine nginx -t
       - run: docker compose build backend frontend
       - name: Scan repository and dependencies with Trivy
