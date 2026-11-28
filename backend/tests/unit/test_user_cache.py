@@ -48,6 +48,8 @@ async def test_set_and_get_user_profile_excludes_sensitive_fields(fake_redis):
         "full_name": "Alice",
         "avatar_url": "https://example.com/a.png",
         "is_active": True,
+        "is_admin": False,
+        "token_version": 1,
     }
     assert "hashed_password" not in raw
     assert "google_sub" not in raw

@@ -76,17 +76,21 @@ async def test_task_status_caps_batch_size(client: AsyncClient, auth_headers, te
 
 
 @pytest.mark.integration
-async def test_scrape_trigger_records_owner(client: AsyncClient, auth_headers, test_user):
+async def test_scrape_trigger_records_owner(
+    client: AsyncClient, admin_auth_headers, admin_user
+):
     task = MagicMock(id="scrape-task-1")
     with patch("app.api.v1.jobs.scrape_github.delay", return_value=task):
         res = await client.post(
             "/api/v1/jobs/scrape/github",
-            cookies=auth_headers["cookies"],
-            headers=auth_headers["headers"],
+            cookies=admin_auth_headers["cookies"],
+            headers=admin_auth_headers["headers"],
         )
     assert res.status_code == 202
 
     done = MagicMock(state="SUCCESS", result={"synced": 1}, info=None)
     with patch("app.tasks.celery_app.celery_app.AsyncResult", return_value=done):
-        res = await client.get("/api/v1/tasks/scrape-task-1", cookies=auth_headers["cookies"])
+        res = await client.get(
+            "/api/v1/tasks/scrape-task-1", cookies=admin_auth_headers["cookies"]
+        )
     assert res.status_code == 200

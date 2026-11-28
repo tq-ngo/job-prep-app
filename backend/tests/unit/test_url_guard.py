@@ -170,6 +170,6 @@ def test_resolve_crawl_target_pins_vetted_addresses():
 def test_resolve_crawl_target_literal_ip_needs_no_pin():
     from app.core.url_guard import resolve_crawl_target
 
-    target = resolve_crawl_target("http://93.184.216.34:8080/x")
-    assert target.port == 8080
+    target = resolve_crawl_target("https://93.184.216.34:443/x")
+    assert target.port == 443
     assert target.curl_resolve() == []

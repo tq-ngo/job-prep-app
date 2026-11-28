@@ -68,7 +68,11 @@ async def test_google_does_not_auto_link_to_password_account(
     res = await client.get("/api/v1/auth/google/callback", params={"state": state, "code": "c"})
 
     assert res.status_code == 303
-    assert res.headers["location"].endswith("/login?error=account_exists")
+    parsed = urlparse(res.headers["location"])
+    assert parsed.path == "/login"
+    qs = parse_qs(parsed.query)
+    assert qs["error"] == ["account_exists"]
+    assert qs["next"] == ["/news"]
     assert "access_token" not in res.cookies
     await mock_db_session.refresh(test_user)
     assert test_user.google_sub is None
@@ -106,6 +110,10 @@ async def test_disabled_google_user_is_refused_before_any_write(
     state = await _start_flow(client)
     res = await client.get("/api/v1/auth/google/callback", params={"state": state, "code": "c"})
 
-    assert res.headers["location"].endswith("/login?error=account_disabled")
+    parsed = urlparse(res.headers["location"])
+    assert parsed.path == "/login"
+    qs = parse_qs(parsed.query)
+    assert qs["error"] == ["account_disabled"]
+    assert qs["next"] == ["/news"]
     await mock_db_session.refresh(user)
     assert user.avatar_url is None

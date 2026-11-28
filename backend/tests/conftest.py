@@ -67,12 +67,16 @@ def patch_redis_and_limiter(fake_redis, monkeypatch):
         return fake_redis
 
     monkeypatch.setattr("app.core.redis.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.core.redis.get_cache_redis", _mock_get_redis_pool)
     monkeypatch.setattr("app.core.auth_cookies.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.core.user_cache.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.core.user_cache.get_cache_redis", _mock_get_redis_pool)
     monkeypatch.setattr("app.core.google_oauth.get_redis_pool", _mock_get_redis_pool)
-    monkeypatch.setattr("app.api.v1.jobs.get_redis_pool", _mock_get_redis_pool)
-    monkeypatch.setattr("app.api.v1.stats.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.api.v1.auth.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.api.v1.jobs.get_cache_redis", _mock_get_redis_pool)
+    monkeypatch.setattr("app.api.v1.stats.get_cache_redis", _mock_get_redis_pool)
     monkeypatch.setattr("app.api.v1.search.get_redis_pool", _mock_get_redis_pool)
+    monkeypatch.setattr("app.api.v1.search.get_cache_redis", _mock_get_redis_pool)
     monkeypatch.setattr("app.api.v1.sse.get_redis_pool", _mock_get_redis_pool)
     monkeypatch.setattr("app.core.task_owner.get_redis_pool", _mock_get_redis_pool)
 
@@ -116,11 +120,18 @@ async def mock_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 async def client(
-    mock_db_session: AsyncSession, fake_redis
+    mock_db_session: AsyncSession, fake_redis, monkeypatch
 ) -> AsyncGenerator[AsyncClient, None]:
     """FastAPI AsyncClient overriding DB and Redis dependencies."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _mock_session_factory():
+        yield mock_db_session
+
     app.dependency_overrides[get_session] = lambda: mock_db_session
     app.dependency_overrides[get_redis_pool] = lambda: fake_redis
+    monkeypatch.setattr("app.api.v1.sse._session_factory", _mock_session_factory)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -137,6 +148,23 @@ async def test_user(mock_db_session: AsyncSession) -> User:
         hashed_password=get_password_hash("ValidPass123!"),
         full_name="Test User",
         is_active=True,
+        is_admin=False,
+    )
+    mock_db_session.add(user)
+    await mock_db_session.commit()
+    await mock_db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+async def admin_user(mock_db_session: AsyncSession) -> User:
+    """Creates and persists an administrator test user."""
+    user = User(
+        email="admin@example.com",
+        hashed_password=get_password_hash("AdminPass123!"),
+        full_name="Admin User",
+        is_active=True,
+        is_admin=True,
     )
     mock_db_session.add(user)
     await mock_db_session.commit()
@@ -151,6 +179,26 @@ def auth_headers(test_user: User) -> dict:
     access, _, _ = create_access_token(test_user.email, family=fam)
     refresh, _, _ = create_refresh_token(test_user.email, family=fam)
     csrf = "test-csrf-token-secret-12345"
+
+    return {
+        "cookies": {
+            ACCESS_COOKIE: access,
+            REFRESH_COOKIE: refresh,
+            CSRF_COOKIE: csrf,
+        },
+        "headers": {
+            "X-CSRF-Token": csrf,
+        },
+    }
+
+
+@pytest.fixture
+def admin_auth_headers(admin_user: User) -> dict:
+    """Generates valid JWT auth cookies and CSRF tokens for an admin user."""
+    fam = new_token_family()
+    access, _, _ = create_access_token(admin_user.email, family=fam)
+    refresh, _, _ = create_refresh_token(admin_user.email, family=fam)
+    csrf = "admin-csrf-token-secret-12345"
 
     return {
         "cookies": {
