@@ -19,11 +19,29 @@ export const SITE_URL = process.env.SITE_URL || "http://localhost";
 export const googleLoginUrl = (next = "/jobs") =>
   `${API_BASE}/api/v1/auth/google/login?next=${encodeURIComponent(next)}`;
 
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
+const ENCODED_CONTROL_CHAR_RE = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i;
+
 /**
- * A post-login destination from the query string, or /jobs. Only relative
- * paths: an absolute URL would be an open redirect. Backslashes too, since
- * browsers treat `/\evil.com` as `//evil.com`.
+ * A post-login destination from the query string, or /jobs. Only same-origin
+ * relative paths: blocks absolute URLs, protocol-relative URLs (`//evil.com`),
+ * backslashes (`/\evil.com`), and raw or percent-encoded ASCII control
+ * characters (`/\t/evil.com`, `/%09/evil.com`) that WHATWG URL parsers strip.
  */
 export function safeNextPath(next: string | undefined | null, fallback = "/jobs"): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : fallback;
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.includes("\\")) {
+    return fallback;
+  }
+  if (CONTROL_CHAR_RE.test(next) || ENCODED_CONTROL_CHAR_RE.test(next)) {
+    return fallback;
+  }
+  try {
+    const parsed = new URL(next, "http://localhost");
+    if (parsed.origin !== "http://localhost") {
+      return fallback;
+    }
+    return next;
+  } catch {
+    return fallback;
+  }
 }
