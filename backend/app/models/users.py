@@ -14,7 +14,8 @@ class User(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    email: str = Field(unique=True)
+    # Uniqueness is enforced case-insensitively by `ux_users_email_lower` above.
+    email: str
 
     # Nullable: a Google-only account has no password.
     hashed_password: Optional[str] = Field(default=None)
