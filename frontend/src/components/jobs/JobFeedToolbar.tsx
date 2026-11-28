@@ -46,6 +46,7 @@ function SearchBox({ value, onSearch }: { value: string; onSearch: (q: string) =
     <Input
       size="sm"
       type="search"
+      name="q"
       leadingIcon={<Search size={14} strokeWidth={1.5} />}
       value={text}
       onChange={(e) => setText(e.target.value)}
@@ -154,6 +155,7 @@ function SkillAutocompleteInput({
       <div className="relative">
         <Input
           size="sm"
+          name="skill"
           role="combobox"
           aria-expanded={listOpen}
           aria-controls={listOpen ? listboxId : undefined}

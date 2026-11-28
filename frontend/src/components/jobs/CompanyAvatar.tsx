@@ -125,6 +125,10 @@ const KNOWN_DOMAINS: Record<string, string> = {
   "general motors": "gm.com",
   lucid: "lucidmotors.com",
   rivian: "rivian.com",
+  "bank of montreal": "bmo.com",
+  bmo: "bmo.com",
+  "hewlett packard enterprise": "hpe.com",
+  hpe: "hpe.com",
 };
 
 function resolveDomain(company: string, companyDomain?: string | null): string | null {
@@ -142,9 +146,6 @@ function resolveDomain(company: string, companyDomain?: string | null): string |
     return companyDomain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   }
 
-  if (cleaned.length >= 2) {
-    return `${cleaned}.com`;
-  }
   return null;
 }
 

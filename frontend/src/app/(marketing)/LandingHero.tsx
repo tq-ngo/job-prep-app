@@ -1,12 +1,11 @@
-import { ArrowRight } from "lucide-react";
-import { ButtonLink } from "@/components/ui/Button";
 import { InteractiveLiveCard, PipelineHighlights } from "./LandingDemos";
+import { MarketingHeroActions } from "./MarketingAuthActions";
 
 export interface PlatformStats {
-  total_active_jobs: number;
-  new_last_24h: number;
-  companies_count: number;
-  sources: Record<string, number>;
+  active_jobs: number;
+  added_24h: number;
+  companies: number;
+  last_crawl_at?: string | null;
 }
 
 function formatCount(value: number | undefined): string {
@@ -15,9 +14,9 @@ function formatCount(value: number | undefined): string {
 
 export default function LandingHero({ stats }: { stats: PlatformStats | null }) {
   const metrics = [
-    { label: "Active internships", value: formatCount(stats?.total_active_jobs) },
-    { label: "Added in 24h", value: formatCount(stats?.new_last_24h) },
-    { label: "Hiring companies", value: formatCount(stats?.companies_count) },
+    { label: "Active internships", value: formatCount(stats?.active_jobs) },
+    { label: "Added in 24h", value: formatCount(stats?.added_24h) },
+    { label: "Hiring companies", value: formatCount(stats?.companies) },
   ];
 
   return (
@@ -34,14 +33,8 @@ export default function LandingHero({ stats }: { stats: PlatformStats | null }) 
             JobPrep crawls GitHub and LinkedIn every hour, merges cross-posted listings, extracts skills and visa requirements, and streams new openings to your board as they land.
           </p>
 
-          <div className="flex flex-wrap items-center gap-3 mt-8">
-            <ButtonLink href="/register" variant="filled" size="lg">
-              Create free account
-              <ArrowRight size={16} strokeWidth={1.5} aria-hidden="true" />
-            </ButtonLink>
-            <ButtonLink href="/login" variant="outlined" size="lg">
-              Sign in
-            </ButtonLink>
+          <div className="mt-8">
+            <MarketingHeroActions primaryLabel="Create free account" />
           </div>
         </div>
 
@@ -76,7 +69,7 @@ export default function LandingHero({ stats }: { stats: PlatformStats | null }) 
             Less tab-switching between spreadsheets and job boards, more time applying while roles are still open.
           </p>
         </div>
-        <PipelineHighlights newLast24h={stats?.new_last_24h ?? null} />
+        <PipelineHighlights newLast24h={stats?.added_24h ?? null} />
       </section>
 
       <section className="pb-20 sm:pb-24">
@@ -89,14 +82,8 @@ export default function LandingHero({ stats }: { stats: PlatformStats | null }) 
               Sign in to browse the live internship feed, save your core skills, and follow daily tech news.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <ButtonLink href="/register" variant="filled" size="lg">
-              Get started
-              <ArrowRight size={16} strokeWidth={1.5} aria-hidden="true" />
-            </ButtonLink>
-            <ButtonLink href="/login" variant="outlined" size="lg">
-              Sign in
-            </ButtonLink>
+          <div className="shrink-0">
+            <MarketingHeroActions primaryLabel="Get started" />
           </div>
         </div>
       </section>

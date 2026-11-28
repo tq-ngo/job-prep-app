@@ -82,10 +82,10 @@ export default function LoginForm({
 
       <form onSubmit={handleSubmit} method="post" action="#" data-hydrated={isHydrated} className="space-y-4">
         <Field label="Email">
-          <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input type="email" name="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="Password">
-          <PasswordInput autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         <Button type="submit" variant="filled" size="lg" block loading={isLoading}>
           {isLoading ? "Signing in…" : "Sign In"}

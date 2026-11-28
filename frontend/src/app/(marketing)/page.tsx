@@ -7,7 +7,7 @@ export const revalidate = 300;
 
 async function getStats(): Promise<PlatformStats | null> {
   try {
-    const res = await fetch(`${INTERNAL_API_URL}/api/v1/stats/overview`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/v1/stats/`, {
       next: { revalidate: 300 },
       signal: AbortSignal.timeout(3000),
     });

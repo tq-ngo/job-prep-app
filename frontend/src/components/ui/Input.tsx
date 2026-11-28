@@ -33,10 +33,13 @@ type InputProps = Omit<ComponentProps<"input">, "size"> & {
 /** Text input. Inside a <Field> it picks up its id, label and descriptions. */
 export function Input({ size = "md", leadingIcon, pill, className, inputClassName, ...props }: InputProps) {
   const field = useFieldControl();
+  const fallbackId = useId();
+  const inputId = props.id ?? field?.id ?? fallbackId;
   const input = (
     <input
       {...field}
       {...props}
+      id={inputId}
       className={cn(
         control,
         sizes[size],

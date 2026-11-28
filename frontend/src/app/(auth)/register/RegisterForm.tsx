@@ -65,10 +65,11 @@ export default function RegisterForm({ nextPath }: { nextPath: string }) {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Email">
-          <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input type="email" name="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="Password" hint="At least 8 characters, with an uppercase letter, a lowercase letter and a digit.">
           <PasswordInput
+            name="password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

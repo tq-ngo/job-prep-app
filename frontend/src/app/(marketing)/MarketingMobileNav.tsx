@@ -3,8 +3,8 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
-import { ButtonLink } from "@/components/ui/Button";
 import { useDismiss } from "@/hooks/useDismiss";
+import { MarketingMobileAuthActions } from "./MarketingAuthActions";
 
 interface Props {
   links: { href: string; label: string }[];
@@ -49,14 +49,7 @@ export default function MarketingMobileNav({ links }: Props) {
             ))}
           </nav>
 
-          <div className="flex flex-col gap-2 pt-3 border-t border-outline-variant">
-            <ButtonLink href="/register" variant="filled" onClick={() => setOpen(false)}>
-              Get started
-            </ButtonLink>
-            <ButtonLink href="/login" variant="outlined" onClick={() => setOpen(false)}>
-              Sign in
-            </ButtonLink>
-          </div>
+          <MarketingMobileAuthActions onNavigate={() => setOpen(false)} />
         </div>
       )}
     </div>

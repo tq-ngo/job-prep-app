@@ -51,6 +51,7 @@ export default function SkillsEditor({ autoFocus = false }: { autoFocus?: boolea
       <form onSubmit={handleAdd} className="flex items-center gap-2">
         <Input
           type="text"
+          name="skillInput"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Add a skill (e.g. Python)"

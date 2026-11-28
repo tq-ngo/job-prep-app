@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import SkipLink from "@/components/SkipLink";
 import ThemeToggle from "@/components/ThemeToggle";
-import { ButtonLink } from "@/components/ui/Button";
+import { MarketingHeaderActions } from "./MarketingAuthActions";
 import MarketingMobileNav from "./MarketingMobileNav";
 
 export const metadata: Metadata = {
@@ -61,14 +61,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
 
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <div className="hidden md:flex items-center gap-2">
-              <ButtonLink href="/login" variant="text" size="sm">
-                Sign in
-              </ButtonLink>
-              <ButtonLink href="/register" variant="filled" size="sm">
-                Get started
-              </ButtonLink>
-            </div>
+            <MarketingHeaderActions />
             <MarketingMobileNav links={navLinks} />
           </div>
         </div>

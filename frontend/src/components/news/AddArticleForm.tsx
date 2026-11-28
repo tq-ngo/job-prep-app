@@ -39,6 +39,7 @@ export default function AddArticleForm() {
           <Input
             size="sm"
             type="url"
+            name="url"
             required
             value={url}
             onChange={(e) => setUrl(e.target.value)}
