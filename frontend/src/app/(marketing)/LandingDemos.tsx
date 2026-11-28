@@ -1,323 +1,413 @@
 "use client";
 
-/**
- * Interactive islands for the landing page. Everything else on the page is
- * a server component; only these need client JS.
- */
-import { useState, useEffect, useRef } from "react";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
-import {
-  Sparkles,
-  ArrowRight,
-  Cpu,
-  Radio,
-  Play,
-  Pause,
-  CheckCircle2,
-  GitBranch,
-} from "lucide-react";
-import Badge from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
+import { useEffect, useRef, useState } from "react";
+import { Pause, Play, Radio, ShieldCheck, SlidersHorizontal, Zap } from "lucide-react";
 import Card from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
 
-// ── Interactive Job Preview Data ─────────────────────────────────────────
 interface MockJob {
+  id: string;
   title: string;
   company: string;
   location: string;
-  source: "github" | "linkedin";
-  category: "FAANG+" | "Quant" | "Others";
-  time: string;
+  category: "FAANG+" | "Quant" | "Startups";
+  skills: string[];
+  pay: string;
+  sponsorship?: string;
+  posted: string;
+  summary: string;
 }
 
 const MOCK_JOBS: MockJob[] = [
-  { title: "Software Engineer Intern", company: "Google", location: "Mountain View, CA", source: "github", category: "FAANG+", time: "2m ago" },
-  { title: "Quantitative Trading Intern", company: "Jane Street", location: "New York, NY", source: "github", category: "Quant", time: "5m ago" },
-  { title: "Frontend Engineer Intern", company: "Meta", location: "Menlo Park, CA", source: "linkedin", category: "FAANG+", time: "11m ago" },
-  { title: "Quantitative Dev Intern", company: "Citadel", location: "New York, NY", source: "github", category: "Quant", time: "18m ago" },
-  { title: "Full Stack Engineer Intern", company: "Stripe", location: "San Francisco, CA", source: "linkedin", category: "Others", time: "24m ago" },
-  { title: "Distributed Systems Intern", company: "Netflix", location: "Los Gatos, CA", source: "github", category: "FAANG+", time: "30m ago" },
-  { title: "Core Engineering Intern", company: "Two Sigma", location: "New York, NY", source: "github", category: "Quant", time: "42m ago" },
-  { title: "Cloud Systems Intern", company: "Amazon", location: "Seattle, WA", source: "linkedin", category: "FAANG+", time: "55m ago" },
+  {
+    id: "jane-street",
+    title: "Quantitative Trading Intern",
+    company: "Jane Street",
+    location: "New York, NY",
+    category: "Quant",
+    skills: ["OCaml", "Python", "Probability"],
+    pay: "$105/hr",
+    posted: "2m ago",
+    summary: "Work on pricing models, market microstructure research, and low-latency trading tools alongside desk engineers.",
+  },
+  {
+    id: "stripe",
+    title: "Software Engineering Intern",
+    company: "Stripe",
+    location: "San Francisco, CA",
+    category: "FAANG+",
+    skills: ["Ruby", "TypeScript", "Distributed Systems"],
+    pay: "$62/hr",
+    sponsorship: "Sponsorship available",
+    posted: "9m ago",
+    summary: "Ship API improvements across payment routing, idempotency primitives, and merchant developer tooling.",
+  },
+  {
+    id: "citadel",
+    title: "Systems Engineering Intern",
+    company: "Citadel Securities",
+    location: "Chicago, IL",
+    category: "Quant",
+    skills: ["C++", "Linux", "Networking"],
+    pay: "$110/hr",
+    posted: "18m ago",
+    summary: "Profile kernel bypass paths, lock-free queues, and real-time market data feeds.",
+  },
+  {
+    id: "linear",
+    title: "Product Engineering Intern",
+    company: "Linear",
+    location: "Remote",
+    category: "Startups",
+    skills: ["TypeScript", "React", "GraphQL"],
+    pay: "$58/hr",
+    sponsorship: "Sponsorship available",
+    posted: "27m ago",
+    summary: "Build fast local-first sync features, keyboard workflows, and issue-tracking views.",
+  },
+  {
+    id: "anthropic",
+    title: "Infrastructure Engineering Intern",
+    company: "Anthropic",
+    location: "San Francisco, CA",
+    category: "FAANG+",
+    skills: ["Python", "Kubernetes", "Rust"],
+    pay: "$75/hr",
+    posted: "41m ago",
+    summary: "Improve cluster scheduling, inference latency telemetry, and evaluation pipelines.",
+  },
+  {
+    id: "vercel",
+    title: "Frontend Platform Intern",
+    company: "Vercel",
+    location: "Remote",
+    category: "Startups",
+    skills: ["Next.js", "TypeScript", "Rust"],
+    pay: "$60/hr",
+    posted: "54m ago",
+    summary: "Work on build caching, bundler diagnostics, and developer dashboard ergonomics.",
+  },
 ];
 
-export function InteractiveLiveCard() {
-  const [filter, setFilter] = useState<"All" | "FAANG+" | "Quant">("All");
-  // Auto-rotation is motion: off by default for people who ask the OS for
-  // less (WCAG 2.2.2), though they can still start it. Their own choice wins.
-  const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const [pausedByUser, setPausedByUser] = useState<boolean | null>(null);
-  const isPaused = pausedByUser ?? reduceMotion;
-  const [displayedJobs, setDisplayedJobs] = useState<MockJob[]>(MOCK_JOBS.slice(0, 4));
+const CATEGORIES = ["All", "FAANG+", "Quant", "Startups"] as const;
+const VISIBLE_ROWS = 4;
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
 
   useEffect(() => {
-    if (isPaused) return;
-    const interval = setInterval(() => {
-      setDisplayedJobs((prev) => {
-        const nextIdx = (MOCK_JOBS.indexOf(prev[0]) + 1) % MOCK_JOBS.length;
-        const nextItem = MOCK_JOBS[nextIdx];
-        const updated = [nextItem, ...prev.slice(0, 3)];
-        return updated;
-      });
-    }, 2800);
-    return () => clearInterval(interval);
-  }, [isPaused]);
+    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mq) return;
+    setReduced(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
-  const filtered = filter === "All" 
-    ? displayedJobs 
-    : displayedJobs.filter(j => j.category === filter);
+  return reduced;
+}
+
+export function InteractiveLiveCard() {
+  const reducedMotion = usePrefersReducedMotion();
+  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("All");
+  const [paused, setPaused] = useState(false);
+  const [userToggled, setUserToggled] = useState(false);
+  const [headIndex, setHeadIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string>(MOCK_JOBS[0].id);
+
+  const effectivelyPaused = userToggled ? paused : reducedMotion;
+
+  useEffect(() => {
+    if (effectivelyPaused || category !== "All") return;
+    const timer = window.setInterval(() => {
+      setHeadIndex((prev) => (prev + 1) % MOCK_JOBS.length);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [effectivelyPaused, category]);
+
+  const orderedJobs =
+    category === "All"
+      ? Array.from({ length: VISIBLE_ROWS }, (_, offset) => MOCK_JOBS[(headIndex + offset) % MOCK_JOBS.length])
+      : MOCK_JOBS.filter((j) => j.category === category);
+
+  const selectedJob = orderedJobs.find((j) => j.id === selectedId) ?? orderedJobs[0];
+
+  const togglePause = () => {
+    setUserToggled(true);
+    setPaused(!effectivelyPaused);
+  };
 
   return (
-    <div className="relative w-full max-w-lg mx-auto lg:mx-0">
-      {/* Glow highlight */}
-      <div className="absolute -inset-1.5 bg-gradient-to-r from-primary/20 via-secondary-container/40 to-primary/20 rounded-xl blur-xl opacity-70" />
-
-      <div className="relative bg-surface-container-lowest dark:bg-surface-container-default border border-outline-variant rounded-lg shadow-level-3 overflow-hidden">
-        {/* Mock Window Title Bar */}
-        <div className="px-5 py-3 border-b border-outline-variant bg-surface-container-low flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
-            <span className="font-mono text-label-small font-semibold uppercase tracking-wider text-primary">
-              Live feed preview
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="text"
-              size="xs"
-              onClick={() => setPausedByUser(!isPaused)}
-              title={isPaused ? "Resume preview" : "Pause preview"}
-              aria-label={isPaused ? "Resume preview" : "Pause preview"}
-            >
-              {isPaused ? <Play size={12} aria-hidden="true" className="text-primary" /> : <Pause size={12} aria-hidden="true" />}
-            </Button>
-            <span className="font-mono text-label-small text-on-surface-variant px-2 py-0.5 rounded-full bg-surface-container-default">
-              Sample data
-            </span>
-          </div>
+    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest shadow-level-1 dark:shadow-none overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-outline-variant bg-surface-container-low">
+        <div className="flex items-center gap-2">
+          <span aria-hidden="true" className="w-2 h-2 rounded-full bg-primary" />
+          <span className="text-label-medium font-medium text-on-surface">Board preview</span>
+          <span className="text-label-small text-on-surface-variant">Sample listings</span>
         </div>
 
-        {/* Filter Toolbar */}
-        <div className="px-4 py-2 border-b border-outline-variant flex items-center justify-between text-body-small bg-surface">
-          <div className="flex gap-1">
-            {(["All", "FAANG+", "Quant"] as const).map((cat) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="group" aria-label="Filter sample roles" className="flex items-center gap-1">
+            {CATEGORIES.map((cat) => {
+              const active = category === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setCategory(cat);
+                    setHeadIndex(0);
+                  }}
+                  className={cn(
+                    "px-3 py-1 min-h-7 rounded-full text-label-small font-medium transition-colors cursor-pointer",
+                    active
+                      ? "bg-primary text-on-primary"
+                      : "bg-surface text-on-surface-variant border border-outline-variant hover:text-on-surface hover:bg-on-surface/8",
+                  )}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={togglePause}
+            aria-label={effectivelyPaused ? "Resume preview" : "Pause preview"}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 min-h-7 rounded-full border border-outline-variant bg-surface text-label-small font-medium text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 transition-colors cursor-pointer"
+          >
+            {effectivelyPaused ? (
+              <Play size={14} strokeWidth={1.5} aria-hidden="true" />
+            ) : (
+              <Pause size={14} strokeWidth={1.5} aria-hidden="true" />
+            )}
+            <span>{effectivelyPaused ? "Resume" : "Pause"}</span>
+          </button>
+        </div>
+      </div>
+
+      <p role="status" className="sr-only">
+        {orderedJobs.length} sample roles visible for {category}.
+      </p>
+
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] divide-y lg:divide-y-0 lg:divide-x divide-outline-variant">
+        <div className="divide-y divide-outline-variant">
+          {orderedJobs.map((job) => {
+            const isSelected = job.id === selectedJob.id;
+            return (
               <button
-                key={cat}
+                key={job.id}
                 type="button"
-                aria-pressed={filter === cat}
-                onClick={() => setFilter(cat)}
-                className={`px-2.5 py-0.5 rounded-full text-label-small font-mono transition-colors ${
-                  filter === cat
-                    ? "bg-secondary-container text-on-secondary-container font-semibold"
-                    : "text-on-surface-variant hover:text-on-surface hover:bg-on-surface/8 focus-visible:bg-on-surface/12"
-                }`}
+                onClick={() => setSelectedId(job.id)}
+                aria-current={isSelected ? "true" : undefined}
+                className={cn(
+                  "w-full text-left px-4 py-3.5 border-l-4 transition-colors cursor-pointer block",
+                  isSelected
+                    ? "border-l-primary bg-primary-container/35"
+                    : "border-l-transparent hover:bg-surface-container-low",
+                )}
               >
-                {cat}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-title-small font-semibold text-on-surface truncate">{job.title}</p>
+                    <p className="text-body-small text-on-surface-variant mt-0.5 truncate">
+                      {job.company} · {job.location}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="font-mono text-label-medium font-medium text-on-surface tabular-nums">{job.pay}</p>
+                    <p className="font-mono text-label-small text-on-surface-variant tabular-nums">{job.posted}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                  {job.skills.map((skill) => (
+                    <span
+                      key={skill}
+                      className="px-2 py-0.5 rounded-xs bg-surface-container-low border border-outline-variant font-mono text-2xs text-on-surface-variant"
+                    >
+                      {skill}
+                    </span>
+                  ))}
+                  {job.sponsorship && (
+                    <span className="px-2 py-0.5 rounded-xs bg-secondary-container text-on-secondary-container font-mono text-2xs font-medium">
+                      {job.sponsorship}
+                    </span>
+                  )}
+                </div>
               </button>
-            ))}
-          </div>
-          <span className="font-mono text-label-small text-on-surface-variant">
-            <span role="status">{filtered.length} visible</span>
-          </span>
+            );
+          })}
         </div>
 
-        {/* Feed List Items */}
-        {/* Not a live region: announcing a new row every 2.8s would talk over
-            everything else. The visible count above is announced on filter. */}
-        <div className="divide-y divide-outline-variant" aria-label="Sample job feed, updating automatically" role="group">
-          {filtered.map((job) => (
-            <div
-              key={`${job.company}-${job.title}`}
-              className="p-3.5 flex items-center justify-between hover:bg-on-surface/8 transition-colors group cursor-pointer"
-            >
-              <div className="min-w-0 flex-1 pr-3">
-                <div className="flex items-center gap-2">
-                  <p className="text-label-large font-medium text-on-surface truncate group-hover:text-primary transition-colors">
-                    {job.title}
-                  </p>
-                  <Badge variant="skill">{job.category}</Badge>
-                </div>
-                <p className="text-label-small text-on-surface-variant mt-0.5">
-                  {job.company} · {job.location}
+        <div className="p-6 flex flex-col justify-between gap-6 bg-surface">
+          <div>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-label-medium font-medium text-primary">{selectedJob.company}</p>
+                <h3 className="text-title-large font-semibold text-on-surface mt-1">{selectedJob.title}</h3>
+                <p className="text-body-small text-on-surface-variant mt-1">
+                  {selectedJob.location} · <span className="font-mono tabular-nums">{selectedJob.pay}</span>
                 </p>
               </div>
-              <div className="text-right shrink-0">
-                <span className="font-mono text-label-small uppercase tracking-wider text-primary block">
-                  {job.source}
-                </span>
-                <span className="font-mono text-label-small text-on-surface-variant block mt-0.5">
-                  {job.time}
-                </span>
+              <span className="px-2.5 py-1 rounded-xs bg-surface-container-low border border-outline-variant font-mono text-label-small text-on-surface-variant shrink-0">
+                {selectedJob.category}
+              </span>
+            </div>
+
+            <p className="text-body-medium text-on-surface-variant mt-4 leading-relaxed">{selectedJob.summary}</p>
+
+            <div className="mt-5">
+              <p className="text-label-medium font-medium text-on-surface-variant mb-2">Extracted skills</p>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedJob.skills.map((skill) => (
+                  <span
+                    key={skill}
+                    className="px-2.5 py-1 rounded-xs bg-surface-container-low border border-outline-variant font-mono text-label-small text-on-surface"
+                  >
+                    {skill}
+                  </span>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
+          </div>
 
-        {/* Card Footer */}
-        <div className="px-4 py-2.5 bg-surface-container-low border-t border-outline-variant flex items-center justify-between text-label-small font-mono text-on-surface-variant">
-          <span>Illustrative listings</span>
-          <span className="text-primary flex items-center gap-1">
-            <CheckCircle2 size={11} /> Pushed over SSE in the app
-          </span>
+          <div className="flex items-center justify-between gap-4 pt-4 border-t border-outline-variant text-label-small text-on-surface-variant">
+            <span>Deduplicated across GitHub and LinkedIn</span>
+            <span className="font-mono tabular-nums">Updated {selectedJob.posted}</span>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Interactive Bento AI Demo Card ───────────────────────────────────────
-export function BentoAIDemoCard() {
-  const [analyzed, setAnalyzed] = useState(false);
-
-  return (
-    <Card tone="elevated" interactive className="flex flex-col justify-between">
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Cpu size={18} className="text-primary" />
-            <h3 className="font-serif text-title-medium font-medium text-on-surface">AI Intelligence Engine</h3>
-          </div>
-          <Button variant="tonal" size="xs" onClick={() => setAnalyzed(!analyzed)}>
-            {analyzed ? "Reset" : "Transform with Gemini"}
-          </Button>
-        </div>
-
-        <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
-          Gemini distills raw market news into structured hiring signals and tech skill demand.
-        </p>
-
-        <div className="bg-surface-container-low border border-outline-variant rounded-md p-3 text-body-small space-y-2">
-          <div className="font-mono text-label-small text-on-surface-variant">Raw Headline:</div>
-          <p className="italic text-on-surface-variant">
-            &quot;NVIDIA accelerates datacenter AI infrastructure investments with new Blackwell platform cluster deployments.&quot;
-          </p>
-
-          <div className="border-t border-outline-variant pt-2">
-            {analyzed ? (
-              <div className="space-y-1.5 text-body-small animate-fadeSlideIn motion-reduce:animate-none">
-                <div className="font-mono text-label-small text-primary font-semibold flex items-center gap-1">
-                  <Sparkles size={10} /> Example takeaways:
-                </div>
-                <div className="flex items-center gap-2 text-on-surface-variant">
-                  <span className="text-primary">→</span> Hiring Sentiment: <strong className="text-primary">Bullish (SWE/ML)</strong>
-                </div>
-                <div className="flex items-center gap-2 text-on-surface-variant">
-                  <span className="text-primary">→</span> Impact: High infrastructure scale
-                </div>
-                <div className="flex flex-wrap gap-1 mt-1 pt-1">
-                  {["CUDA", "Triton", "PyTorch", "RDMA"].map((skill) => (
-                    <Badge key={skill} variant="skill">
-                      {skill}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between py-1 text-on-surface-variant font-mono text-label-small">
-                <span>Click &quot;Transform with Gemini&quot; to test AI parsing</span>
-                <ArrowRight size={12} className="text-primary" />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-
-// ── Interactive Bento Real-Time SSE Card ─────────────────────────────────
 export function BentoSSECard({ initialCount }: { initialCount: number | null }) {
-  // The simulation counts separately: it used to add to the real "last 24h"
-  // figure, so the page's one live statistic could be inflated by clicking.
   const [simulated, setSimulated] = useState(0);
-  const [animating, setAnimating] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const [recentPulse, setRecentPulse] = useState(false);
+  const timerRef = useRef<number | null>(null);
 
-  const triggerMockPing = () => {
-    setAnimating(true);
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const simulateEvent = () => {
     setSimulated((n) => n + 1);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setAnimating(false), 500);
+    setRecentPulse(true);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setRecentPulse(false);
+      timerRef.current = null;
+    }, 600);
   };
 
   return (
-    <Card tone="elevated" interactive className="flex flex-col justify-between">
+    <Card variant="outlined" className="p-6 flex flex-col justify-between gap-6">
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Radio size={18} aria-hidden="true" className="text-primary" />
-            <h3 className="font-serif text-title-medium font-medium text-on-surface">Real-Time Sync (SSE)</h3>
-          </div>
-          <Badge variant="skill">Live Stream</Badge>
+        <div className="flex items-center gap-2 text-on-surface-variant mb-3">
+          <Radio size={16} strokeWidth={1.5} aria-hidden="true" />
+          <span className="text-label-medium font-medium">Live stream</span>
         </div>
-        <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
-          Server-Sent Events push new listings to your screen instantly. Redis Stream backlog preserves event state during re-connections.
+        <h3 className="text-title-large font-semibold text-on-surface">New listings push directly to open tabs</h3>
+        <p className="text-body-medium text-on-surface-variant mt-2">
+          Background crawlers stream newly discovered roles and extracted skills over Server-Sent Events with no manual reload.
         </p>
+      </div>
 
-        <div className="bg-surface-container-low border border-outline-variant rounded-md p-3 text-center">
+      <div className="rounded-lg bg-surface-container-low p-4 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
           {initialCount !== null && (
-            <p className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider mb-3">
-              <span className="font-serif text-title-medium normal-case tracking-normal text-on-surface">{initialCount.toLocaleString("en-US")}</span>{" "}
-              roles added in the last 24h
-            </p>
+            <div>
+              <p className="text-label-small text-on-surface-variant">Added in last 24h</p>
+              <p className="font-mono text-headline-small font-semibold text-on-surface tabular-nums mt-1">
+                {initialCount.toLocaleString("en-US")}
+              </p>
+            </div>
           )}
-          <p className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider mb-1">Simulated events</p>
-          <p
-            aria-live="polite"
-            className={`font-serif text-headline-medium font-medium transition-transform motion-reduce:transition-none ${animating ? "scale-110 motion-reduce:scale-100 text-primary" : "text-on-surface"}`}
-          >
-            {simulated}
-          </p>
-          <Button variant="outlined" size="sm" block onClick={triggerMockPing} className="mt-3">
-            + Simulate a live event (demo)
-          </Button>
+          <div>
+            <p className="text-label-small text-on-surface-variant">Simulated events</p>
+            <p
+              className={cn(
+                "font-mono text-headline-small font-semibold tabular-nums mt-1 transition-colors",
+                recentPulse ? "text-primary" : "text-on-surface",
+              )}
+            >
+              {simulated}
+            </p>
+          </div>
         </div>
+
+        <Button variant="outlined" size="sm" onClick={simulateEvent} className="w-full">
+          Simulate a live event
+        </Button>
       </div>
     </Card>
   );
 }
 
-// ── Daily Crawler Pipeline Card ──────────────────────────────────────────
-export function BentoPipelineCard() {
+export function PipelineHighlights({ newLast24h }: { newLast24h: number | null }) {
   return (
-    <Card tone="elevated" interactive className="flex flex-col justify-between">
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <GitBranch size={18} aria-hidden="true" className="text-primary" />
-          <h3 className="font-serif text-title-medium font-medium text-on-surface">Daily Crawler Pipeline</h3>
-        </div>
-        <p className="text-body-small text-on-surface-variant mb-4 leading-relaxed">
-          Scrapers crawl 4 curated GitHub repos every 6 hours and LinkedIn daily, then fetch each posting&apos;s full description, sanitized and stripped of tracking pixels.
-        </p>
+    <div className="grid lg:grid-cols-12 gap-6">
+      <div className="lg:col-span-7 grid sm:grid-cols-2 gap-6">
+        <Card variant="outlined" className="p-6 flex flex-col justify-between gap-4 sm:col-span-2">
+          <div>
+            <div className="flex items-center gap-2 text-on-surface-variant mb-3">
+              <Zap size={16} strokeWidth={1.5} aria-hidden="true" />
+              <span className="text-label-medium font-medium">Hourly ingestion</span>
+            </div>
+            <h3 className="text-title-large font-semibold text-on-surface">GitHub and LinkedIn merged into one canonical row</h3>
+            <p className="text-body-medium text-on-surface-variant mt-2 max-w-2xl">
+              Cross-posted internships are linked before descriptions are fetched, so each role appears once with its freshest apply link, location, and pay range.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 pt-4 border-t border-outline-variant text-label-small">
+            <div>
+              <p className="font-mono font-semibold text-on-surface">Hourly</p>
+              <p className="text-on-surface-variant mt-0.5">Crawl cadence</p>
+            </div>
+            <div>
+              <p className="font-mono font-semibold text-on-surface">3-layer</p>
+              <p className="text-on-surface-variant mt-0.5">Canonical dedup</p>
+            </div>
+            <div>
+              <p className="font-mono font-semibold text-on-surface">Structured</p>
+              <p className="text-on-surface-variant mt-0.5">Skills &amp; visa tags</p>
+            </div>
+          </div>
+        </Card>
 
-        {/* Visual Pipeline Flow */}
-        <div className="bg-surface-container-low border border-outline-variant rounded-md p-3 space-y-2 font-mono text-label-small">
-          <div className="flex items-center justify-between text-on-surface-variant">
-            <span className="flex items-center gap-1.5 text-on-surface">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary" /> GitHub Repos
-            </span>
-            <span className="text-primary">every 6h</span>
+        <Card variant="outlined" className="p-6 flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-on-surface-variant">
+            <SlidersHorizontal size={16} strokeWidth={1.5} aria-hidden="true" />
+            <span className="text-label-medium font-medium">Fast filtering</span>
           </div>
-          <div className="flex items-center justify-between text-on-surface-variant">
-            <span className="flex items-center gap-1.5 text-on-surface">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary" /> LinkedIn Guest API
-            </span>
-            <span className="text-primary">daily</span>
-          </div>
+          <h3 className="text-title-medium font-semibold text-on-surface">Filter by category, skill, and work type</h3>
+          <p className="text-body-medium text-on-surface-variant">
+            Slice the board by FAANG+, Quant, remote availability, and extracted skills with shareable URL parameters.
+          </p>
+        </Card>
 
-          {/* Deduplication Arrow */}
-          <div className="border-t border-outline-variant pt-2 text-center text-on-surface-variant flex items-center justify-center gap-1 text-label-small uppercase tracking-wider">
-            <span>↓ 3-Tier Dedup: LRU → Redis → PostgreSQL ↓</span>
+        <Card variant="outlined" className="p-6 flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-on-surface-variant">
+            <ShieldCheck size={16} strokeWidth={1.5} aria-hidden="true" />
+            <span className="text-label-medium font-medium">Clean descriptions</span>
           </div>
+          <h3 className="text-title-medium font-semibold text-on-surface">Sanitized job details without tracker clutter</h3>
+          <p className="text-body-medium text-on-surface-variant">
+            Scraped descriptions are stripped to clean Markdown on ingest so you can read requirements side by side before clicking apply.
+          </p>
+        </Card>
+      </div>
 
-          <div className="p-2 rounded-sm bg-primary-container border border-primary/20 text-on-primary-container text-center font-medium">
-            One canonical listing per role
-          </div>
+      <div className="lg:col-span-5 flex flex-col">
+        <div className="flex-1 flex flex-col [&>*]:flex-1">
+          <BentoSSECard initialCount={newLast24h} />
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

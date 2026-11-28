@@ -1,167 +1,101 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { cookies } from "next/headers";
-import ThemeToggle from "@/components/ThemeToggle";
 import SkipLink from "@/components/SkipLink";
-import MarketingMobileNav from "./MarketingMobileNav";
+import ThemeToggle from "@/components/ThemeToggle";
 import { ButtonLink } from "@/components/ui/Button";
-import { SITE_URL } from "@/lib/urls";
-import type { User } from "@/lib/api";
-import { INTERNAL_API_URL } from "@/lib/server-api";
-
-export const dynamic = "force-dynamic";
-
-const TITLE = "JobPrep — Automated Tech Career Command Center";
-const SHORT_DESCRIPTION =
-  "SWE internship listings from GitHub and LinkedIn, with AI skill extraction and live updates.";
+import MarketingMobileNav from "./MarketingMobileNav";
 
 export const metadata: Metadata = {
-  title: TITLE,
+  title: {
+    default: "JobPrep — Software engineering internships in one feed",
+    template: "%s | JobPrep",
+  },
   description:
-    "JobPrep aggregates SWE internship listings from GitHub repos and LinkedIn, enriches them with AI-powered skill extraction via Gemini, and delivers real-time updates. Never miss a role.",
-  keywords: [
-    "software engineer internship",
-    "SWE intern jobs",
-    "tech career",
-    "job board",
-    "automated job aggregator",
-    "AI job matching",
-  ],
-  // og:image / twitter:image come from ./opengraph-image.tsx.
+    "Software engineering, ML, and quant internships aggregated hourly from GitHub and LinkedIn with skill extraction, visa sponsorship tags, and live feed updates.",
   openGraph: {
-    title: TITLE,
-    description: SHORT_DESCRIPTION,
+    title: "JobPrep — Software engineering internships in one feed",
+    description:
+      "Software engineering, ML, and quant internships aggregated hourly from GitHub and LinkedIn with skill extraction and live feed updates.",
     type: "website",
-    url: "/",
     siteName: "JobPrep",
   },
   twitter: {
     card: "summary_large_image",
-    title: TITLE,
-    description: SHORT_DESCRIPTION,
+    title: "JobPrep — Software engineering internships in one feed",
+    description:
+      "Software engineering, ML, and quant internships aggregated hourly from GitHub and LinkedIn.",
   },
+  robots: { index: true, follow: true },
 };
 
-async function getSessionUser(): Promise<User | null> {
-  try {
-    const cookieHeader = (await cookies()).toString();
-    if (!cookieHeader || !cookieHeader.includes("access_token")) return null;
-    const res = await fetch(`${INTERNAL_API_URL}/api/v1/auth/me`, {
-      headers: { cookie: cookieHeader },
-      cache: "no-store",
-    });
-    if (res.ok) return (await res.json()) as User;
-    return null;
-  } catch {
-    return null;
-  }
-}
+const navLinks = [
+  { href: "/#features", label: "Features" },
+  { href: "/#demo", label: "Live preview" },
+];
 
-/**
- * Persistent marketing chrome, rendered on the server. The header adapts
- * for authenticated sessions vs. guest visitors.
- */
-export default async function MarketingLayout({ children }: { children: React.ReactNode }) {
-  const user = await getSessionUser();
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "WebSite",
-        "@id": `${SITE_URL}/#website`,
-        url: `${SITE_URL}/`,
-        name: "JobPrep",
-        description: "Automated SWE Internship Aggregator & AI Career Command Center",
-      },
-      {
-        "@type": "SoftwareApplication",
-        "@id": `${SITE_URL}/#application`,
-        name: "JobPrep Platform",
-        applicationCategory: "BusinessApplication",
-        operatingSystem: "Web",
-        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-        featureList: [
-          "Automated GitHub and LinkedIn crawling",
-          "3-layer deduplication pipeline (LRU, Redis, PostgreSQL)",
-          "Gemini skill extraction and pgvector semantic search",
-          "Live Server-Sent Events updates",
-        ],
-      },
-    ],
-  };
-
+export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-surface text-on-surface font-sans">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-
+    <div className="min-h-screen flex flex-col bg-surface text-on-surface">
       <SkipLink />
-      <header className="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-surface/90 border-b border-outline-variant">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+
+      <header className="sticky top-0 z-40 h-14 bg-surface/95 backdrop-blur-md border-b border-outline-variant">
+        <div className="max-w-app mx-auto h-full px-4 sm:px-6 flex items-center justify-between gap-4">
           <Link
             href="/"
-            className="font-serif text-title-large font-medium tracking-tight text-on-surface hover:text-primary transition-colors"
+            className="text-title-large font-semibold tracking-tight text-on-surface hover:text-primary transition-colors"
           >
             JobPrep
           </Link>
 
-          <nav aria-label="Main" className="hidden md:flex items-center gap-6 text-label-large font-medium text-on-surface-variant">
-            <Link href="/jobs" className="hover:text-on-surface transition-colors font-medium">Job Board</Link>
-            <Link href="/news" className="hover:text-on-surface transition-colors font-medium">Tech Radar</Link>
-            <Link href="/#features" className="hover:text-on-surface transition-colors">Features</Link>
-            <Link href="/#demo" className="hover:text-on-surface transition-colors">AI Intelligence</Link>
+          <nav aria-label="Primary" className="hidden md:flex items-center gap-6">
+            {navLinks.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                className="text-label-large font-medium text-on-surface-variant hover:text-on-surface transition-colors"
+              >
+                {label}
+              </Link>
+            ))}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <ThemeToggle />
-            {user ? (
-              <>
-                <span className="hidden sm:inline font-sans text-label-medium text-on-surface-variant truncate max-w-44 border border-outline-variant px-3 py-1 rounded-full bg-surface-container-low" title={user.email}>
-                  {user.email}
-                </span>
-                <ButtonLink href="/jobs" variant="filled" size="sm">
-                  Job Board
-                </ButtonLink>
-                <MarketingMobileNav isLoggedIn />
-              </>
-            ) : (
-              <>
-                <span className="hidden sm:inline">
-                  <ButtonLink href="/login" variant="text" size="sm">
-                    Sign In
-                  </ButtonLink>
-                </span>
-                <ButtonLink href="/register" variant="filled" size="sm">
-                  Get Started
-                </ButtonLink>
-                <MarketingMobileNav />
-              </>
-            )}
+            <div className="hidden md:flex items-center gap-2">
+              <ButtonLink href="/login" variant="text" size="sm">
+                Sign in
+              </ButtonLink>
+              <ButtonLink href="/register" variant="filled" size="sm">
+                Get started
+              </ButtonLink>
+            </div>
+            <MarketingMobileNav links={navLinks} />
           </div>
         </div>
       </header>
 
-      {/* Skip-link target; programmatic focus only, so no ring around the page. */}
-      <main id="main" tabIndex={-1} className="focus:outline-none">
+      <main id="main" tabIndex={-1} className="flex-1 focus:outline-none">
         {children}
       </main>
 
-      <footer className="border-t border-outline-variant py-8 bg-surface-container-low/40 text-body-small">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider">
-            © 2026 JobPrep · Built with Next.js, FastAPI, Celery, Gemini
-          </p>
-          <nav aria-label="Footer" className="flex gap-4 text-on-surface-variant">
-            <Link href="/jobs" className="hover:text-primary transition-colors">Jobs</Link>
-            <Link href="/news" className="hover:text-primary transition-colors">Radar</Link>
-            {!user && (
-              <>
-                <Link href="/login" className="hover:text-primary transition-colors">Sign In</Link>
-                <Link href="/register" className="hover:text-primary transition-colors">Register</Link>
-              </>
-            )}
+      <footer className="border-t border-outline-variant bg-surface-container-low">
+        <div className="max-w-app mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+            <span className="text-title-medium font-semibold text-on-surface">JobPrep</span>
+            <p className="text-body-small text-on-surface-variant">
+              Hourly software engineering internship listings from GitHub and LinkedIn.
+            </p>
+          </div>
+          <nav aria-label="Footer" className="flex items-center gap-4 text-label-medium text-on-surface-variant">
+            <Link href="/jobs" className="hover:text-on-surface transition-colors">
+              Job board
+            </Link>
+            <Link href="/news" className="hover:text-on-surface transition-colors">
+              Tech news
+            </Link>
+            <Link href="/login" className="hover:text-on-surface transition-colors">
+              Sign in
+            </Link>
           </nav>
         </div>
       </footer>
