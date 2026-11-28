@@ -22,13 +22,13 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
       target="_blank"
       rel="noopener noreferrer"
       className={cardClasses({
-        tone: "elevated",
-        padding: "lg",
+        tone: "outlined",
+        padding: "md",
         interactive: true,
         className: "block group",
       })}
     >
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <Badge variant="source">{article.source_domain}</Badge>
         {article.categories?.map((cat) => (
           <Badge key={cat} variant="skill">
@@ -36,34 +36,40 @@ export default function ArticleCard({ article }: { article: NewsArticle }) {
           </Badge>
         ))}
         {article.published_at && (
-          <span className="ml-auto font-mono text-label-small text-on-surface-variant flex items-center gap-1">
-            <Clock size={11} aria-hidden="true" />
+          <span className="ml-auto font-mono text-label-small text-on-surface-variant tabular-nums flex items-center gap-1">
+            <Clock size={12} strokeWidth={1.5} aria-hidden="true" />
             <time dateTime={article.published_at}>{formatDate(article.published_at)}</time>
           </span>
         )}
       </div>
 
-      <h2 className="text-title-large font-serif font-medium text-on-surface group-hover:text-primary transition-colors mb-3 flex items-start gap-2">
-        {article.title || article.url}
-        <ExternalLink size={14} aria-hidden="true" className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-primary" />
+      <h2 className="text-title-large font-semibold text-on-surface group-hover:text-primary transition-colors mb-2 flex items-start gap-2">
+        <span>{article.title || article.url}</span>
+        <ExternalLink
+          size={16}
+          strokeWidth={1.5}
+          aria-hidden="true"
+          className="opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0 text-primary"
+        />
       </h2>
 
-      <p className="font-sans text-body-medium text-on-surface-variant leading-relaxed line-clamp-3">{article.summary || "No summary available."}</p>
+      <p className="font-sans text-body-medium text-on-surface-variant leading-relaxed line-clamp-3">
+        {article.summary || "No summary available."}
+      </p>
       {!article.enriched_at && (
-        <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-label-small uppercase tracking-wider text-on-surface-variant">
-          <Spinner size={11} /> AI summary pending
+        <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-label-small text-on-surface-variant">
+          <Spinner size={12} /> Summary pending
         </p>
       )}
 
       <div className="flex items-center gap-1.5 mt-4 flex-wrap">
         {article.tags?.map((tag) => (
           <Badge key={tag} variant="neutral">
-            <Tag size={9} aria-hidden="true" /> {tag}
+            <Tag size={10} strokeWidth={1.5} aria-hidden="true" /> {tag}
           </Badge>
         ))}
         {article.scraped_at && (
-          // Relative to now, so the server render and hydration can differ.
-          <span suppressHydrationWarning className="ml-auto font-mono text-label-small text-on-surface-variant">
+          <span suppressHydrationWarning className="ml-auto font-mono text-label-small text-on-surface-variant tabular-nums">
             Analyzed {timeAgo(article.scraped_at)}
           </span>
         )}

@@ -16,7 +16,7 @@ export default function JobListPagination({
   if (pages <= 1) return null;
   return (
     <nav aria-label="Pagination" className="flex items-center justify-between gap-2 px-4 py-3 border-t border-outline-variant">
-      <span className="font-mono text-label-small text-on-surface-variant uppercase tracking-wider">
+      <span className="font-mono text-label-small text-on-surface-variant tabular-nums">
         Page {page} of {pages} ({total}
         {capped ? "+" : ""} total)
       </span>

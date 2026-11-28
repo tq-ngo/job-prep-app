@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Briefcase } from "lucide-react";
 import { Job, JobEvent, JobListResponse, JobSummary } from "@/lib/api";
-import { hasActiveFilters, sameFilters, toListParams, type JobFilters } from "@/lib/job-filters";
+import { hasActiveFilters, sameFilters, toListParams, type JobFilters, type JobListParams } from "@/lib/job-filters";
 import { jobQueryKey, useJob, useJobs } from "@/hooks/useJobs";
 import { useJobAlerts } from "@/hooks/useJobAlerts";
 import { DESKTOP_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
@@ -18,6 +18,23 @@ import JobList, { JobListSkeleton } from "@/components/jobs/JobList";
 import JobListPagination from "@/components/jobs/JobListPagination";
 import { useJobFeedUrlState } from "@/components/jobs/useJobFeedUrlState";
 
+const MAX_DISPLAY_TOTAL = 500;
+
+function isUnfilteredDatePageOne(params: JobListParams | undefined): boolean {
+  if (!params) return false;
+  return (
+    (params.page ?? 1) === 1 &&
+    !params.q &&
+    !params.category &&
+    !params.source &&
+    !params.work_type &&
+    !params.sponsorship &&
+    !params.skill &&
+    !params.is_remote &&
+    (!params.sort_by || params.sort_by === "date")
+  );
+}
+
 interface JobFeedProps {
   initialData?: JobListResponse;
   initialDataUpdatedAt?: number;
@@ -29,9 +46,6 @@ interface JobFeedProps {
  * List and detail side by side (lg+), or one at a time below lg: the list,
  * or the selected job with a way back. Which one shows is pure CSS keyed on
  * ?jobId=, so the server HTML is already right for every screen size.
- *
- * On lg+ the two panes scroll independently and the page doesn't; below lg
- * the page scrolls normally (so mobile browsers can collapse their chrome).
  */
 export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilters }: JobFeedProps) {
   const { filters, activeJobId, setFilter, clearFilters, setPage, jobHref, openJob, closeJob } = useJobFeedUrlState();
@@ -40,73 +54,97 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
 
   // The server seeded exactly one filter set; only that query may use it.
   const seeded = initialData && initialFilters && sameFilters(initialFilters, filters);
-  const jobsQuery = useJobs(toListParams(filters), seeded ? { initialData, initialDataUpdatedAt } : {});
+  const listParams = toListParams(filters);
+  const jobsQuery = useJobs(listParams, seeded ? { initialData, initialDataUpdatedAt } : {});
   const { data, isLoading, isError, isPlaceholderData, refetch } = jobsQuery;
   const jobs = data?.items ?? [];
 
   // ── Continuous live updates ─────────────────────────────────────────────
   // Newly retrieved postings from background crawlers are pushed directly
-  // into the feed without requiring manual refresh or showing intrusive alerts.
-  // Invalidation is debounced so bursts of newly ingested postings during an
-  // active crawl batch coalesce into a single smooth refetch.
+  // into unfiltered page-1 feeds without manual refreshes or alert popups.
   const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { connected: sseConnected } = useJobAlerts({
     onEvent: useCallback(
       (event: JobEvent) => {
         if (event.kind === "created") {
-          // Immediately push the newly created job directly into the feed cache
-          queryClient.setQueriesData<JobListResponse>({ queryKey: ["jobs"] }, (old) => {
-            if (!old) return old;
-            if (old.items.some((job) => job.id === event.id)) return old;
+          // Only optimistically prepend into unfiltered, page-1, date-sorted queries
+          // so filtered views or deeper pages never receive mismatched rows.
+          queryClient.setQueriesData<JobListResponse>(
+            {
+              queryKey: ["jobs"],
+              predicate: (query) => isUnfilteredDatePageOne(query.queryKey[1] as JobListParams | undefined),
+            },
+            (old) => {
+              if (!old) return old;
+              if (old.items.some((job) => job.id === event.id)) return old;
 
-            const newJob: JobSummary = {
-              id: event.id,
-              title: event.title,
-              company: event.company,
-              company_domain: event.company_domain ?? null,
-              location: event.location,
-              skills: event.skills ?? [],
-              apply_url: event.apply_url,
-              source: event.source,
-              is_remote: event.is_remote,
-              sponsorship_status: event.sponsorship_status ?? null,
-              sponsorship_label: event.sponsorship_label ?? null,
-              category: event.category ?? null,
-              posted_at: event.posted_at ?? null,
-              scraped_at: new Date().toISOString(),
-              salary_min: event.salary_min ?? null,
-              salary_max: event.salary_max ?? null,
-              salary_currency: event.salary_currency ?? "USD",
-              salary_period: (event.salary_period as "hour" | "year") ?? null,
-            };
+              const newJob: JobSummary = {
+                id: event.id,
+                title: event.title,
+                company: event.company,
+                company_domain: event.company_domain ?? null,
+                location: event.location,
+                skills: event.skills ?? [],
+                apply_url: event.apply_url,
+                source: event.source,
+                is_remote: event.is_remote,
+                sponsorship_status: event.sponsorship_status ?? null,
+                sponsorship_label: event.sponsorship_label ?? null,
+                category: event.category ?? null,
+                posted_at: event.posted_at ?? null,
+                scraped_at: new Date().toISOString(),
+                salary_min: event.salary_min ?? null,
+                salary_max: event.salary_max ?? null,
+                salary_currency: event.salary_currency ?? "USD",
+                salary_period: (event.salary_period as "hour" | "year") ?? null,
+              };
 
-            return {
-              ...old,
-              total: old.total + 1,
-              items: [newJob, ...old.items],
-            };
-          });
+              const hitCap = Boolean(old.capped) || old.total >= MAX_DISPLAY_TOTAL;
+              const nextTotal = hitCap ? Math.min(old.total, MAX_DISPLAY_TOTAL) : old.total + 1;
+              const maxItems = old.page_size || old.items.length + 1;
+
+              return {
+                ...old,
+                total: nextTotal,
+                capped: hitCap || nextTotal >= MAX_DISPLAY_TOTAL ? true : old.capped,
+                items: [newJob, ...old.items].slice(0, maxItems),
+              };
+            },
+          );
 
           if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current);
           invalidateTimerRef.current = setTimeout(() => {
             queryClient.invalidateQueries({ queryKey: ["jobs"] });
           }, 300);
         } else if (event.kind === "enriched") {
-          // Immediately update enriched attributes (skills) in query cache
+          const patch = {
+            skills: event.skills,
+            ...(event.location !== undefined ? { location: event.location } : {}),
+            ...(event.is_remote !== undefined ? { is_remote: event.is_remote } : {}),
+            ...(event.sponsorship_status !== undefined ? { sponsorship_status: event.sponsorship_status } : {}),
+            ...(event.sponsorship_label !== undefined ? { sponsorship_label: event.sponsorship_label } : {}),
+            ...(event.category !== undefined ? { category: event.category } : {}),
+            ...(event.salary_min !== undefined ? { salary_min: event.salary_min } : {}),
+            ...(event.salary_max !== undefined ? { salary_max: event.salary_max } : {}),
+            ...(event.salary_currency !== undefined ? { salary_currency: event.salary_currency } : {}),
+            ...(event.salary_period !== undefined
+              ? { salary_period: (event.salary_period as "hour" | "year" | null) ?? null }
+              : {}),
+          };
+
           queryClient.setQueriesData<JobListResponse>({ queryKey: ["jobs"] }, (old) => {
             if (!old) return old;
             return {
               ...old,
-              items: old.items.map((job) =>
-                job.id === event.id ? { ...job, skills: event.skills } : job
-              ),
+              items: old.items.map((job) => (job.id === event.id ? { ...job, ...patch } : job)),
             };
           });
           queryClient.setQueryData<Job>(jobQueryKey(event.id), (old) => {
             if (!old) return old;
-            return { ...old, skills: event.skills };
+            return { ...old, ...patch };
           });
+          queryClient.invalidateQueries({ queryKey: jobQueryKey(event.id) });
         }
       },
       [queryClient],
@@ -131,23 +169,40 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
   };
 
   // ── Selection ──────────────────────────────────────────────────────────
-  // With nothing selected, desktop shows the first result, like LinkedIn,
-  // without writing it to the URL. Below lg that pane is hidden, so its
-  // full job isn't fetched there.
-  const defaultJobId = !activeJobId && isDesktop ? (jobs[0]?.id ?? null) : null;
-  const shownId = activeJobId ?? jobs[0]?.id ?? null;
+  // With nothing selected, desktop shows the first result without writing to
+  // the URL. Pin that default id per filter/page signature so an SSE prepend
+  // doesn't yank the reader out of the description they're currently viewing.
+  const filterSignature = JSON.stringify(listParams);
+  const [pinnedDefault, setPinnedDefault] = useState<{ sig: string; id: string | null }>({
+    sig: filterSignature,
+    id: jobs[0]?.id ?? null,
+  });
+
+  const firstJobId = jobs[0]?.id ?? null;
+  const pinnedStillVisible =
+    pinnedDefault.sig === filterSignature &&
+    pinnedDefault.id !== null &&
+    jobs.some((j) => j.id === pinnedDefault.id);
+
+  const stableFirstId = pinnedStillVisible ? pinnedDefault.id : firstJobId;
+
+  useEffect(() => {
+    if (pinnedDefault.sig !== filterSignature || (!pinnedStillVisible && pinnedDefault.id !== firstJobId)) {
+      setPinnedDefault({ sig: filterSignature, id: firstJobId });
+    }
+  }, [filterSignature, firstJobId, pinnedDefault.id, pinnedDefault.sig, pinnedStillVisible]);
+
+  const defaultJobId = !activeJobId && isDesktop ? stableFirstId : null;
+  const shownId = activeJobId ?? stableFirstId;
   const row = jobs.find((j) => j.id === shownId);
   const detail = useJob(activeJobId ?? defaultJobId, row);
   const shownJob = detail.data ?? row ?? null;
 
   const focusTitleRequestRef = useRef(false);
   const listScrollY = useRef(0);
-  // Whether the open job was pushed from the list, so "Back" can pop it.
   const openedFromList = useRef(false);
 
   const handleSelect = (job: JobSummary, e: MouseEvent<HTMLAnchorElement>) => {
-    // detail 0 = activated by keyboard. Mobile always moves focus, since the
-    // list it came from disappears.
     focusTitleRequestRef.current = e.detail === 0 || !isDesktop;
     listScrollY.current = window.scrollY;
     openedFromList.current = true;
@@ -156,11 +211,9 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
 
   const handleBack = () => {
     if (openedFromList.current) window.history.back();
-    else closeJob("push"); // deep link: push list state so hardware back navigates within history rather than exiting site
+    else closeJob("push");
   };
 
-  // Below lg, the detail view starts at the top, and returning restores the
-  // list where it was, with focus on the job just viewed.
   const prevActiveJobId = useRef(activeJobId);
   useEffect(() => {
     const prev = prevActiveJobId.current;
@@ -183,12 +236,15 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
   const filtered = hasActiveFilters(filters);
 
   return (
-    <div className="bg-surface text-on-surface font-sans flex flex-col lg:h-[calc(100dvh-3rem)]">
-      {/* Below lg the open job replaces the list, filters included. */}
+    <div className="bg-surface text-on-surface font-sans flex flex-col lg:h-[calc(100dvh-3.5rem)]">
+      {/* Keep a page-level h1 in the accessibility tree when mobile replaces the toolbar with the detail pane. */}
+      {activeJobId && <h1 className="sr-only lg:hidden">Job Board</h1>}
+
       <JobFeedToolbar
         className={activeJobId ? "hidden lg:block" : undefined}
         filters={filters}
         onFilter={setFilter}
+        onClearAll={clearFilters}
         totalLabel={totalLabel}
         liveConnected={sseConnected}
       />
@@ -202,7 +258,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
             activeJobId ? "hidden" : "flex",
           )}
         >
-          {isError && !data && (
+          {isError && (
             <Alert
               variant="error"
               className="m-4"
@@ -225,7 +281,7 @@ export default function JobFeed({ initialData, initialDataUpdatedAt, initialFilt
             </>
           ) : jobs.length === 0 && !isError ? (
             <EmptyState
-              icon={<Briefcase size={22} />}
+              icon={<Briefcase size={20} strokeWidth={1.5} />}
               title="No positions found"
               description={
                 filters.q

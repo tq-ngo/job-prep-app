@@ -21,6 +21,9 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
     initialData,
     initialDataUpdatedAt,
     staleTime: 60_000,
+    // Poll every 5s while any article is still waiting on background AI enrichment.
+    refetchInterval: (query) =>
+      query.state.data?.some((article) => !article.enriched_at) ? 5000 : false,
   });
 
   const linkedin = useNewsScrape(() => newsApi.triggerLinkedInNews(), {
@@ -35,9 +38,9 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-wrap gap-3 justify-between items-center mb-6 border-b border-outline-variant pb-4">
           <div>
-            <h1 className="text-headline-medium font-serif font-medium text-on-surface tracking-tight">Tech News Radar</h1>
-            <p className="font-mono text-label-small text-on-surface-variant mt-1 uppercase tracking-wider">
-              {count > 0 ? `${count} article${count !== 1 ? "s" : ""} · AI-summarized insights` : "AI-summarized insights from across the industry"}
+            <h1 className="text-headline-medium font-semibold text-on-surface tracking-tight">Tech News Radar</h1>
+            <p className="font-mono text-label-small text-on-surface-variant mt-1 tabular-nums">
+              {count > 0 ? `${count} article${count !== 1 ? "s" : ""} · Summarized industry coverage` : "Summarized industry coverage"}
             </p>
           </div>
           <Button
@@ -45,7 +48,7 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
             size="sm"
             onClick={() => linkedin.run(undefined).catch(() => {})}
             loading={linkedin.busy}
-            icon={<RefreshCw size={13} aria-hidden="true" />}
+            icon={<RefreshCw size={14} strokeWidth={1.5} aria-hidden="true" />}
           >
             {linkedin.busy ? "Fetching…" : "Refresh News"}
           </Button>
@@ -83,8 +86,6 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
             ))}
           </SkeletonGroup>
         ) : isError && !articles ? (
-          // Not "Radar is empty": that told people to fetch more news when
-          // the real problem was that the list couldn't load at all.
           <Alert
             variant="error"
             action={
@@ -97,8 +98,8 @@ export default function NewsFeed({ initialData, initialDataUpdatedAt }: { initia
           </Alert>
         ) : count === 0 ? (
           <EmptyState
-            icon={<Newspaper size={22} />}
-            title="Radar is empty."
+            icon={<Newspaper size={20} strokeWidth={1.5} />}
+            title="No articles yet"
             description={
               <>
                 Click <strong className="text-primary">Refresh News</strong> to fetch today&apos;s LinkedIn headlines, or paste a URL above to analyze any article.

@@ -2,9 +2,9 @@
 
 import { useEffect, useId, useRef, type RefObject } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Briefcase, ExternalLink, SearchX, Sparkles } from "lucide-react";
+import { ArrowLeft, Briefcase, ExternalLink, SearchX } from "lucide-react";
 import type { Job, JobSummary } from "@/lib/api";
-import { formatDate, formatLocation } from "@/lib/format";
+import { formatDate, formatLocation, formatPay } from "@/lib/format";
 import { getJobSponsorship } from "@/lib/sponsorship";
 import Badge from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -74,7 +74,13 @@ export default function JobDetailPane({
   }, [jobId, focusTitleRequestRef]);
 
   const backButton = (
-    <Button variant="text" size="sm" onClick={onBack} icon={<ArrowLeft size={14} aria-hidden="true" />} className="lg:hidden -ml-2">
+    <Button
+      variant="text"
+      size="sm"
+      onClick={onBack}
+      icon={<ArrowLeft size={16} strokeWidth={1.5} aria-hidden="true" />}
+      className="lg:hidden -ml-2"
+    >
       Back to results
     </Button>
   );
@@ -87,12 +93,12 @@ export default function JobDetailPane({
           <DetailSkeleton />
         ) : unavailable ? (
           <EmptyState
-            icon={<SearchX size={22} />}
+            icon={<SearchX size={20} strokeWidth={1.5} />}
             title="This job isn't available"
             description="It may have been removed or filled. Pick another role from the list."
           />
         ) : (
-          <EmptyState icon={<Briefcase size={22} />} title="No job selected" description="Pick a role from the list to see its details." />
+          <EmptyState icon={<Briefcase size={20} strokeWidth={1.5} />} title="No job selected" description="Pick a role from the list to see its details." />
         )}
       </section>
     );
@@ -100,6 +106,7 @@ export default function JobDetailPane({
 
   const description = "description" in job ? job.description : null;
   const sponsorship = getJobSponsorship(job);
+  const pay = formatPay(job);
 
   const workType =
     job.work_type === "remote" || job.is_remote
@@ -115,11 +122,22 @@ export default function JobDetailPane({
               : "On-site";
 
   const metrics = [
+    ...(pay
+      ? [
+          {
+            label: "Compensation",
+            value: <span className="font-mono font-medium text-on-surface tabular-nums">{pay}</span>,
+          },
+        ]
+      : []),
     {
-      label: "Work Type",
+      label: "Work type",
       value: <span className="font-sans font-medium text-on-surface">{workType}</span>,
     },
-    { label: "Posted", value: job.posted_at ? formatDate(job.posted_at) : "Unknown" },
+    {
+      label: "Posted",
+      value: <span className="font-mono tabular-nums">{job.posted_at ? formatDate(job.posted_at) : "Unknown"}</span>,
+    },
     {
       label: "Status",
       value: (
@@ -129,7 +147,7 @@ export default function JobDetailPane({
       ),
     },
     {
-      label: "Visa / Work Auth",
+      label: "Visa / work auth",
       value: sponsorship?.label ? (
         <span
           className={
@@ -152,18 +170,24 @@ export default function JobDetailPane({
       aria-labelledby={titleId}
       className={cn("flex-col min-w-0 lg:flex-1 lg:overflow-y-auto bg-surface-container-low/40", className)}
     >
-      <header className="sticky top-12 lg:top-0 z-10 bg-surface-container-lowest/95 dark:bg-surface-container-low/95 backdrop-blur-md border-b border-outline-variant px-4 sm:px-6 lg:px-8 py-4 shadow-level-1">
+      <header className="sticky top-14 lg:top-0 z-10 bg-surface-container-lowest/95 dark:bg-surface-container-low/95 backdrop-blur-md border-b border-outline-variant px-4 sm:px-6 lg:px-8 py-4">
         <div className="mb-2 lg:hidden">{backButton}</div>
         <div className="flex items-start gap-4">
           <CompanyAvatar company={job.company} companyDomain={job.company_domain} size="lg" />
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-headline-small font-serif font-medium text-on-surface leading-tight">
+            <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-headline-small font-semibold text-on-surface leading-tight">
               {job.title}
             </h2>
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-on-surface-variant font-sans text-body-small mt-1.5">
               <span className="font-medium text-on-surface">{job.company}</span>
-              <span aria-hidden="true">•</span>
+              <span aria-hidden="true">·</span>
               <span>{formatLocation(job)}</span>
+              {pay && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono font-medium text-on-surface tabular-nums">{pay}</span>
+                </>
+              )}
               {job.is_remote && job.location && <Badge variant="remote">Remote</Badge>}
               {sponsorship?.label && (
                 <Badge
@@ -181,17 +205,25 @@ export default function JobDetailPane({
             </p>
           </div>
           <ButtonLink href={job.apply_url} external variant="filled" size="sm" className="shrink-0 px-5">
-            Apply <ExternalLink size={13} aria-hidden="true" />
+            <span>Apply</span>
+            <ExternalLink size={14} strokeWidth={1.5} aria-hidden="true" />
           </ButtonLink>
         </div>
       </header>
 
-      {/* Detail pane stretches to right edge with comfortable M3 contained reading surface */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3.5">
+        <dl
+          className={cn(
+            "grid grid-cols-2 gap-4",
+            metrics.length >= 5 ? "sm:grid-cols-3 xl:grid-cols-5" : "sm:grid-cols-4",
+          )}
+        >
           {metrics.map(({ label, value }) => (
-            <div key={label} className="border border-outline-variant rounded-md p-3.5 bg-surface-container-lowest dark:bg-surface-container-low shadow-level-1">
-              <dt className="text-label-small font-mono text-on-surface-variant uppercase tracking-wider mb-1">{label}</dt>
+            <div
+              key={label}
+              className="border border-outline-variant rounded-md p-4 bg-surface-container-lowest dark:bg-surface-container-low"
+            >
+              <dt className="text-label-small font-mono text-on-surface-variant mb-1">{label}</dt>
               <dd className="text-body-small font-sans font-medium text-on-surface truncate">{value}</dd>
             </div>
           ))}
@@ -199,9 +231,7 @@ export default function JobDetailPane({
 
         {job.skills && job.skills.length > 0 && (
           <section className="border-t border-outline-variant pt-4">
-            <h3 className="text-label-medium font-mono uppercase tracking-wider text-on-surface-variant mb-2.5 flex items-center gap-1.5">
-              <Sparkles size={12} aria-hidden="true" className="text-primary" /> Extracted skills
-            </h3>
+            <h3 className="text-label-medium font-medium text-on-surface-variant mb-3">Extracted skills</h3>
             <ul className="flex flex-wrap gap-1.5">
               {job.skills.map((skill) => (
                 <li key={skill}>
@@ -215,11 +245,11 @@ export default function JobDetailPane({
         )}
 
         <section className="border-t border-outline-variant pt-4">
-          <h3 className="text-label-medium font-mono uppercase tracking-wider text-on-surface-variant mb-3">Job description</h3>
+          <h3 className="text-label-medium font-medium text-on-surface-variant mb-3">Job description</h3>
           {descriptionLoading ? (
             <DescriptionSkeleton />
           ) : description ? (
-            <div className="rounded-lg border border-outline-variant bg-surface-container-lowest dark:bg-surface-container-low p-5 sm:p-6 shadow-level-1">
+            <div className="rounded-lg border border-outline-variant bg-surface-container-lowest dark:bg-surface-container-low p-6">
               <JobDescription markdown={description} />
             </div>
           ) : (
@@ -231,7 +261,7 @@ export default function JobDetailPane({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-label-medium font-medium text-primary hover:underline"
               >
-                View the posting on the company site <ExternalLink size={12} aria-hidden="true" />
+                View the posting on the company site <ExternalLink size={14} strokeWidth={1.5} aria-hidden="true" />
               </a>
             </div>
           )}
@@ -251,7 +281,7 @@ function DetailSkeleton() {
           <Skeleton className="h-3 w-1/3" />
         </div>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[0, 1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-14" />
         ))}

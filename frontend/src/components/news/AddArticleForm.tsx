@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Radio } from "lucide-react";
 import { newsApi } from "@/lib/api";
 import Alert from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -15,7 +14,7 @@ import { useNewsScrape } from "./useNewsScrape";
 export default function AddArticleForm() {
   const [url, setUrl] = useState("");
   const scrape = useNewsScrape((u: string) => newsApi.triggerScrape(u), {
-    queuedMessage: "Analyzing article content and generating an AI summary…",
+    queuedMessage: "Analyzing article content and generating a summary…",
     failureMessage: "Couldn't analyze that article.",
   });
 
@@ -31,9 +30,9 @@ export default function AddArticleForm() {
   };
 
   return (
-    <Card as="section" tone="filled" padding="sm" className="mb-8" aria-labelledby="add-article-heading">
-      <h2 id="add-article-heading" className="text-label-medium font-sans font-medium text-on-surface mb-3 flex items-center gap-2">
-        <Radio size={14} aria-hidden="true" className="text-primary" /> Add Article to Radar
+    <Card as="section" tone="filled" padding="md" className="mb-8" aria-labelledby="add-article-heading">
+      <h2 id="add-article-heading" className="text-title-small font-semibold text-on-surface mb-3">
+        Add article to radar
       </h2>
       <form onSubmit={handleSubmit} className="flex gap-2 items-start">
         <Field label="Article URL" labelVisible={false} className="flex-1">
@@ -43,7 +42,7 @@ export default function AddArticleForm() {
             required
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://techcrunch.com/article..."
+            placeholder="https://techcrunch.com/article"
           />
         </Field>
         <Button type="submit" variant="filled" size="sm" loading={scrape.busy}>

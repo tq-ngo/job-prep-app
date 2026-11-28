@@ -15,6 +15,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const params = await searchParams;
   const filters = parseJobFilters((k) => {
     const v = params[k];
+    if (Array.isArray(v)) return v[0] ?? null;
     return typeof v === "string" ? v : null;
   });
 

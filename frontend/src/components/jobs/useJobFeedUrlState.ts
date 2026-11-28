@@ -11,13 +11,7 @@ type Update = (params: URLSearchParams) => void;
  * reloads, shared links and Back/Forward all restore it.
  *
  * Writes go through window.history, not router.push: Next syncs
- * useSearchParams with pushState/replaceState without a server round trip,
- * whereas router.push re-rendered the (dynamic) /jobs page on the server,
- * refetching the list from the API on every click.
- *
- * Filters replace the history entry (typing a search shouldn't create one
- * entry per keystroke); opening a job and paging push one, so Back returns
- * to the list on mobile and to the previous page.
+ * useSearchParams with pushState/replaceState without a server round trip.
  */
 export function useJobFeedUrlState() {
   const pathname = usePathname();
@@ -36,13 +30,20 @@ export function useJobFeedUrlState() {
     [pathname, searchParams],
   );
 
+  // Read live window.location.search on imperative writes so back-to-back calls
+  // within the same render tick never clobber each other with a stale closure.
   const go = useCallback(
     (update: Update, mode: "push" | "replace") => {
-      const url = hrefWith(update);
+      const currentSearch =
+        typeof window !== "undefined" ? window.location.search : searchParams.toString();
+      const params = new URLSearchParams(currentSearch);
+      update(params);
+      const qs = params.toString();
+      const url = qs ? `${pathname}?${qs}` : pathname;
       if (mode === "push") window.history.pushState(null, "", url);
       else window.history.replaceState(null, "", url);
     },
-    [hrefWith],
+    [pathname, searchParams],
   );
 
   /** A new filter starts over: page 1, and the first result instead of the old job. */
@@ -51,6 +52,8 @@ export function useJobFeedUrlState() {
       go((p) => {
         if (value) p.set(key, value);
         else p.delete(key);
+        // Legacy ?remote=true alias must be cleared whenever work_type changes or resets.
+        if (key === "work_type") p.delete("remote");
         p.delete("page");
         p.delete("jobId");
       }, "replace"),
@@ -61,6 +64,7 @@ export function useJobFeedUrlState() {
     () =>
       go((p) => {
         FILTER_KEYS.forEach((k) => p.delete(k));
+        p.delete("remote");
         p.delete("page");
         p.delete("jobId");
       }, "replace"),

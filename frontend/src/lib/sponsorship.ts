@@ -7,9 +7,13 @@ export interface SponsorshipInfo {
   isF1Eligible: boolean;
 }
 
-const CITIZEN_REGEX = /\b(?:u\.?s\.?\s+citizen(?:ship)?\s+(?:required|only|is required|mandatory)|must be a u\.?s\.?\s+citizen|you are a u\.?s\.?\s+citizen|u\.?s\.?\s+citizen(?:ship)?\s*,\s*(?:u\.?s\.?\s+)?permanent resident|u\.?s\.?\s+citizen(?:ship)?\s+(?:or|and)\s+(?:u\.?s\.?\s+)?permanent resident|u\.?s\.?\s+person\b|security clearance\b|active secret clearance\b|top secret\b|dod clearance\b|itar\b|export control laws?\b)/i;
-const NO_SPONSOR_REGEX = /\b(?:will not sponsor|does not sponsor|no visa sponsorship|not eligible for (?:visa\s+)?sponsorship|without (?:the\s+)?need for (?:visa\s+)?sponsorship|sponsorship (?:is\s+)?not available|must not require (?:work\s+)?(?:visa\s+)?sponsorship|without\s+(?:[\w\s]{1,30}\s+)?sponsorship|not provide (?:visa\s+|work\s+)?sponsorship|(?:f-?1|cpt|opt|j-?1|m-?1).*?not eligible)\b/i;
-const SPONSOR_AVAILABLE_REGEX = /\b(?:visa sponsorship (?:is\s+)?available|offers? (?:visa\s+)?sponsorship|will sponsor (?:work\s+)?visas?|provides? (?:visa\s+)?sponsorship|h-?1b (?:sponsorship|sponsor|visa support)|sponsors? h-?1b|accepts?\s+(?:cpt|opt)|(?:cpt|opt)\s+accepted|cpt\/opt\s+eligible|f-?1\s+visa\s+sponsorship)\b/i;
+const CITIZEN_REGEX =
+  /\b(?:u\.?s\.?\s+citizen(?:ship)?\s+(?:required|only|is required|mandatory)|must be a u\.?s\.?\s+citizen|you are a u\.?s\.?\s+citizen|u\.?s\.?\s+citizen(?:ship)?\s*,\s*(?:u\.?s\.?\s+)?permanent resident|u\.?s\.?\s+citizen(?:ship)?\s+(?:or|and)\s+(?:u\.?s\.?\s+)?permanent resident|u\.?s\.?\s+person\b|security clearance\b|active secret clearance\b|top secret\b|dod clearance\b|itar\b|export control laws?\b)/i;
+const WITH_OR_WITHOUT_SPONSOR_REGEX = /\bwith\s+or\s+without\s+(?:[\w\s]{0,30}\s+)?sponsorship\b/i;
+const NO_SPONSOR_REGEX =
+  /\b(?:will not sponsor|does not sponsor|no visa sponsorship|not eligible for (?:visa\s+)?sponsorship|without (?:the\s+)?need for (?:visa\s+)?sponsorship|sponsorship (?:is\s+)?not available|must not require (?:work\s+)?(?:visa\s+)?sponsorship|without\s+(?:[\w\s]{1,30}\s+)?sponsorship|not provide (?:visa\s+|work\s+)?sponsorship|(?:f-?1|cpt|opt|j-?1|m-?1).*?not eligible)\b/i;
+const SPONSOR_AVAILABLE_REGEX =
+  /\b(?:visa sponsorship (?:is\s+)?available|offers? (?:visa\s+)?sponsorship|will sponsor (?:work\s+)?visas?|provides? (?:visa\s+)?sponsorship|h-?1b (?:sponsorship|sponsor|visa support)|sponsors? h-?1b|accepts?\s+(?:cpt|opt)|(?:cpt|opt)\s+accepted|cpt\/opt\s+eligible|f-?1\s+visa\s+sponsorship)\b/i;
 
 /**
  * Determine sponsorship classification for a job, using backend metadata if present
@@ -22,11 +26,11 @@ export function getJobSponsorship(job: {
   sponsorship_status?: string | null;
   sponsorship_label?: string | null;
 }): SponsorshipInfo | null {
-  if (job.sponsorship_status && job.sponsorship_label) {
+  if (job.sponsorship_status) {
     if (job.sponsorship_status === "citizenship") {
       return {
         status: "citizenship",
-        label: "US Citizen Required",
+        label: job.sponsorship_label || "US Citizen Required",
         isCitizenOnly: true,
         isF1Eligible: false,
       };
@@ -46,7 +50,7 @@ export function getJobSponsorship(job: {
     ) {
       return {
         status: "sponsorship_available",
-        label: "Sponsorship Available",
+        label: job.sponsorship_label || "Sponsorship Available",
         isCitizenOnly: false,
         isF1Eligible: true,
       };
@@ -65,16 +69,23 @@ export function getJobSponsorship(job: {
     };
   }
 
-  if (NO_SPONSOR_REGEX.test(text)) {
-    return null;
-  }
-
   if (SPONSOR_AVAILABLE_REGEX.test(text)) {
     return {
       status: "sponsorship_available",
       label: "Sponsorship Available",
       isCitizenOnly: false,
       isF1Eligible: true,
+    };
+  }
+
+  // Avoid flagging inclusive equal-opportunity phrasing like "with or without sponsorship"
+  const scrubbedText = text.replace(WITH_OR_WITHOUT_SPONSOR_REGEX, "");
+  if (NO_SPONSOR_REGEX.test(scrubbedText)) {
+    return {
+      status: "no_sponsorship",
+      label: "No Sponsorship",
+      isCitizenOnly: false,
+      isF1Eligible: false,
     };
   }
 
