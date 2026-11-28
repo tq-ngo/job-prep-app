@@ -1,42 +1,17 @@
 """
 Full job-description extraction and sanitization.
-
-Neither crawler used to fetch a description: parsers/linkedin.py and
-parsers/github.py both emitted metadata only, so `jobs.description` was NULL
-for every row. That single gap made Gemini skill extraction, pgvector
-embeddings, /search/semantic and the UI's job-detail drawer all inert.
-
-This module adds the missing stage. Given a job record it fetches the real
-posting body, sanitizes it, and converts it to Markdown for storage:
-
-    LinkedIn  -> /jobs-guest/jobs/api/jobPosting/{id}   (server-rendered)
-    Greenhouse     -> boards-api.greenhouse.io/v1/boards/...      (JSON)
-    Lever          -> api.lever.co/v0/postings/...                (JSON)
-    Ashby          -> api.ashbyhq.com/posting-api/job-board/...   (JSON)
-    Workday        -> {tenant}.wdN.myworkdayjobs.com/wday/cxs/... (JSON)
-    SmartRecruiters-> api.smartrecruiters.com/v1/companies/...    (JSON)
-    other          -> JSON-LD, else readability-lxml main content
-
-Ashby, Workday and SmartRecruiters render client-side, so the generic path
-usually got a JS shell for them; their public JSON APIs are the reliable
-source.
-
-Storage format is Markdown, not raw HTML: sanitizing once at write time means
-the frontend never needs dangerouslySetInnerHTML, so a malicious posting can't
-become stored XSS on every render.
 """
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import logging
-import random
 import re
 import time
 from html import unescape
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from cachetools import TTLCache
-
 import nh3
 from bs4 import BeautifulSoup
 from markdownify import markdownify
@@ -45,12 +20,6 @@ from app.scraping.http_scraper import http_scraper
 
 logger = logging.getLogger(__name__)
 
-# Tags worth keeping in a job description. Deliberately EXCLUDES:
-#   img / picture / source  -> 1x1 tracking pixels. nh3's default allowlist
-#                              keeps <img>, which would preserve exactly the
-#                              beacons the requirement says to strip.
-#   iframe / object / embed -> third-party frames
-#   script / style / form / input -> executable or interactive content
 _ALLOWED_TAGS = {
     "p", "br", "hr",
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -60,25 +29,25 @@ _ALLOWED_TAGS = {
     "a", "span", "div",
 }
 
-# Only hyperlink targets survive; every style/tracking attribute is dropped.
 _ALLOWED_ATTRIBUTES = {"a": {"href", "title"}}
 
-# Pathological pages (or an accidental full-site fetch) shouldn't land a
-# megabyte in a TEXT column. Real JDs top out around 15k chars.
 MAX_JD_CHARS = 40_000
-
-# Below this, whatever we extracted is boilerplate or a JS shell, not a JD.
-# Storing it would be worse than NULL: it would satisfy `if job.description`
-# and feed noise to Gemini.
 MIN_JD_CHARS = 200
+
+_SAFE_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+_SAFE_DIGITS_RE = re.compile(r"^\d{1,20}$")
+_SAFE_UUID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+def _host_matches(host: str, suffix: str) -> bool:
+    """Dot-boundary domain suffix match so `greenhouse.io.evil.com` never matches."""
+    host = (host or "").split(":")[0].lower()
+    suffix = suffix.lower()
+    return host == suffix or host.endswith("." + suffix)
 
 
 def sanitize_html_to_markdown(html: str) -> Optional[str]:
-    """
-    Sanitize untrusted posting HTML and convert it to Markdown.
-
-    Returns None when the result is too short to be a real description.
-    """
+    """Sanitize untrusted posting HTML and convert it to Markdown."""
     if not html or not html.strip():
         return None
 
@@ -91,8 +60,7 @@ def sanitize_html_to_markdown(html: str) -> Optional[str]:
 
     md = markdownify(cleaned, heading_style="ATX", bullets="-", strip=["a"])
 
-    # markdownify leaves ragged blank lines and NBSPs from CMS content.
-    md = md.replace(" ", " ").replace("​", "")
+    md = md.replace("\u00a0", " ").replace("\u200b", "")
     md = re.sub(r"[ \t]+\n", "\n", md)
     md = re.sub(r"\n{3,}", "\n\n", md)
     md = "\n".join(line.rstrip() for line in md.splitlines()).strip()
@@ -105,7 +73,6 @@ def sanitize_html_to_markdown(html: str) -> Optional[str]:
 
 
 def _first_text(html: str, selectors: Iterable[str]) -> Optional[str]:
-    """Return the inner HTML of the first matching selector."""
     soup = BeautifulSoup(html, "lxml")
     for selector in selectors:
         el = soup.select_one(selector)
@@ -118,11 +85,16 @@ def _first_text(html: str, selectors: Iterable[str]) -> Optional[str]:
 
 # ── Per-source extractors ───────────────────────────────────────────────────
 
+def _extract_linkedin_id(apply_url: str) -> Optional[str]:
+    if not apply_url:
+        return None
+    m = re.search(r"jobs/view/(?:[^/?#]*-)?(\d{6,15})", apply_url)
+    return m.group(1) if m else None
+
+
 async def _from_linkedin(external_id: str) -> Optional[str]:
-    """
-    LinkedIn's unauthenticated guest endpoint returns the posting
-    server-rendered, so no login cookie or browser is needed.
-    """
+    if not _SAFE_DIGITS_RE.match(external_id):
+        return None
     url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{external_id}"
     html = await http_scraper.fetch_page(url)
     if not html:
@@ -130,7 +102,7 @@ async def _from_linkedin(external_id: str) -> Optional[str]:
     inner = _first_text(
         html,
         (
-            ".show-more-less-html__markup",   # tightest: the description body
+            ".show-more-less-html__markup",
             ".description__text",
             "section.description",
         ),
@@ -138,17 +110,18 @@ async def _from_linkedin(external_id: str) -> Optional[str]:
     return sanitize_html_to_markdown(inner) if inner else None
 
 
-def _greenhouse_ids(apply_url: str) -> Optional[tuple]:
-    """(board, job_id) from a Greenhouse URL, including the embed form."""
+def _greenhouse_ids(apply_url: str) -> Optional[Tuple[str, str]]:
     parsed = urlparse(apply_url)
     m = re.search(r"^/([^/]+)/jobs/(\d+)", parsed.path)
     if m and m.group(1) != "embed":
-        return m.group(1), m.group(2)
-    # boards.greenhouse.io/embed/job_app?for=<board>&token=<id> (also on
-    # job-boards.greenhouse.io); the old regex required "/jobs/" and missed it.
+        board, job_id = m.group(1), m.group(2)
+        if _SAFE_SLUG_RE.match(board) and _SAFE_DIGITS_RE.match(job_id):
+            return board, job_id
     qs = parse_qs(parsed.query)
     if parsed.path.startswith("/embed/") and qs.get("for") and qs.get("token"):
-        return qs["for"][0], qs["token"][0]
+        board, job_id = qs["for"][0], qs["token"][0]
+        if _SAFE_SLUG_RE.match(board) and _SAFE_DIGITS_RE.match(job_id):
+            return board, job_id
     return None
 
 
@@ -156,12 +129,14 @@ async def _from_greenhouse(apply_url: str) -> Optional[str]:
     ids = _greenhouse_ids(apply_url)
     if not ids:
         return None
-    api = f"https://boards-api.greenhouse.io/v1/boards/{ids[0]}/jobs/{ids[1]}"
+    api = (
+        f"https://boards-api.greenhouse.io/v1/boards/"
+        f"{quote(ids[0], safe='')}/jobs/{quote(ids[1], safe='')}"
+    )
     raw = await http_scraper.fetch_page(api)
     if not raw:
         return None
     try:
-        # Greenhouse returns `content` as HTML-escaped markup.
         content = json.loads(raw).get("content") or ""
     except json.JSONDecodeError:
         return None
@@ -169,10 +144,14 @@ async def _from_greenhouse(apply_url: str) -> Optional[str]:
 
 
 async def _from_lever(apply_url: str) -> Optional[str]:
-    m = re.search(r"lever\.co/([^/?]+)/([0-9a-fA-F-]{36})", apply_url)
-    if not m:
+    parsed = urlparse(apply_url)
+    segments = [s for s in parsed.path.split("/") if s]
+    if len(segments) < 2:
         return None
-    api = f"https://api.lever.co/v0/postings/{m.group(1)}/{m.group(2)}"
+    org, job_id = segments[0], segments[1]
+    if not (_SAFE_SLUG_RE.match(org) and _SAFE_UUID_RE.match(job_id)):
+        return None
+    api = f"https://api.lever.co/v0/postings/{quote(org, safe='')}/{quote(job_id, safe='')}"
     raw = await http_scraper.fetch_page(api)
     if not raw:
         return None
@@ -180,9 +159,6 @@ async def _from_lever(apply_url: str) -> Optional[str]:
         data = json.loads(raw)
     except json.JSONDecodeError:
         return None
-    # `description` is the intro and `additional` the closing notes; the
-    # responsibilities/requirements bullets live in `lists`, which used to be
-    # dropped — leaving most Lever JDs without their actual requirements.
     parts = [data.get("description") or ""]
     for section in data.get("lists") or []:
         if not isinstance(section, dict):
@@ -196,21 +172,21 @@ async def _from_lever(apply_url: str) -> Optional[str]:
     return sanitize_html_to_markdown(combined)
 
 
-# An Ashby board returns every posting for the org in one response, and a
-# README lists many roles per company, so cache boards briefly per process.
 _ashby_boards: TTLCache = TTLCache(maxsize=256, ttl=600)
 
 
 async def _from_ashby(apply_url: str) -> Optional[str]:
-    # jobs.ashbyhq.com/<org>/<job-uuid>[/application]
-    m = re.search(r"ashbyhq\.com/([^/?#]+)/([0-9a-fA-F-]{36})", apply_url)
-    if not m:
+    parsed = urlparse(apply_url)
+    segments = [s for s in parsed.path.split("/") if s]
+    if len(segments) < 2:
         return None
-    org, job_id = m.group(1), m.group(2).lower()
+    org, job_id = segments[0], segments[1].lower()
+    if not (_SAFE_SLUG_RE.match(org) and _SAFE_UUID_RE.match(job_id)):
+        return None
     jobs = _ashby_boards.get(org)
     if jobs is None:
         raw = await http_scraper.fetch_page(
-            f"https://api.ashbyhq.com/posting-api/job-board/{org}",
+            f"https://api.ashbyhq.com/posting-api/job-board/{quote(org, safe='')}",
             headers={"Accept": "application/json"},
         )
         if not raw:
@@ -227,13 +203,8 @@ async def _from_ashby(apply_url: str) -> Optional[str]:
 
 
 async def _from_workday(apply_url: str) -> Optional[str]:
-    """
-    <tenant>.wdN.myworkdayjobs.com/[<locale>/]<site>/job/<path> maps to the
-    CXS JSON endpoint /wday/cxs/<tenant>/<site>/job/<path>. Undocumented but
-    it is what Workday's own SPA calls.
-    """
     parsed = urlparse(apply_url)
-    host_m = re.match(r"^([^.]+)\.wd\d+\.myworkdayjobs\.com$", parsed.netloc.lower())
+    host_m = re.match(r"^([A-Za-z0-9-]+)\.wd\d+\.myworkdayjobs\.com$", parsed.netloc.lower())
     if not host_m:
         return None
     segments = [seg for seg in parsed.path.split("/") if seg]
@@ -241,8 +212,10 @@ async def _from_workday(apply_url: str) -> Optional[str]:
         segments = segments[1:]
     if len(segments) < 3 or segments[1] != "job":
         return None
-    site, rest = segments[0], "/".join(segments[2:])
-    api = f"https://{parsed.netloc}/wday/cxs/{host_m.group(1)}/{site}/job/{rest}"
+    site, rest = segments[0], "/".join(quote(seg, safe="") for seg in segments[2:])
+    if not _SAFE_SLUG_RE.match(site):
+        return None
+    api = f"https://{parsed.netloc}/wday/cxs/{host_m.group(1)}/{quote(site, safe='')}/job/{rest}"
     raw = await http_scraper.fetch_page(api, headers={"Accept": "application/json"})
     if not raw:
         return None
@@ -254,11 +227,19 @@ async def _from_workday(apply_url: str) -> Optional[str]:
 
 
 async def _from_smartrecruiters(apply_url: str) -> Optional[str]:
-    # jobs.smartrecruiters.com/<Company>/<postingId>-<slug>
-    m = re.search(r"smartrecruiters\.com/([^/?#]+)/(\d+)", apply_url)
-    if not m:
+    parsed = urlparse(apply_url)
+    segments = [s for s in parsed.path.split("/") if s]
+    if len(segments) < 2:
         return None
-    api = f"https://api.smartrecruiters.com/v1/companies/{m.group(1)}/postings/{m.group(2)}"
+    company = segments[0]
+    m_id = re.match(r"^(\d+)", segments[1])
+    if not (m_id and _SAFE_SLUG_RE.match(company)):
+        return None
+    posting_id = m_id.group(1)
+    api = (
+        f"https://api.smartrecruiters.com/v1/companies/"
+        f"{quote(company, safe='')}/postings/{quote(posting_id, safe='')}"
+    )
     raw = await http_scraper.fetch_page(api, headers={"Accept": "application/json"})
     if not raw:
         return None
@@ -275,11 +256,6 @@ async def _from_smartrecruiters(apply_url: str) -> Optional[str]:
 
 
 async def _from_jsonld(html: str) -> Optional[str]:
-    """
-    schema.org/JobPosting carries `description` as escaped HTML. Ashby,
-    Workday and many custom boards emit it even when the DOM is JS-rendered,
-    which makes this the single highest-yield generic strategy.
-    """
     soup = BeautifulSoup(html, "lxml")
     for tag in soup.find_all("script", type="application/ld+json"):
         try:
@@ -302,10 +278,6 @@ async def _from_jsonld(html: str) -> Optional[str]:
 
 
 async def _from_generic(apply_url: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Fallback for the long tail of career hosts: try JSON-LD first, then
-    readability's main-content heuristic. Returns (markdown, strategy).
-    """
     html = await http_scraper.fetch_page(apply_url)
     if not html:
         return None, None
@@ -318,7 +290,7 @@ async def _from_generic(apply_url: str) -> Tuple[Optional[str], Optional[str]]:
         from readability import Document
 
         summary_html = Document(html).summary(html_partial=True)
-    except Exception as exc:  # readability raises on fragments/empty docs
+    except Exception as exc:
         logger.debug("readability failed for %s: %s", apply_url, exc)
         return None, None
     md = sanitize_html_to_markdown(summary_html)
@@ -341,35 +313,29 @@ async def fetch_jd_with_source(
     source: str,
     external_id: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Fetch and sanitize the full job description as Markdown.
-
-    Returns (markdown, strategy), where strategy names the extractor that
-    produced it (e.g. "greenhouse", "jsonld", "readability"). (None, None)
-    when the description cannot be recovered (blocked, JS-only page, or
-    extracted text below MIN_JD_CHARS). Callers must treat None as
-    "unknown", never as "empty" — leaving the column NULL is correct, and
-    lets a later backfill retry.
-    """
+    """Fetch and sanitize the full job description as Markdown."""
     try:
-        if source == "linkedin" and external_id:
-            md = await _from_linkedin(external_id)
-            return (md, "linkedin") if md else (None, None)
+        if source == "linkedin":
+            li_id = external_id or _extract_linkedin_id(apply_url)
+            if li_id:
+                md = await _from_linkedin(li_id)
+                if md:
+                    return md, "linkedin"
+                return None, None
 
         if not apply_url:
             return None, None
 
         host = (urlparse(apply_url).netloc or "").lower()
-        for needle, handler in _ATS_DISPATCH:
-            if needle in host:
+        for suffix, handler in _ATS_DISPATCH:
+            if _host_matches(host, suffix):
                 md = await handler(apply_url)
                 if md:
                     return md, handler.__name__.removeprefix("_from_")
-                break  # ATS matched but yielded nothing; try the generic path
+                break
 
         return await _from_generic(apply_url)
     except Exception as exc:
-        # One bad posting must never abort a whole crawl batch.
         logger.warning("JD extraction failed for %s (%s): %s", apply_url, source, exc)
         return None, None
 
@@ -379,17 +345,16 @@ async def fetch_jd(
     source: str,
     external_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Markdown-only convenience wrapper around fetch_jd_with_source."""
     md, _ = await fetch_jd_with_source(apply_url, source, external_id)
     return md
 
 
 class DomainRateLimiter:
     """
-    Limits concurrent requests per host domain and spaces requests politely.
+    Limits concurrent requests per target host domain and spaces requests politely.
 
-    This replaces a single global semaphore that unfairly bottlenecks
-    independent hosts with per-domain semaphores.
+    Must be instantiated per task/event loop (never as a module-level singleton
+    shared across Celery's per-task event loops).
     """
     def __init__(
         self,
@@ -401,71 +366,77 @@ class DomainRateLimiter:
         self.default_interval = default_interval
         self.linkedin_interval = linkedin_interval
         self._semaphores: Dict[str, asyncio.Semaphore] = {}
+        self._domain_locks: Dict[str, asyncio.Lock] = {}
         self._last_request_time: Dict[str, float] = {}
         self._lock = asyncio.Lock()
 
     def get_domain(self, apply_url: str, source: str) -> str:
         if source == "linkedin":
             return "www.linkedin.com"
-        netloc = (urlparse(apply_url).netloc or "").lower()
-        return netloc or "generic"
+        host = (urlparse(apply_url).netloc or "").split(":")[0].lower()
+        if _host_matches(host, "greenhouse.io"):
+            return "boards-api.greenhouse.io"
+        if _host_matches(host, "lever.co"):
+            return "api.lever.co"
+        if _host_matches(host, "ashbyhq.com"):
+            return "api.ashbyhq.com"
+        if _host_matches(host, "smartrecruiters.com"):
+            return "api.smartrecruiters.com"
+        return host or "generic"
 
     async def acquire(self, domain: str):
         async with self._lock:
             if domain not in self._semaphores:
-                # Up to 2 concurrent requests per individual domain
                 self._semaphores[domain] = asyncio.Semaphore(self.default_per_domain_limit)
-        sem = self._semaphores[domain]
-        await sem.acquire()
+                self._domain_locks[domain] = asyncio.Lock()
+            sem = self._semaphores[domain]
+            dlock = self._domain_locks[domain]
 
-        # Enforce domain-specific spacing
-        is_linkedin_domain = domain == "linkedin.com" or domain.endswith(".linkedin.com")
-        interval = self.linkedin_interval if is_linkedin_domain else self.default_interval
-        now = time.monotonic()
-        last = self._last_request_time.get(domain, 0.0)
-        delay = interval - (now - last)
-        if delay > 0:
-            await asyncio.sleep(delay)
-        self._last_request_time[domain] = time.monotonic()
+        await sem.acquire()
+        try:
+            is_linkedin_domain = _host_matches(domain, "linkedin.com")
+            interval = self.linkedin_interval if is_linkedin_domain else self.default_interval
+            async with dlock:
+                now = time.monotonic()
+                last = self._last_request_time.get(domain, 0.0)
+                delay = interval - (now - last)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                self._last_request_time[domain] = time.monotonic()
+        except BaseException:
+            sem.release()
+            raise
 
     def release(self, domain: str):
         if domain in self._semaphores:
             self._semaphores[domain].release()
 
-
-# Module-level default limiter
-_default_domain_limiter = DomainRateLimiter()
+    @asynccontextmanager
+    async def slot(self, domain: str):
+        await self.acquire(domain)
+        try:
+            yield
+        finally:
+            self.release(domain)
 
 
 async def enrich_with_descriptions(
     records: List[Dict[str, Any]],
     concurrency: int = 16,
-    min_delay: float = 0.2,
-    max_delay: float = 0.5,
     domain_limiter: Optional[DomainRateLimiter] = None,
 ) -> int:
     """
     Populate `description` on scraped job dicts, in place.
-
-    Uses a global concurrency ceiling (default 16) alongside a DomainRateLimiter
-    to ensure high parallel throughput across distinct domains while politely
-    spacing and capping requests to the same host domain (e.g. LinkedIn or Greenhouse).
-    Also deduplicates identical apply_urls within the batch so a single network fetch
-    populates all matching records.
-
-    Returns the number of records that gained a description.
+    Creates a fresh task-local DomainRateLimiter when none is supplied so
+    asyncio primitives never bind to closed Celery event loops.
     """
     if not records:
         return 0
 
-    limiter = domain_limiter or _default_domain_limiter
+    limiter = domain_limiter or DomainRateLimiter()
     global_semaphore = asyncio.Semaphore(concurrency)
     filled = 0
 
-    # Group records by target fetch identity to avoid duplicate network requests.
-    # Most sources fetch by apply_url only, so external_id differences should not
-    # force additional calls for the same URL. LinkedIn is the exception because
-    # it primarily fetches by external_id.
     groups: Dict[Tuple[str, str, Optional[str]], List[Dict[str, Any]]] = {}
     for r in records:
         if r.get("description"):
@@ -473,7 +444,9 @@ async def enrich_with_descriptions(
         apply_url = r.get("apply_url") or ""
         source = str(r.get("source") or "")
         external_id = str(r["external_id"]) if r.get("external_id") else None
-        key = (apply_url, source, external_id if source == "linkedin" and not apply_url else None)
+        # Preserve external_id for LinkedIn even when apply_url is present so
+        # _from_linkedin's guest posting API is used instead of authwalled HTML.
+        key = (apply_url, source, external_id if source == "linkedin" else None)
         groups.setdefault(key, []).append(r)
 
     async def fetch_group(key: Tuple[str, str, Optional[str]], group_records: List[Dict[str, Any]]) -> None:
@@ -482,15 +455,12 @@ async def enrich_with_descriptions(
         domain = limiter.get_domain(apply_url, source)
 
         async with global_semaphore:
-            await limiter.acquire(domain)
-            try:
+            async with limiter.slot(domain):
                 md, strategy = await fetch_jd_with_source(
                     apply_url=apply_url,
                     source=source,
                     external_id=external_id,
                 )
-            finally:
-                limiter.release(domain)
 
         if md:
             for rec in group_records:
@@ -498,7 +468,13 @@ async def enrich_with_descriptions(
                 rec["description_source"] = strategy
                 filled += 1
 
-    await asyncio.gather(*(fetch_group(k, v) for k, v in groups.items()), return_exceptions=True)
+    results = await asyncio.gather(
+        *(fetch_group(k, v) for k, v in groups.items()), return_exceptions=True
+    )
+    for res in results:
+        if isinstance(res, Exception):
+            logger.warning("JD batch fetch worker raised: %s", res)
+
     logger.info(
         "JD extraction: %d/%d records gained a description across %d distinct targets",
         filled,

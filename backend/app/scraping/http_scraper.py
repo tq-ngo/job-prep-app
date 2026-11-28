@@ -10,6 +10,18 @@ from app.scraping.circuit_breaker import circuit_breaker
 
 logger = logging.getLogger(__name__)
 
+# Cap scraped HTTP response bodies at 5 MB to prevent worker OOM / decompression bombs.
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+_SENSITIVE_REDIRECT_HEADERS = {"cookie", "authorization"}
+_RETRYABLE_STATUSES = {403, 429, 500, 502, 503, 504}
+
+
+def _strip_sensitive_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    return {
+        k: v for k, v in headers.items() if k.lower() not in _SENSITIVE_REDIRECT_HEADERS
+    }
+
+
 class TLSImpersonateScraper:
     """
     HTTP Engine using curl_cffi to bypass JA3/JA4 TLS fingerprinting checks.
@@ -17,7 +29,6 @@ class TLSImpersonateScraper:
     """
     def __init__(self, proxy_url: Optional[str] = None):
         self.proxy_url = proxy_url
-        # Maintain browser headers consistent with Chrome 120
         self.default_headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
@@ -33,36 +44,27 @@ class TLSImpersonateScraper:
         }
 
     async def fetch_page(
-        self, 
-        url: str, 
-        max_retries: int = 3, 
+        self,
+        url: str,
+        max_retries: int = 3,
         base_backoff: float = 2.0,
         headers: Optional[Dict[str, str]] = None,
         max_redirects: int = 5,
     ) -> Optional[str]:
         """
         Fetches a target URL with TLS impersonation, automatic retries,
-        exponential backoff, and randomized jitter.
-
-        `headers` are merged over the browser defaults (e.g. a JSON Accept
-        header for ATS APIs that content-negotiate).
-        Redirects are followed manually with SSRF checks on each target.
+        exponential backoff, randomized jitter, SSRF DNS pinning, cross-host
+        credential stripping, and response-size caps.
         """
-        request_headers = {**self.default_headers, **(headers or {})}
+        base_headers = {**self.default_headers, **(headers or {})}
         proxies = {"http": self.proxy_url, "https": self.proxy_url} if self.proxy_url else None
 
-        # Re-validate at FETCH time, not just at request time: DNS can
-        # re-resolve between the API accepting a URL and the worker fetching
-        # it (DNS rebinding). The lookup blocks, so it runs off the loop.
         try:
             target = await asyncio.to_thread(resolve_crawl_target, url)
         except UnsafeUrlError as exc:
             logger.error("Refusing to fetch unsafe URL %s: %s", url, exc)
             return None
 
-        # Each domain consults the breaker once per call, not once per retry:
-        # in HALF_OPEN only a single probe is admitted, so a second check
-        # from our own retry loop would be refused.
         admitted: set = set()
 
         async def _admit(domain: str) -> bool:
@@ -74,43 +76,39 @@ class TLSImpersonateScraper:
             admitted.add(domain)
             return True
 
-        # The domain of the last failed attempt; charged to the breaker once
-        # when the whole call gives up. Charging every retry let one flaky
-        # posting (3 attempts) bring a whole ATS host most of the way to OPEN.
         failed_domain: Optional[str] = None
 
         for attempt in range(1, max_retries + 1):
             hop: CrawlTarget = target
             domain = urlparse(hop.url).netloc.lower()
+            hop_headers = dict(base_headers)
             if not await _admit(domain):
                 return None
 
             try:
                 redirect_count = 0
                 while True:
-                    # Without a proxy, connect to the IPs validated above
-                    # rather than letting curl resolve the name again. A
-                    # proxy resolves names itself, so pinning can't apply.
                     pin = hop.curl_resolve() if not proxies else []
+                    curl_opts = {CurlOpt.RESOLVE: pin} if pin else None
                     response = await asyncio.to_thread(
                         requests.get,
                         hop.url,
-                        headers=request_headers,
+                        headers=hop_headers,
                         impersonate="chrome120",
                         proxies=proxies,
                         timeout=15,
                         allow_redirects=False,
-                        curl_options={CurlOpt.RESOLVE: pin} if pin else None,
+                        curl_options=curl_opts,
                     )
 
                     # Handle 3xx redirects manually to validate destination against SSRF guard
                     if response.status_code in (301, 302, 303, 307, 308):
                         loc = response.headers.get("location") or response.headers.get("Location")
                         if not loc:
-                            # Retrying won't make a Location header appear.
                             logger.error("Redirect without Location from %s", hop.url)
                             return None
                         next_url = urljoin(hop.url, loc)
+                        prev_host = hop.host
                         try:
                             hop = await asyncio.to_thread(resolve_crawl_target, next_url)
                         except UnsafeUrlError as ssrf_err:
@@ -119,6 +117,10 @@ class TLSImpersonateScraper:
                                 url, next_url, ssrf_err,
                             )
                             return None
+
+                        # Never leak Cookie or Authorization headers across origins.
+                        if hop.host != prev_host:
+                            hop_headers = _strip_sensitive_headers(hop_headers)
 
                         redirect_count += 1
                         if redirect_count > max_redirects:
@@ -130,25 +132,32 @@ class TLSImpersonateScraper:
                             return None
                         continue
 
-                    # Terminal response reached
                     if response.status_code == 200:
+                        content_len = response.headers.get("content-length") or response.headers.get("Content-Length")
+                        if content_len and content_len.isdigit() and int(content_len) > MAX_RESPONSE_BYTES:
+                            logger.warning("Refusing oversized response (%s bytes) from %s", content_len, hop.url)
+                            return None
+                        text = response.text
+                        if text and len(text.encode("utf-8", errors="ignore")) > MAX_RESPONSE_BYTES:
+                            logger.warning("Response body exceeded %d bytes from %s", MAX_RESPONSE_BYTES, hop.url)
+                            return None
                         await circuit_breaker.record_success(domain)
-                        return response.text
-                    elif response.status_code in (429, 503, 403):
+                        return text
+                    elif response.status_code in _RETRYABLE_STATUSES:
                         failed_domain = domain
                         logger.warning(
-                            f"Attempt {attempt}/{max_retries}: Encountered status {response.status_code} for {hop.url}. Backing off."
+                            "Attempt %d/%d: Encountered status %d for %s. Backing off.",
+                            attempt, max_retries, response.status_code, hop.url,
                         )
                         break
                     else:
-                        logger.error(f"Unrecoverable HTTP status {response.status_code} for URL: {hop.url}")
+                        logger.error("Unrecoverable HTTP status %d for URL: %s", response.status_code, hop.url)
                         return None
 
             except Exception as exc:
                 failed_domain = domain
-                logger.error(f"Attempt {attempt}/{max_retries} failed for {hop.url} with error: {exc}")
+                logger.error("Attempt %d/%d failed for %s with error: %s", attempt, max_retries, hop.url, exc)
 
-            # Back off before the NEXT attempt only.
             if attempt < max_retries:
                 jitter = random.uniform(0.5, 1.5)
                 backoff_delay = (base_backoff * (2 ** (attempt - 1))) + jitter
@@ -156,7 +165,7 @@ class TLSImpersonateScraper:
 
         if failed_domain:
             await circuit_breaker.record_failure(failed_domain)
-        logger.error(f"Failed to fetch {url} after {max_retries} retries.")
+        logger.error("Failed to fetch %s after %d retries.", url, max_retries)
         return None
 
     async def fetch(self, url: str, max_retries: int = 3) -> Optional[Any]:
@@ -164,11 +173,12 @@ class TLSImpersonateScraper:
         text = await self.fetch_page(url, max_retries=max_retries)
         if text is None:
             return None
+
         class ResponseWrapper:
             def __init__(self, t):
                 self.text = t
+
         return ResponseWrapper(text)
 
 
-# Singleton instance shared across crawlers and tasks
 http_scraper = TLSImpersonateScraper()

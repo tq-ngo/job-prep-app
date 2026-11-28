@@ -34,7 +34,10 @@ async def release_lock(redis, key: str, token: Optional[str]) -> bool:
     async with redis.pipeline(transaction=True) as pipe:
         try:
             await pipe.watch(key)
-            if await pipe.get(key) != token:
+            current = await pipe.get(key)
+            if isinstance(current, bytes):
+                current = current.decode("utf-8", errors="ignore")
+            if current != token:
                 await pipe.unwatch()
                 return False
             pipe.multi()

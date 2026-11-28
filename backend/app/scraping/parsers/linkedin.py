@@ -3,7 +3,7 @@ import re
 import random
 import logging
 from typing import List, Dict, Callable, Awaitable, Optional
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, urlencode, urljoin
 from bs4 import BeautifulSoup
 from app.scraping.http_scraper import TLSImpersonateScraper
 
@@ -69,7 +69,9 @@ class LinkedInScraper:
             seen_ids_on_page = set()
             for link_el in job_links:
                 try:
-                    raw_url = link_el.get("href", "")
+                    raw_url = (link_el.get("href") or "").strip()
+                    if raw_url.startswith("/"):
+                        raw_url = urljoin("https://www.linkedin.com", raw_url)
                     clean_url = raw_url.split("?")[0] if raw_url else ""
                     if not clean_url:
                         continue

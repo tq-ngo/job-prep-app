@@ -1,10 +1,10 @@
 import asyncio
 import time
 import logging
+import weakref
 from enum import Enum
 from dataclasses import dataclass
 from app.core.redis import create_worker_redis
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,183 +20,134 @@ class CircuitStatus:
     state: CircuitState
     domain: str
     failure_count: int
-    opened_at: float | None  # Unix timestamp when circuit opened
+    opened_at: float | None
 
 
-# How many consecutive failures before opening the circuit
 FAILURE_THRESHOLD = 5
-# How long (seconds) to keep circuit OPEN before testing
 OPEN_DURATION_SECONDS = 90
-# How long a HALF_OPEN probe holds the single test slot
 PROBE_TTL_SECONDS = 60
-# Redis key prefix
+STATE_TTL_SECONDS = OPEN_DURATION_SECONDS * 20
 CB_PREFIX = "cb:v1"
 
 
 class CircuitBreaker:
-    """
-    Redis-backed per-domain circuit breaker.
-    
-    All state lives in Redis so it's shared across all Celery workers.
-    If one worker sees LinkedIn failing, all workers stop hitting LinkedIn.
-    
-    Usage:
-        cb = CircuitBreaker()
-        
-        if not await cb.allow_request("linkedin.com"):
-            logger.info("Circuit OPEN for linkedin.com — skipping")
-            return
-        
-        try:
-            response = await httpx_client.get(url)
-            await cb.record_success("linkedin.com")
-        except Exception:
-            await cb.record_failure("linkedin.com")
-            raise
-    """
-    
+    """Redis-backed per-domain circuit breaker."""
+
     def __init__(self):
-        # One Redis client per event loop. Celery runs tasks through
-        # async_to_sync on a fresh loop per task; a single cached client
-        # bound to the first task's loop fails with "Event loop is closed"
-        # in subsequent runs.
-        self._redis_by_loop: dict = {}
-    
+        self._redis_by_loop: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, object]" = (
+            weakref.WeakKeyDictionary()
+        )
+        self._fallback_redis = None
+
     def _get_redis(self):
         """Return this event loop's Redis client, creating it on first use."""
         try:
-            loop_id = id(asyncio.get_running_loop())
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop_id = 0
-        client = self._redis_by_loop.get(loop_id)
+            if self._fallback_redis is None:
+                self._fallback_redis = create_worker_redis()
+            return self._fallback_redis
+
+        client = self._redis_by_loop.get(loop)
         if client is None:
-            if len(self._redis_by_loop) > 8:
-                self._redis_by_loop.clear()
-            client = self._redis_by_loop[loop_id] = create_worker_redis()
+            client = create_worker_redis()
+            self._redis_by_loop[loop] = client
         return client
-    
+
     async def get_status(self, domain: str) -> CircuitStatus:
         """Fetch current circuit state from Redis."""
         redis = self._get_redis()
-        
-        # Pipeline: batch multiple Redis commands into one round-trip
         async with redis.pipeline(transaction=False) as pipe:
             pipe.get(f"{CB_PREFIX}:{domain}:state")
             pipe.get(f"{CB_PREFIX}:{domain}:failures")
             pipe.get(f"{CB_PREFIX}:{domain}:opened_at")
             state_val, failures_val, opened_at_val = await pipe.execute()
-        
+
         state = CircuitState(state_val) if state_val else CircuitState.CLOSED
         failures = int(failures_val) if failures_val else 0
         opened_at = float(opened_at_val) if opened_at_val else None
-        
+
         return CircuitStatus(
             state=state,
             domain=domain,
             failure_count=failures,
             opened_at=opened_at,
         )
-    
+
     async def allow_request(self, domain: str) -> bool:
-        """
-        Returns True if a request to this domain is allowed.
-        
-        Call this BEFORE making any HTTP request.
-        """
+        """Returns True if a request to this domain is allowed."""
         status = await self.get_status(domain)
-        
+
         if status.state == CircuitState.CLOSED:
             return True
-        
+
         if status.state == CircuitState.OPEN:
-            # Check if enough time has passed to try again
             elapsed = time.time() - (status.opened_at or 0)
             if elapsed >= OPEN_DURATION_SECONDS:
-                # Transition to HALF_OPEN to allow one test request
                 await self._set_state(domain, CircuitState.HALF_OPEN)
-                logger.info(f"Circuit HALF_OPEN for {domain} — testing")
+                logger.info("Circuit HALF_OPEN for %s — testing", domain)
                 return await self._claim_probe(domain)
-            else:
-                remaining = OPEN_DURATION_SECONDS - elapsed
-                logger.info(f"Circuit OPEN for {domain} — {remaining:.0f}s remaining")
-                return False
+            remaining = OPEN_DURATION_SECONDS - elapsed
+            logger.info("Circuit OPEN for %s — %.0fs remaining", domain, remaining)
+            return False
 
         if status.state == CircuitState.HALF_OPEN:
-            # Only one test request allowed in HALF_OPEN. Every worker used to
-            # get True here, so a recovering host took the full backlog at once.
             return await self._claim_probe(domain)
 
         return False
 
     async def _claim_probe(self, domain: str) -> bool:
-        """Admit exactly one HALF_OPEN test request across all workers.
-
-        The key expires, so a probe whose worker died without reporting back
-        doesn't wedge the domain in HALF_OPEN forever.
-        """
         redis = self._get_redis()
         return bool(
             await redis.set(f"{CB_PREFIX}:{domain}:probe", "1", nx=True, ex=PROBE_TTL_SECONDS)
         )
-    
+
     async def record_success(self, domain: str):
-        """
-        Call this after a successful HTTP response.
-        Resets failure count and closes the circuit.
-        """
+        """Reset failure count and remove breaker keys (absent state == CLOSED)."""
         redis = self._get_redis()
         status = await self.get_status(domain)
-        
+
         if status.state in (CircuitState.HALF_OPEN, CircuitState.OPEN):
-            logger.info(f"Circuit CLOSED for {domain} — test succeeded")
-        
-        # Reset everything
+            logger.info("Circuit CLOSED for %s — test succeeded", domain)
+
         async with redis.pipeline(transaction=True) as pipe:
             pipe.delete(f"{CB_PREFIX}:{domain}:failures")
             pipe.delete(f"{CB_PREFIX}:{domain}:opened_at")
             pipe.delete(f"{CB_PREFIX}:{domain}:probe")
-            pipe.set(f"{CB_PREFIX}:{domain}:state", CircuitState.CLOSED.value)
+            pipe.delete(f"{CB_PREFIX}:{domain}:state")
             await pipe.execute()
-    
+
     async def record_failure(self, domain: str):
-        """
-        Call this after a failed HTTP request (timeout, 4xx, 5xx, etc.).
-        Increments failure count; opens circuit if threshold reached.
-        """
+        """Increment failure count; open circuit if threshold reached."""
         redis = self._get_redis()
         status = await self.get_status(domain)
-        
+
         if status.state == CircuitState.HALF_OPEN:
-            # Test failed — immediately re-open
-            logger.warning(f"Circuit OPEN again for {domain} — test failed")
+            logger.warning("Circuit OPEN again for %s — test failed", domain)
             await self._open_circuit(domain)
             return
-        
-        # Atomically increment failure counter
+
         failure_key = f"{CB_PREFIX}:{domain}:failures"
         new_count = await redis.incr(failure_key)
-        # Set expiry so stale failures don't accumulate forever
         await redis.expire(failure_key, OPEN_DURATION_SECONDS * 10)
-        
-        logger.debug(f"Failure recorded for {domain}: {new_count}/{FAILURE_THRESHOLD}")
-        
+
+        logger.debug("Failure recorded for %s: %d/%d", domain, new_count, FAILURE_THRESHOLD)
+
         if new_count >= FAILURE_THRESHOLD:
-            logger.warning(f"Circuit OPEN for {domain} — {new_count} failures")
+            logger.warning("Circuit OPEN for %s — %d failures", domain, new_count)
             await self._open_circuit(domain)
-    
+
     async def _open_circuit(self, domain: str):
         redis = self._get_redis()
         async with redis.pipeline(transaction=True) as pipe:
-            pipe.set(f"{CB_PREFIX}:{domain}:state", CircuitState.OPEN.value)
-            pipe.set(f"{CB_PREFIX}:{domain}:opened_at", str(time.time()))
+            pipe.set(f"{CB_PREFIX}:{domain}:state", CircuitState.OPEN.value, ex=STATE_TTL_SECONDS)
+            pipe.set(f"{CB_PREFIX}:{domain}:opened_at", str(time.time()), ex=STATE_TTL_SECONDS)
             pipe.delete(f"{CB_PREFIX}:{domain}:probe")
-            pipe.expire(f"{CB_PREFIX}:{domain}:state", OPEN_DURATION_SECONDS * 20)
             await pipe.execute()
-    
+
     async def _set_state(self, domain: str, state: CircuitState):
         redis = self._get_redis()
-        await redis.set(f"{CB_PREFIX}:{domain}:state", state.value)
+        await redis.set(f"{CB_PREFIX}:{domain}:state", state.value, ex=STATE_TTL_SECONDS)
 
 
-# Module-level singleton
 circuit_breaker = CircuitBreaker()

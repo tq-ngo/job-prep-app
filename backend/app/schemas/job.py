@@ -27,10 +27,13 @@ class JobCreate(BaseModel):
     @field_validator("apply_url")
     @classmethod
     def _validate_apply_url(cls, v: str) -> str:
-        parsed = urlparse(v.strip())
-        if parsed.scheme.lower() not in ("http", "https"):
-            raise ValueError(f"apply_url must use http or https scheme, got {parsed.scheme!r}")
-        return v.strip()
+        cleaned = v.strip()
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in cleaned):
+            raise ValueError("apply_url must not contain control characters")
+        parsed = urlparse(cleaned)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+            raise ValueError(f"apply_url must be an absolute http/https URL, got {v!r}")
+        return cleaned
 
     @field_validator("posted_at")
     @classmethod

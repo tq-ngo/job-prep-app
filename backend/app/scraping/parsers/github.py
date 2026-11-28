@@ -25,7 +25,7 @@ def parse_relative_date(date_str: str) -> datetime | None:
     if "yesterday" in date_str:
         return now - timedelta(days=1)
         
-    match = re.search(r'(\d+)\s*(d|day|days|w|week|weeks|m|month|months|h|hr|hrs|hour|hours)\b', date_str)
+    match = re.search(r'(\d+)\s*(d|day|days|w|week|weeks|mo|mos|m|month|months|h|hr|hrs|hour|hours)\b', date_str)
     if match:
         val = int(match.group(1))
         unit = match.group(2)
@@ -239,7 +239,8 @@ def _parse_html_tables(text: str, source_url: str, include_inactive: bool = Fals
             apply_url = f"https://github.com/closed-job/{uuid.uuid4()}"
 
         if company and role:
-            id_str = f"{company}-{apply_url}"
+            norm_role = JobDeduplicator.normalize_text(role)
+            id_str = f"{company}-{norm_role}-{apply_url}"
             stable_id = str(uuid.UUID(hashlib.md5(id_str.encode(), usedforsecurity=False).hexdigest()))
             jobs.append(
                 JobCreate(
@@ -329,7 +330,8 @@ def _parse_markdown_tables(text: str, source_url: str, include_inactive: bool = 
                 apply_url = f"https://github.com/closed-job/{uuid.uuid4()}"
 
             if company and role:
-                id_str = f"{company}-{apply_url}"
+                norm_role = JobDeduplicator.normalize_text(role)
+                id_str = f"{company}-{norm_role}-{apply_url}"
                 stable_id = str(uuid.UUID(hashlib.md5(id_str.encode(), usedforsecurity=False).hexdigest()))
                 jobs.append(
                     JobCreate(
@@ -358,10 +360,16 @@ async def _parse_readme(url: str, include_inactive: bool = False) -> Dict[str, A
         logger.warning(f"Failed to fetch {url} (circuit open, rate limited, or error)")
         return {"url": url, "jobs": [], "status": "failed"}
 
-    if "<table" in text:
-        jobs_list, skipped_inactive = _parse_html_tables(text, url, include_inactive)
-    else:
-        jobs_list, skipped_inactive = _parse_markdown_tables(text, url, include_inactive)
+    html_jobs, html_skipped = _parse_html_tables(text, url, include_inactive) if "<table" in text else ([], 0)
+    md_jobs, md_skipped = _parse_markdown_tables(text, url, include_inactive)
+
+    seen_ids = set()
+    jobs_list: List[JobCreate] = []
+    for job in html_jobs + md_jobs:
+        if job.external_id not in seen_ids:
+            seen_ids.add(job.external_id)
+            jobs_list.append(job)
+    skipped_inactive = html_skipped + md_skipped
 
     logger.info(f"Finished parsing {url}. Yielded {len(jobs_list)}, skipped inactive {skipped_inactive}")
     return {"url": url, "jobs": jobs_list, "status": "success"}
@@ -388,7 +396,8 @@ async def parse_github_jobs(include_inactive: bool = False):
             logger.error(f"README fetch raised: {res}")
             continue
         if isinstance(res, dict) and res.get("status") == "success":
-            successful_urls.append(res["url"])
+            if res["jobs"]:
+                successful_urls.append(res["url"])
             all_jobs.extend(res["jobs"])
 
     return all_jobs, successful_urls

@@ -54,4 +54,7 @@ def job_event_payload(job, kind: str, skills=None) -> dict:
         "salary_max": getattr(job, "salary_max", None),
         "salary_currency": getattr(job, "salary_currency", None),
         "salary_period": getattr(job, "salary_period", None),
+        "seniority_level": getattr(job, "seniority_level", None),
+        "employment_type": getattr(job, "employment_type", None),
+        "enriched_at": job.enriched_at.isoformat() if getattr(job, "enriched_at", None) else None,
     }

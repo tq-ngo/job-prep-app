@@ -25,7 +25,7 @@ NO_SPONSORSHIP_PATTERNS = (
     r"\b(?:will not sponsor|does not sponsor|no visa sponsorship|not eligible for (?:visa\s+)?sponsorship)\b",
     r"\b(?:does\s+not|will\s+not|cannot|can\s+not|not\s+able\s+to)\s+(?:offer|provide)\s+(?:work\s+)?(?:visa\s+)?sponsorship\b",
     r"\bwithout (?:the\s+)?need for (?:visa\s+)?sponsorship\b",
-    r"\bwithout\s+(?:[\w\s]{1,30}\s+)?sponsorship\b",
+    r"(?<!with or )\bwithout\s+(?:[\w\s]{1,30}\s+)?sponsorship\b",
     r"\bsponsorship (?:is\s+)?not available\b",
     r"\bunable to (?:provide\s+|offer\s+)?(?:work\s+)?(?:visa\s+)?sponsor(?:ship)?\b",
     r"\bnot able to sponsor\b",

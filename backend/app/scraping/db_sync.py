@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_utils import utc_now
 from app.core.events import KIND_CREATED, job_event_payload, publish_job_event
-from app.core.redis import create_worker_redis
+from app.core.redis import create_worker_cache_redis, create_worker_redis
 from app.models.job import Job
 from app.scraping.categorize import categorize, company_domain
 from app.scraping.dedup import dedup_engine
@@ -20,21 +20,16 @@ logger = logging.getLogger(__name__)
 
 Key = Tuple[str, str]  # (external_id, source)
 
-# Layer 1: per-process LRU of job keys known to be fully synced (row exists
-# AND description extraction was attempted). Sized for several days' crawls.
+# Layer 1: per-process LRU of job keys known to be fully synced WITH a description.
 _seen_jobs_cache: LRUCache = LRUCache(maxsize=25_000)
 
-# Layer 2: Redis sorted set, member = "source:external_id", score = epoch
-# seconds when last confirmed synced. A plain SET with EXPIRE on the whole
-# key never expired at all — every crawl (every 6h) pushed the 90-day TTL
-# forward, so it grew forever. Scores give each entry its own expiry.
+# Layer 2: Redis sorted set in cache Redis, member = "source:external_id", score = epoch.
 _SEEN_ZSET = "seen:jobs"
 _SEEN_TTL_SECONDS = 90 * 24 * 3600
 
-# Columns that a re-crawl is allowed to refresh. Built per-batch from the keys
-# actually present, because `stmt.excluded.<col>` for a column absent from the
-# INSERT resolves to DEFAULT (NULL) — which would wipe a backfilled
-# description on the next crawl.
+# O(1) version counter for jobs_count cache keys (replaces blocking KEYS scan).
+JOBS_COUNT_VERSION_KEY = "jobs_count:ver"
+
 _UPDATABLE_COLUMNS = (
     "title", "company", "location", "salary_min", "salary_max",
     "apply_url", "source_url", "is_remote", "scraped_at", "is_active",
@@ -42,15 +37,10 @@ _UPDATABLE_COLUMNS = (
     "sponsorship_status", "sponsorship_label",
 )
 
-# A posting whose description couldn't be fetched (403/404, JS-only page) is
-# not retried until this long after the attempt. Without it every crawl
-# re-fetched each unreachable posting, 3 backoff retries apiece — ~half of a
-# second crawl's wall time in a live run was spent on 117 permanent failures.
 JD_RETRY_AFTER = timedelta(days=7)
 
 DescriptionFetcher = Callable[[List[Dict[str, Any]]], Awaitable[int]]
 
-# Arbitrary app-wide constant identifying the relink_hashes advisory lock.
 _RELINK_LOCK_KEY = 0x6A6F_6273_7265_6C6E  # "jobsreln"
 
 
@@ -63,40 +53,17 @@ def _member(key: Key) -> str:
 
 
 async def invalidate_jobs_count_cache(redis) -> None:
-    """Clear cached count totals in Redis so subsequent feed queries reflect fresh rows."""
+    """O(1) invalidation of cached count totals via version counter bump."""
     try:
-        keys = await redis.keys("jobs_count:*")
-        if keys:
-            await redis.delete(*keys)
+        await redis.incr(JOBS_COUNT_VERSION_KEY)
     except Exception as exc:
         logger.warning("Failed to invalidate jobs_count cache: %s", exc)
 
 
 class DatabaseSyncService:
     """
-    Sync a crawled batch through a sequential 3-layer dedup pipeline, and
-    only then spend network on job-description extraction.
-
-        L1  in-process LRU   ─ hit ─┐
-         │ miss                      │
-        L2  Redis ZSET       ─ hit ─┤──▶ known: touch scraped_at/is_active
-         │ miss                      │
-        L3  PostgreSQL       ─ hit ─┘    (unless the row still lacks a JD)
-         │ miss
-        new ──▶ fetch JD ──▶ UPSERT ──▶ link cross-source duplicates
-
-    Previously the crawlers fetched a description for EVERY record before
-    this service ran, so dedup saved no network at all: each crawl re-fetched
-    every posting's JD, and large GitHub runs could outlive their lock.
-
-    Dedup is keyed on (source, external_id) only. The content fingerprint
-    (company|title|location) is used to LINK cross-source duplicates via
-    canonical_id, never to skip: skipping on it silently dropped genuinely
-    distinct reqs that share a title and location.
-
-    L1/L2 are advisory. Their hits are confirmed with one COUNT against L3,
-    so a restored or truncated database can't leave postings permanently
-    "seen" and missing.
+    Sync a crawled batch through a sequential 3-layer dedup pipeline before
+    spending network on job-description extraction.
     """
 
     def __init__(self, session: AsyncSession):
@@ -107,13 +74,6 @@ class DatabaseSyncService:
         job_records: List[Dict[str, Any]],
         fetch_descriptions: DescriptionFetcher,
     ) -> Dict[str, int]:
-        """
-        Sync one crawled batch. `fetch_descriptions` fills `description` in
-        place on the records it is given and returns how many it filled.
-
-        Returns {"inserted", "updated", "skipped", "linked", "descriptions"}.
-        "skipped" counts postings already fully synced (only touched).
-        """
         stats = {"inserted": 0, "updated": 0, "skipped": 0, "linked": 0, "descriptions": 0}
         if not job_records:
             return stats
@@ -121,25 +81,29 @@ class DatabaseSyncService:
         records = self._collapse_intra_batch(job_records)
         self._attach_fingerprints(records)
 
-        redis = create_worker_redis()
+        state_redis = create_worker_redis()
+        cache_redis = create_worker_cache_redis()
         try:
-            known = await self._known_from_cache(records, redis)
-            needs_upsert, already_synced, existing = await self._classify_in_db(records, known)
+            known = await self._known_from_cache(records, cache_redis)
+            needs_upsert, already_synced, cacheable_existing = await self._classify_in_db(
+                records, known, cache_redis
+            )
 
+            reactivated_hashes: Set[str] = set()
             if already_synced:
-                stats["skipped"] = await self._touch(already_synced)
+                touched, reactivated_hashes = await self._touch(already_synced)
+                stats["skipped"] = touched
+                if reactivated_hashes:
+                    # Relink reactivated postings in the same transaction as _touch
+                    # so no feed query observes an unlinked reactivated duplicate.
+                    stats["linked"] += await self.relink_hashes(reactivated_hashes)
 
-            # End the transaction before the network fetch. Holding it open
-            # across a batch of JD fetches (minutes, on a first crawl) left
-            # the connection "idle in transaction", with the _touch row locks
-            # held the whole time.
+            # End the transaction before network fetches.
             await self.session.commit()
 
             inserted_ids: List[Any] = []
             if needs_upsert:
                 stats["descriptions"] = await fetch_descriptions(needs_upsert)
-                # Stamp EVERY attempt, successful or not: it is what lets
-                # _lookup_existing skip recently-failed postings.
                 now = utc_now()
                 for r in needs_upsert:
                     r["description_fetched_at"] = now
@@ -150,92 +114,104 @@ class DatabaseSyncService:
                 stats["inserted"] = len(inserted_ids)
                 stats["updated"] = len(needs_upsert) - stats["inserted"]
 
-            hashes = {r["canonical_hash"] for r in records if r.get("canonical_hash")}
-            stats["linked"] = await self.relink_hashes(hashes)
-            await self.session.commit()
+                hashes = {r["canonical_hash"] for r in needs_upsert if r.get("canonical_hash")}
+                stats["linked"] += await self.relink_hashes(hashes)
+                await self.session.commit()
 
-            await self._publish_created(inserted_ids, redis)
+            await self._publish_created(inserted_ids, state_redis)
 
-            if inserted_ids or stats["linked"]:
-                await invalidate_jobs_count_cache(redis)
+            if inserted_ids or stats["linked"] or reactivated_hashes:
+                await invalidate_jobs_count_cache(cache_redis)
 
-            # A cache hit must mean "nothing left to fetch for this posting",
-            # so a failed fetch stays uncached and is retried next crawl until
-            # backfill_descriptions stamps it as attempted.
-            await self._mark_synced(
-                [_key(r) for r in already_synced]
-                + [_key(r) for r in needs_upsert if r.get("description")],
-                redis,
-            )
+            # Only cache keys that actually HAVE a description in L1/L2 `seen:jobs`.
+            # Rows whose JD failed stay out of the 90-day cache so JD_RETRY_AFTER (7d)
+            # retries them cleanly once their cooldown elapses.
+            keys_to_cache = list(cacheable_existing) + [
+                _key(r) for r in needs_upsert if r.get("description")
+            ]
+            await self._mark_synced(keys_to_cache, cache_redis)
             return stats
         finally:
-            await redis.aclose()
+            await state_redis.aclose(close_connection_pool=True)
+            await cache_redis.aclose(close_connection_pool=True)
 
     # ── L1 + L2 ─────────────────────────────────────────────────────────
 
     async def _known_from_cache(self, records: List[Dict[str, Any]], redis) -> Set[Key]:
         keys = [_key(r) for r in records]
-        known = {k for k in keys if k in _seen_jobs_cache}           # L1
+        known = {k for k in keys if k in _seen_jobs_cache}
 
         l2_candidates = [k for k in keys if k not in known]
-        if l2_candidates:                                             # L2
+        if l2_candidates:
             cutoff = time.time() - _SEEN_TTL_SECONDS
             scores = await redis.zmscore(_SEEN_ZSET, [_member(k) for k in l2_candidates])
             for k, score in zip(l2_candidates, scores):
                 if score is not None and float(score) >= cutoff:
                     known.add(k)
-                    _seen_jobs_cache[k] = True  # promote to L1
+                    _seen_jobs_cache[k] = True
         return known
 
     # ── L3 ──────────────────────────────────────────────────────────────
 
     async def _classify_in_db(
-        self, records: List[Dict[str, Any]], known: Set[Key]
+        self, records: List[Dict[str, Any]], known: Set[Key], cache_redis=None
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Set[Key]]:
         """
-        Split records into (needs_upsert, already_synced, keys_existing_in_db).
-
-        Cache hits are confirmed with one COUNT; if any is missing from the
-        DB, the caches are stale and every record falls through to the
-        per-row L3 lookup.
+        Split records into (needs_upsert, already_synced, cacheable_keys).
+        `cacheable_keys` contains ONLY keys confirmed to have a non-null description.
         """
         if known:
             present = await self._count_existing(list(known))
             if present < len(known):
                 logger.warning(
                     "Dedup cache stale: %d of %d cached keys missing from DB; "
-                    "falling through to L3 and purging them",
+                    "falling through to L3 and purging L1/L2",
                     len(known) - present, len(known),
                 )
                 for k in known:
                     _seen_jobs_cache.pop(k, None)
+                if cache_redis is not None:
+                    try:
+                        await cache_redis.zrem(_SEEN_ZSET, *[_member(k) for k in known])
+                    except Exception as exc:
+                        logger.warning("Failed to purge stale keys from %s: %s", _SEEN_ZSET, exc)
                 known = set()
 
         unknown = [_key(r) for r in records if _key(r) not in known]
         existing = await self._lookup_existing(unknown) if unknown else {}
 
         needs_upsert, already_synced = [], []
+        cacheable_keys: Set[Key] = set(known)
         for r in records:
             k = _key(r)
-            if k in known or existing.get(k):
+            if k in known:
                 already_synced.append(r)
+            elif k in existing:
+                skip_fetch, has_desc = existing[k]
+                if skip_fetch:
+                    already_synced.append(r)
+                    if has_desc:
+                        cacheable_keys.add(k)
+                else:
+                    needs_upsert.append(r)
             else:
-                # New, or a pre-JD-extraction row whose description was never
-                # attempted: worth one fetch.
                 needs_upsert.append(r)
-        return needs_upsert, already_synced, set(existing) | known
+        return needs_upsert, already_synced, cacheable_keys
 
-    async def _lookup_existing(self, keys: List[Key]) -> Dict[Key, bool]:
-        """Map each key present in the DB to whether its JD needs no fetch now."""
+    async def _lookup_existing(self, keys: List[Key]) -> Dict[Key, Tuple[bool, bool]]:
+        """
+        Map each key present in the DB to `(skip_jd_fetch_now, has_description)`.
+        """
         retry_cutoff = utc_now() - JD_RETRY_AFTER
         rows = await self.session.execute(
             select(
                 Job.external_id,
                 Job.source,
+                Job.description.isnot(None),
                 (Job.description.isnot(None) | (Job.description_fetched_at > retry_cutoff)),
             ).where(tuple_(Job.external_id, Job.source).in_(keys))
         )
-        return {(eid, src): attempted for eid, src, attempted in rows}
+        return {(eid, src): (bool(skip_now), bool(has_desc)) for eid, src, has_desc, skip_now in rows}
 
     async def _count_existing(self, keys: List[Key]) -> int:
         stmt = select(func.count()).select_from(Job).where(
@@ -243,28 +219,33 @@ class DatabaseSyncService:
         )
         return (await self.session.execute(stmt)).scalar_one()
 
-    async def _touch(self, records: List[Dict[str, Any]]) -> int:
+    async def _touch(self, records: List[Dict[str, Any]]) -> Tuple[int, Set[str]]:
         """
         Refresh scraped_at and reactivate postings seen again.
-
-        The old pipeline skipped known postings entirely, so a job that was
-        deactivated and later reappeared in a README stayed hidden forever.
+        Returns `(touched_count, reactivated_canonical_hashes)`.
         """
         keys = [_key(r) for r in records]
+        # Capture hashes of rows that were inactive so caller can relink & invalidate count cache.
+        inactive_hashes = {
+            h
+            for h in (
+                await self.session.execute(
+                    select(Job.canonical_hash)
+                    .where(tuple_(Job.external_id, Job.source).in_(keys))
+                    .where(Job.is_active == False)  # noqa: E712
+                )
+            ).scalars().all()
+            if h
+        }
         await self.session.execute(
             update(Job)
             .where(tuple_(Job.external_id, Job.source).in_(keys))
             .values(scraped_at=utc_now(), is_active=True)
         )
-        return len(keys)
+        return len(keys), inactive_hashes
 
     @staticmethod
     def _collapse_intra_batch(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Collapse duplicate (external_id, source) within one batch.
-
-        Postgres raises CardinalityViolationError if a single INSERT ... ON
-        CONFLICT touches the same conflict target twice.
-        """
         deduped: Dict[Key, Dict[str, Any]] = {}
         for r in records:
             deduped[_key(r)] = r
@@ -272,7 +253,6 @@ class DatabaseSyncService:
 
     @staticmethod
     def _attach_fingerprints(records: List[Dict[str, Any]]) -> None:
-        """Attach the content fingerprint plus ingest-time classification."""
         for r in records:
             company, title = r.get("company") or "", r.get("title") or ""
             if company and title:
@@ -286,9 +266,6 @@ class DatabaseSyncService:
             r["sponsorship_label"] = spons["label"]
 
     async def _upsert(self, records: List[Dict[str, Any]]) -> List[Any]:
-        """UPSERT the records; returns ids of rows that were newly INSERTED."""
-        # insert().values(list_of_dicts) uses the FIRST dict's keys for the
-        # column list, so normalize every record to the same key set.
         all_keys = set()
         for r in records:
             all_keys.update(r.keys())
@@ -301,9 +278,6 @@ class DatabaseSyncService:
             for col in _UPDATABLE_COLUMNS
             if col in all_keys
         }
-        # Never overwrite a stored description with NULL. A crawl that didn't
-        # fetch the JD (or whose fetch failed) must leave the existing one
-        # intact; coalesce keeps the incoming value only when it is non-null.
         if "description" in all_keys:
             update_cols["description"] = func.coalesce(
                 stmt.excluded.description, Job.description
@@ -317,10 +291,6 @@ class DatabaseSyncService:
             update_cols["sponsorship_label"] = func.coalesce(
                 stmt.excluded.sponsorship_label, Job.sponsorship_label
             )
-            # A row enriched while it had no description was marked done
-            # with no skills; when a later crawl finally fetches its JD, send
-            # it back through enrichment. Resetting a 'queued' row also voids
-            # an in-flight claim that loaded the description-less row.
             update_cols["scrape_status"] = case(
                 (
                     and_(Job.description.is_(None), stmt.excluded.description.isnot(None)),
@@ -332,30 +302,18 @@ class DatabaseSyncService:
             update_cols["description_source"] = func.coalesce(
                 stmt.excluded.description_source, Job.description_source
             )
-        # posted_at is deliberately excluded: relative dates ("3 days ago") are
-        # recomputed at crawl time, so refreshing it would drift the date
-        # forward on every re-scrape.
 
         result = await self.session.execute(
             stmt.on_conflict_do_update(
                 constraint="uq_jobs_external_id_source", set_=update_cols
             ).returning(
                 Job.id,
-                # A row created by this statement has xmax = 0; one updated by
-                # ON CONFLICT has xmax = this transaction's id.
                 literal_column("(xmax = 0)").label("inserted"),
             )
         )
         return [row.id for row in result if row.inserted]
 
     async def _publish_created(self, inserted_ids: List[Any], redis) -> None:
-        """
-        Emit `created` events for new postings that are visible in the feed.
-
-        Runs after commit and after linking, so a new row that turned out to
-        duplicate an existing posting (canonical_id set) doesn't announce
-        itself as a new job.
-        """
         if not inserted_ids:
             return
         rows = (await self.session.execute(
@@ -368,30 +326,11 @@ class DatabaseSyncService:
             try:
                 await publish_job_event(redis, job_event_payload(job, KIND_CREATED))
             except Exception as exc:
-                # Live updates are best-effort; the rows are already committed.
                 logger.warning("Failed to publish created event for %s: %s", job.id, exc)
 
     # ── Cross-source linking ────────────────────────────────────────────
 
     async def relink_hashes(self, hashes: Set[str]) -> int:
-        """
-        Recompute canonical_id for every row sharing one of these hashes.
-
-        The canonical row is the earliest-seen ACTIVE one. Previously it was
-        the earliest by scraped_at regardless of is_active, and a row that
-        became canonical never had its own canonical_id cleared — so when the
-        original posting was deactivated, its still-active duplicate stayed
-        linked to it and vanished from the feed (which filters on
-        `is_active AND canonical_id IS NULL`). Call this after any change to
-        is_active as well as after inserts.
-
-        Does not commit. Returns the number of rows whose link changed.
-
-        Takes a transaction-scoped advisory lock first. A GitHub and a
-        LinkedIn crawl relinking overlapping hashes at the same time updated
-        the same rows in different orders and could deadlock; with the lock
-        they relink one after the other. Released at commit/rollback.
-        """
         if not hashes:
             return 0
         await self.session.execute(
@@ -453,7 +392,6 @@ class DatabaseSyncService:
         now = time.time()
         pipe = redis.pipeline()
         pipe.zadd(_SEEN_ZSET, {_member(k): now for k in keys})
-        # Prune expired entries; O(log N + M), cheap enough to do per batch.
         pipe.zremrangebyscore(_SEEN_ZSET, "-inf", now - _SEEN_TTL_SECONDS)
         await pipe.execute()
         for k in keys:

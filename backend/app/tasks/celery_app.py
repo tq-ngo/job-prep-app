@@ -45,7 +45,10 @@ celery_app.conf.update(
     # AFTER completion, not before. This prevents task loss if the worker
     # crashes mid-execution — the task goes back to the queue.
     task_acks_late=True,
+    task_track_started=True,
     worker_prefetch_multiplier=1,  # Only take one task at a time
+    worker_max_tasks_per_child=100,
+    worker_max_memory_per_child=300_000,  # 300 MB per child process (kB)
     # With acks_late, Redis redelivers any message unacknowledged after the
     # visibility timeout — by default 1h, less than a long crawl plus its
     # retry countdowns, so a healthy run could be delivered a second time.
@@ -92,10 +95,11 @@ celery_app.conf.update(
             "kwargs": {"stale_after_minutes": 60},
         },
         # Retire LinkedIn postings the daily crawl hasn't seen in 21 days.
-        # After the 06:00 crawl, so today's sightings count.
+        # Runs at 07:30 UTC (90m after the 06:00 crawl) so it never overlaps
+        # a 55-minute crawl + retry.
         "deactivate-stale-linkedin-daily": {
             "task": "app.tasks.job_tasks.deactivate_stale_jobs",
-            "schedule": crontab(hour=6, minute=45),
+            "schedule": crontab(hour=7, minute=30),
             "kwargs": {"source": "linkedin", "max_age_days": 21},
         },
         # Walks the description backlog (rows never attempted). It was routed

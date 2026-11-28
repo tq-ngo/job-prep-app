@@ -24,14 +24,16 @@ from typing import Iterable, List, Optional
 from urllib.parse import urlparse
 
 ALLOWED_SCHEMES = {"http", "https"}
+ALLOWED_PORTS = {80, 443}
 
 # Hostnames that must never be fetched regardless of DNS resolution.
 _BLOCKED_HOSTNAMES = {
     "localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback",
     "metadata", "metadata.google.internal", "metadata.goog",
     # compose service names on the app network
-    "postgres", "redis", "backend", "frontend", "nginx",
-    "celery-worker", "celery-beat", "celery-flower",
+    "postgres", "redis", "redis-cache", "backend", "frontend", "nginx",
+    "celery-worker", "celery-worker-scraping", "celery-worker-ai",
+    "celery-beat", "celery-flower",
 }
 
 
@@ -136,9 +138,18 @@ def resolve_crawl_target(raw_url: str, allowed_hosts: Optional[set] = None) -> C
             )
 
     try:
-        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        raw_port = parsed.port
     except ValueError as exc:
         raise UnsafeUrlError(f"Invalid port in URL: {exc}") from exc
+
+    if raw_port is not None:
+        if raw_port not in ALLOWED_PORTS:
+            raise UnsafeUrlError(
+                f"Port {raw_port} is not allowed (only ports 80 and 443)"
+            )
+        port = raw_port
+    else:
+        port = 443 if parsed.scheme.lower() == "https" else 80
 
     return CrawlTarget(
         url=raw_url.strip(),
