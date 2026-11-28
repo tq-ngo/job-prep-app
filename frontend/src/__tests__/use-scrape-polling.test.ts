@@ -66,6 +66,38 @@ describe("useScrapePolling (src/hooks/useScrapePolling.ts)", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("treats SUCCESS payload with status=failed as an error", async () => {
+    const onSuccess = vi.fn();
+    const onError = vi.fn();
+    vi.spyOn(tasksApi, "getStatus").mockResolvedValueOnce({
+      status: "SUCCESS",
+      result: { status: "failed", error: "Upstream returned 403" },
+      error: null,
+    });
+
+    renderHook(() => useScrapePolling("task-soft-fail", { onSuccess, onError }));
+    await tick(10_000);
+
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledExactlyOnceWith("The task failed: Upstream returned 403");
+  });
+
+  it("reports PARTIAL_FAILURE as an error and stops", async () => {
+    const onSuccess = vi.fn();
+    const onError = vi.fn();
+    vi.spyOn(tasksApi, "getStatus").mockResolvedValueOnce({
+      status: "PARTIAL_FAILURE",
+      result: null,
+      error: "2 URLs timed out",
+    });
+
+    renderHook(() => useScrapePolling("task-partial", { onSuccess, onError }));
+    await tick(10_000);
+
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledExactlyOnceWith("The task partially failed: 2 URLs timed out");
+  });
+
   it("rides out a network blip but gives up after repeated failures", async () => {
     const onError = vi.fn();
     const onSuccess = vi.fn();

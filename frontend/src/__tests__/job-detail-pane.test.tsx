@@ -47,15 +47,27 @@ describe("JobDetailPane", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows company, work type, skills and an Apply link that opens off-site safely", () => {
+  it("shows company, pay, work type, skills and an Apply link that opens off-site safely", () => {
     renderPane();
     expect(screen.getByText("Linear")).toBeInTheDocument();
+    expect(screen.getAllByText("$60 – $75/hr").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Remote").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("TypeScript")).toBeInTheDocument();
     const apply = screen.getByRole("link", { name: /^apply/i });
     expect(apply).toHaveAttribute("href", job.apply_url);
     expect(apply).toHaveAttribute("target", "_blank");
     expect(apply).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("blocks Markdown image tracking beacons inside job descriptions", async () => {
+    const { container } = renderPane({
+      job: {
+        ...job,
+        description: "### Overview\n![tracker](https://tracker.example/pixel.gif)\nRead carefully.",
+      },
+    });
+    expect(await screen.findByText("Read carefully.")).toBeInTheDocument();
+    expect(container.querySelector('img[src*="tracker.example"]')).toBeNull();
   });
 
   it("shows visa sponsorship badge and metric when specified", () => {

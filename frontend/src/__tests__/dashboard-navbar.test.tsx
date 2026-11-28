@@ -90,4 +90,19 @@ describe("DashboardNavbar", () => {
     renderNavbar();
     expect(screen.getByRole("button", { name: /dark mode|light mode/i })).toBeInTheDocument();
   });
+
+  it("opens the desktop Skills editor popover and closes it with Escape", async () => {
+    const { ue } = renderNavbar();
+    const skillsBtn = screen.getByRole("button", { name: /skills\s*2/i });
+    expect(skillsBtn).toHaveAttribute("aria-expanded", "false");
+
+    await ue.click(skillsBtn);
+    expect(skillsBtn).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "Tracked skills" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Add a skill")).toBeInTheDocument();
+
+    await ue.keyboard("{Escape}");
+    expect(skillsBtn).toHaveAttribute("aria-expanded", "false");
+    expect(skillsBtn).toHaveFocus();
+  });
 });

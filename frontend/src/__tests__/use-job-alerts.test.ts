@@ -133,4 +133,17 @@ describe("useJobAlerts SSE Hook (src/hooks/useJobAlerts.ts)", () => {
     unmount();
     expect(es.closed).toBe(true);
   });
+
+  it("stops reconnecting when refresh returns 403", async () => {
+    vi.spyOn(authApi, "refresh").mockRejectedValueOnce({ response: { status: 403 } });
+    renderHook(() => useJobAlerts());
+    const es = MockEventSource.instances[0];
+
+    await act(async () => {
+      es.emit("auth-expired", {});
+      await Promise.resolve();
+    });
+
+    expect(MockEventSource.instances).toHaveLength(1);
+  });
 });

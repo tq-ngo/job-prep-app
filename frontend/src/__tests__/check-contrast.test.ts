@@ -30,20 +30,17 @@ describe("WCAG 2.1 contrast tokens (src/app/globals.css)", () => {
 
   it("composites translucent tints over the surface", () => {
     expect(composite("#000000", 0.5, "#ffffff")).toBe("#808080");
-    expect(composite("#b45309", 0, "#faf9f5")).toBe("#faf9f5");
+    expect(composite("#0b57d0", 0, "#f8fafd")).toBe("#f8fafd");
   });
 
-  it("would catch a failing tint pair", () => {
-    // Plain amber-clay on its own 10% tint is the pair that used to fail.
-    const [light] = evaluate(css, [["amber-clay", "amber-clay/10", 4.5]]);
+  it("would catch a failing low-contrast pair", () => {
+    const [light] = evaluate(css, [["outline-variant", "surface", 4.5]]);
     expect(light.ok).toBe(false);
   });
 
   it("keeps the dark-mode text hierarchy ordered", () => {
-    const dark = results.filter((r) => r.theme === "dark" && r.bg === "background");
+    const dark = results.filter((r) => r.theme === "dark" && r.bg === "surface");
     const get = (fg: string) => dark.find((r) => r.fg === fg)!.ratio;
-    expect(get("foreground-heading")).toBeGreaterThan(get("foreground"));
-    expect(get("foreground")).toBeGreaterThan(get("foreground-muted"));
-    expect(get("foreground-muted")).toBeGreaterThan(get("foreground-subtle"));
+    expect(get("on-surface")).toBeGreaterThan(get("on-surface-variant"));
   });
 });

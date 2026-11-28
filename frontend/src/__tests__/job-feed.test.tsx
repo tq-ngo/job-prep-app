@@ -135,10 +135,10 @@ describe("JobFeed list", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
-  it("shows location, up to three skills and relative date on each row", () => {
+  it("shows pay, location, up to three skills and relative date on each row", () => {
     renderFeed();
     const row = link(/Backend Intern/);
-    expect(row).not.toHaveTextContent("$55 – $65/hr");
+    expect(row).toHaveTextContent("$55 – $65/hr");
     expect(row).toHaveTextContent("Boston, MA");
     expect(row).not.toHaveTextContent("github");
     expect(row).toHaveTextContent(/ago|today|yesterday/i);
@@ -284,6 +284,83 @@ describe("JobFeed list", () => {
     const skills = await screen.findAllByText("Distributed Systems");
     expect(skills.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByRole("button", { name: /new job/i })).not.toBeInTheDocument();
+  });
+
+  it("clears all active filters atomically from the toolbar Clear all button", async () => {
+    realReplace(null, "", "/jobs?category=Quant&work_type=remote&remote=true&skill=Rust");
+    vi.spyOn(jobsApi, "list").mockResolvedValue(feed());
+    renderFeed();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Clear all" }));
+    expect(window.location.search).toBe("");
+  });
+
+  it("removes legacy remote=true when switching Work Type back to All", async () => {
+    realReplace(null, "", "/jobs?remote=true");
+    vi.spyOn(jobsApi, "list").mockResolvedValue(feed());
+    renderFeed();
+
+    const ue = userEvent.setup();
+    await ue.click(screen.getByRole("button", { name: "Work Type" }));
+    await ue.click(screen.getByRole("option", { name: "All Work Types" }));
+    expect(search().has("remote")).toBe(false);
+    expect(search().has("work_type")).toBe(false);
+  });
+
+  it("does not optimistically prepend SSE created jobs into a filtered view", async () => {
+    realReplace(null, "", "/jobs?category=Quant");
+    vi.spyOn(jobsApi, "list").mockResolvedValue(feed());
+    renderFeed();
+
+    act(() =>
+      emitJobEvent?.({
+        kind: "created",
+        id: "j-filtered-out",
+        title: "Non-Quant Intern",
+        company: "Acme",
+        location: "Remote",
+        skills: [],
+        apply_url: "https://acme.example",
+        source: "github",
+        is_remote: true,
+        category: "Others",
+      }),
+    );
+
+    expect(screen.queryByRole("link", { name: /Non-Quant Intern/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the currently viewed desktop default job pinned when a new job prepends via SSE", async () => {
+    setViewport(true);
+    vi.spyOn(jobsApi, "list").mockResolvedValue(
+      feed({
+        items: [
+          item("j-3", "Security Intern", "Cloudflare"),
+          item("j-1", "Backend Intern", "Datadog"),
+          item("j-2", "Frontend Intern", "Vercel"),
+        ],
+        total: 3,
+      }),
+    );
+    renderFeed();
+    expect(screen.getByRole("heading", { level: 2, name: "Backend Intern" })).toBeInTheDocument();
+
+    act(() =>
+      emitJobEvent?.({
+        kind: "created",
+        id: "j-3",
+        title: "Security Intern",
+        company: "Cloudflare",
+        location: null,
+        skills: [],
+        apply_url: "https://cloudflare.example",
+        source: "github",
+        is_remote: false,
+      }),
+    );
+
+    await waitFor(() => expect(link(/Security Intern/)).toBeInTheDocument());
+    expect(screen.getByRole("heading", { level: 2, name: "Backend Intern" })).toBeInTheDocument();
   });
 });
 
