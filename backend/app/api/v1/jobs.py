@@ -1,24 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, func
-from typing import Optional, List
+import asyncio
+import hashlib
 import json
+import logging
+import uuid
+from typing import List, Literal, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from redis.exceptions import RedisError
+from sqlalchemy import Text, and_, case, inspect as sa_inspect, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
+from sqlmodel import func, select
+
+from app.api.v1.auth import get_current_user, require_admin, require_csrf
 from app.core.database import get_session
 from app.core.rate_limit import limiter
+from app.core.redis import get_cache_redis
+from app.core.task_owner import record_task_owner
 from app.models.job import Job
 from app.models.users import User
-from app.schemas.job import JobRead, JobListResponse, JobListItem
-from app.tasks.job_tasks import scrape_github, scrape_linkedin
-from app.core.redis import get_redis_pool
-from app.api.v1.auth import get_current_user, require_csrf
-from app.core.task_owner import record_task_owner
+from app.schemas.job import JobListItem, JobListResponse, JobRead
+from app.scraping.db_sync import JOBS_COUNT_VERSION_KEY
 from app.scraping.sponsorship import classify_sponsorship
-from sqlalchemy import or_, and_, case, Text, inspect as sa_inspect
-from sqlalchemy.orm import defer
-import hashlib
-import uuid
+from app.tasks.job_tasks import scrape_github, scrape_linkedin
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 POPULAR_TECH_SKILLS = [
@@ -123,27 +129,34 @@ def to_job_read(j: Job) -> JobRead:
 
 
 @router.get("/skills", response_model=List[str])
+@limiter.limit("60/minute")
 async def list_skills(
+    request: Request,
+    response: Response,
     q: Optional[str] = Query(default=None, max_length=50, description="Prefix or keyword to search"),
     limit: int = Query(default=20, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Suggests technical skills for autocomplete based on skills extracted from jobs.
-    """
-    redis = await get_redis_pool()
+    """Suggests technical skills for autocomplete based on skills extracted from jobs."""
+    response.headers["Cache-Control"] = "private, no-store"
     cache_key = "popular_skills_cache"
-    cached = await redis.get(cache_key)
-    
+    cache_redis = None
+    cached = None
+    try:
+        cache_redis = await get_cache_redis()
+        cached = await cache_redis.get(cache_key)
+    except RedisError as exc:
+        logger.warning("Skills cache read failed; querying database: %s", exc)
+
     if cached:
         all_skills = json.loads(cached)
     else:
-        # Fetch any distinct skills in DB
         result = await session.execute(
             select(Job.skills)
-            .where(Job.is_active == True, Job.skills.is_not(None))
-            .limit(100)
+            .where(Job.is_active == True, Job.canonical_id.is_(None), Job.skills.is_not(None))  # noqa: E712
+            .order_by(Job.scraped_at.desc(), Job.id)
+            .limit(200)
         )
         seen_skills = set(POPULAR_TECH_SKILLS)
         for row in result.scalars().all():
@@ -152,7 +165,11 @@ async def list_skills(
                     if isinstance(s, str) and len(s) <= 40:
                         seen_skills.add(s.strip())
         all_skills = sorted(seen_skills, key=lambda s: s.lower())
-        await redis.setex(cache_key, 600, json.dumps(all_skills))
+        if cache_redis is not None:
+            try:
+                await cache_redis.setex(cache_key, 600, json.dumps(all_skills))
+            except RedisError as exc:
+                logger.warning("Skills cache write failed: %s", exc)
 
     if not q or not q.strip():
         return all_skills[:limit]
@@ -164,31 +181,34 @@ async def list_skills(
 
 
 @router.get("/", response_model=JobListResponse)
+@limiter.limit("120/minute")
 async def list_jobs(
-    # Query parameters with defaults and validation
+    request: Request,
+    response: Response,
     page: int = Query(default=1, ge=1, le=100, description="Page number (1-indexed)"),
     page_size: int = Query(default=30, ge=1, le=100, description="Items per page"),
-    source: Optional[str] = Query(default=None, max_length=32, description="Filter by source"),
+    source: Optional[Literal["github", "linkedin"]] = Query(default=None, description="Filter by source"),
     is_remote: Optional[bool] = Query(default=None),
-    min_salary: Optional[int] = Query(default=None, ge=0),
+    min_salary: Optional[int] = Query(default=None, ge=0, le=10_000_000),
     q: Optional[str] = Query(default=None, max_length=200, description="Search term for title or company"),
-    category: Optional[str] = Query(default=None, max_length=16, description="Filter by category (FAANG+, Quant, Others)"),
-    work_type: Optional[str] = Query(default=None, max_length=16, description="Filter by work type (remote, hybrid, onsite)"),
-    sponsorship: Optional[str] = Query(default=None, max_length=32, description="Filter by sponsorship (f1_eligible, h1b, requires_citizenship)"),
+    category: Optional[Literal["FAANG+", "Quant", "Others"]] = Query(default=None, description="Filter by category"),
+    work_type: Optional[Literal["remote", "hybrid", "onsite"]] = Query(default=None, description="Filter by work type"),
+    sponsorship: Optional[str] = Query(default=None, max_length=32, description="Filter by sponsorship"),
     skill: Optional[str] = Query(default=None, max_length=50, description="Filter by technical skill"),
-    sort_by: Optional[str] = Query(default="date", max_length=16, description="Sort order (date, relevance)"),
+    sort_by: Literal["date", "relevance"] = Query(default="date", description="Sort order"),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    response.headers["Cache-Control"] = "private, no-store"
     offset = (page - 1) * page_size
-    base_filters = [Job.is_active == True, Job.canonical_id.is_(None)]
+    base_filters = [Job.is_active == True, Job.canonical_id.is_(None)]  # noqa: E712
     query = select(Job).options(defer(Job.embedding), defer(Job.description)).where(*base_filters)
     count_query = select(func.count(Job.id)).where(*base_filters)
-    
+
     if source:
         query = query.where(Job.source == source)
         count_query = count_query.where(Job.source == source)
-    
+
     if is_remote is not None:
         query = query.where(Job.is_remote == is_remote)
         count_query = count_query.where(Job.is_remote == is_remote)
@@ -196,39 +216,37 @@ async def list_jobs(
     if work_type:
         wt = work_type.lower().strip()
         if wt == "remote":
-            work_filter = or_(Job.is_remote == True, Job.location.ilike("%remote%"))
+            work_filter = or_(Job.is_remote == True, Job.location.ilike("%remote%"))  # noqa: E712
         elif wt == "hybrid":
             work_filter = or_(Job.location.ilike("%hybrid%"), Job.title.ilike("%hybrid%"))
-        elif wt == "onsite":
+        else:
             work_filter = and_(
-                or_(Job.is_remote == False, Job.is_remote.is_(None)),
+                or_(Job.is_remote == False, Job.is_remote.is_(None)),  # noqa: E712
                 or_(
                     Job.location.is_(None),
                     and_(~Job.location.ilike("%remote%"), ~Job.location.ilike("%hybrid%")),
                 ),
             )
-        else:
-            work_filter = None
-        if work_filter is not None:
-            query = query.where(work_filter)
-            count_query = count_query.where(work_filter)
+        query = query.where(work_filter)
+        count_query = count_query.where(work_filter)
 
+    normalized_sponsorship = None
     if sponsorship:
         sp = sponsorship.lower().strip()
         if sp in ("sponsorship_available", "f1_eligible", "cpt_opt", "h1b"):
-            spons_filter = Job.sponsorship_status == "sponsorship_available"
+            normalized_sponsorship = "sponsorship_available"
         elif sp in ("requires_citizenship", "citizenship"):
-            spons_filter = Job.sponsorship_status == "citizenship"
+            normalized_sponsorship = "citizenship"
         elif sp in ("no_sponsorship", "not_sponsored", "none"):
-            spons_filter = Job.sponsorship_status == "no_sponsorship"
+            normalized_sponsorship = "no_sponsorship"
         else:
-            spons_filter = None
-        if spons_filter is not None:
-            query = query.where(spons_filter)
-            count_query = count_query.where(spons_filter)
+            raise HTTPException(status_code=422, detail=f"Invalid sponsorship filter: {sponsorship!r}")
+        query = query.where(Job.sponsorship_status == normalized_sponsorship)
+        count_query = count_query.where(Job.sponsorship_status == normalized_sponsorship)
 
-    if skill:
-        sk_clean = skill.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").strip()
+    sk_clean = None
+    if skill and skill.strip():
+        sk_clean = skill.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         skill_filter = or_(
             Job.skills.cast(Text).ilike(f'%"{sk_clean}"%', escape="\\"),
             Job.skills.cast(Text).ilike(f'%{sk_clean}%', escape="\\"),
@@ -236,14 +254,14 @@ async def list_jobs(
         )
         query = query.where(skill_filter)
         count_query = count_query.where(skill_filter)
-    
+
     if min_salary is not None:
         query = query.where(Job.salary_min >= min_salary)
         count_query = count_query.where(Job.salary_min >= min_salary)
-    
+
     search_term = None
-    if q:
-        search_term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").strip()
+    if q and q.strip():
+        search_term = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         search_filter = or_(
             Job.title.ilike(f"%{search_term}%", escape="\\"),
             Job.company.ilike(f"%{search_term}%", escape="\\"),
@@ -256,24 +274,46 @@ async def list_jobs(
         query = query.where(Job.category == category)
         count_query = count_query.where(Job.category == category)
 
-    MAX_UI_JOBS = 500  # All jobs are stored in DB; UI displays at most 500
-    redis = await get_redis_pool()
-    filter_digest = hashlib.sha256(
-        "|".join(
-            str(v) for v in (source, is_remote, min_salary, q, category, work_type, sponsorship, skill, sort_by)
-        ).encode("utf-8")
-    ).hexdigest()[:32]
-    cache_key = f"jobs_count:{filter_digest}"
-    cached_total = await redis.get(cache_key)
+    MAX_UI_JOBS = 500
+    # Hash structured JSON (excluding sort_by, which never changes COUNT(*))
+    # and embed an O(1) version counter so invalidation never calls KEYS.
+    filter_payload = json.dumps(
+        {
+            "source": source,
+            "is_remote": is_remote,
+            "min_salary": min_salary,
+            "q": search_term,
+            "category": category,
+            "work_type": work_type,
+            "sponsorship": normalized_sponsorship,
+            "skill": sk_clean,
+        },
+        sort_keys=True,
+    )
+    filter_digest = hashlib.sha256(filter_payload.encode("utf-8")).hexdigest()[:32]
+
+    cache_redis = None
+    cache_key = None
+    cached_total = None
+    try:
+        cache_redis = await get_cache_redis()
+        ver = await cache_redis.get(JOBS_COUNT_VERSION_KEY) or "0"
+        cache_key = f"jobs_count:v{ver}:{filter_digest}"
+        cached_total = await cache_redis.get(cache_key)
+    except RedisError as exc:
+        logger.warning("Jobs count cache read failed; querying database: %s", exc)
 
     if cached_total is not None:
         raw_total = int(cached_total)
     else:
         count_result = await session.execute(count_query)
-        raw_total = count_result.scalar()
-        await redis.set(cache_key, raw_total, ex=30)
+        raw_total = count_result.scalar() or 0
+        if cache_redis is not None and cache_key is not None:
+            try:
+                await cache_redis.set(cache_key, raw_total, ex=30)
+            except RedisError as exc:
+                logger.warning("Jobs count cache write failed: %s", exc)
 
-    # Clamp display total to 500 — DB still holds all records
     total = min(raw_total, MAX_UI_JOBS)
     capped = raw_total > MAX_UI_JOBS
     pages = (total + page_size - 1) // page_size if total > 0 else 1
@@ -294,13 +334,13 @@ async def list_jobs(
             query = query.order_by(
                 case((Job.title.ilike(f"%{search_term}%", escape="\\"), 1), else_=2),
                 Job.posted_at.desc().nulls_last(),
-                Job.id
+                Job.id,
             )
         else:
             query = query.order_by(
                 case((Job.category == "FAANG+", 1), (Job.category == "Quant", 2), else_=3),
                 Job.posted_at.desc().nulls_last(),
-                Job.id
+                Job.id,
             )
     else:
         query = query.order_by(Job.posted_at.desc().nulls_last(), Job.id)
@@ -310,7 +350,7 @@ async def list_jobs(
     jobs_result = await session.execute(query)
     jobs = jobs_result.scalars().all()
     items = [to_job_list_item(j) for j in jobs]
-    
+
     return JobListResponse(
         items=items,
         total=total,
@@ -326,15 +366,10 @@ async def list_jobs(
 async def trigger_scrape(
     request: Request,
     source: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     _: None = Depends(require_csrf),
 ):
-    """
-    Administrative endpoint to manually trigger a background scrape job.
-    Continuous ingestion is managed automatically by Celery Beat and live SSE push.
-    Idempotency is handled inside each task via Redis NX locks — the API simply
-    dispatches and the task will self-skip if already running.
-    """
+    """Administrative endpoint to manually trigger a background scrape job."""
     task_map = {
         "github": scrape_github,
         "linkedin": scrape_linkedin,
@@ -343,9 +378,13 @@ async def trigger_scrape(
     if source == "all":
         task_ids = []
         for src_name, src_task in task_map.items():
-            task = src_task.delay() if src_name == "github" else src_task.delay(
-                "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern"
-            )
+            if src_name == "github":
+                task = await asyncio.to_thread(src_task.delay)
+            else:
+                task = await asyncio.to_thread(
+                    src_task.delay,
+                    "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern",
+                )
             task_ids.append({"source": src_name, "task_id": task.id})
         await record_task_owner([t["task_id"] for t in task_ids], current_user.id)
         combined_task_id = ",".join([t["task_id"] for t in task_ids])
@@ -355,17 +394,20 @@ async def trigger_scrape(
             "tasks": task_ids,
             "message": f"Triggered {len(task_ids)} scrapers (each will self-skip if already running)",
         }
-    
+
     if source not in task_map:
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown source '{source}'. Valid: {list(task_map.keys()) + ['all']}"
+            detail=f"Unknown source '{source}'. Valid: {list(task_map.keys()) + ['all']}",
         )
 
     if source == "linkedin":
-        task = task_map[source].delay("https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern")
+        task = await asyncio.to_thread(
+            task_map[source].delay,
+            "https://www.linkedin.com/jobs/search/?keywords=software+engineer+intern",
+        )
     else:
-        task = task_map[source].delay()
+        task = await asyncio.to_thread(task_map[source].delay)
     await record_task_owner([task.id], current_user.id)
 
     return {
@@ -377,9 +419,17 @@ async def trigger_scrape(
 
 
 @router.get("/{job_id}", response_model=JobRead)
-async def get_job(job_id: uuid.UUID, session: AsyncSession = Depends(get_session), current_user: User = Depends(get_current_user)):
-    """Get a single job by ID."""
+@limiter.limit("120/minute")
+async def get_job(
+    request: Request,
+    response: Response,
+    job_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a single active job by ID."""
+    response.headers["Cache-Control"] = "private, no-store"
     job = await session.get(Job, job_id)
-    if not job:
+    if not job or not job.is_active:
         raise HTTPException(status_code=404, detail="Job not found")
     return to_job_read(job)

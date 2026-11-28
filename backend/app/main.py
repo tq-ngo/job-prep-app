@@ -1,95 +1,90 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi import _rate_limit_exceeded_handler
+from sqlalchemy import text
 
 from app.config import settings
-from app.core.database import assert_schema_current
+from app.core.database import AsyncSessionLocal, assert_schema_current, engine
+from app.core.locks import acquire_lock
 from app.core.rate_limit import limiter
 from app.ai.gemini_client import verify_model
 from app.api.v1 import jobs, news, search, auth, tasks, sse, stats
-from app.core.redis import close_redis_pool
+from app.core.redis import close_redis_pool, get_redis_pool
 
 logger = logging.getLogger(__name__)
 
 
+async def _json_rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    FastAPI lifespan: code before `yield` runs on startup,
-    code after `yield` runs on shutdown.
-    
-    This replaces the old @app.on_event("startup") pattern.
-    """
-    # ── STARTUP ──────────────────────────────────────────────────────────
+    """FastAPI lifespan: startup verification/bootstrap and graceful shutdown."""
     logger.info("Starting Job Prep Platform...")
 
-    # Schema is owned by Alembic; `alembic upgrade head` runs in the
-    # entrypoint before uvicorn. This only asserts it actually happened.
     await assert_schema_current()
-
-    # Fail fast on a wrong/retired GEMINI_MODEL rather than 404ing on every
-    # call while the pipeline reports success. No-ops without an API key.
     await verify_model()
 
-    # Automatically bootstrap initial postings if the database is empty on startup
+    # Automatically bootstrap initial postings if the database is empty on startup,
+    # guarded by a Redis NX lock so concurrent replicas only enqueue once.
     try:
-        from app.core.database import AsyncSessionLocal
         from app.models.job import Job
         from sqlmodel import select, func
+
         async with AsyncSessionLocal() as session:
             count = await session.scalar(select(func.count(Job.id)))
-            if count == 0:
+        if count == 0:
+            redis = await get_redis_pool()
+            if await acquire_lock(redis, "bootstrap:initial_github_scrape", 300):
                 logger.info("Jobs table is empty; enqueuing initial GitHub scrape bootstrap...")
                 from app.tasks.job_tasks import scrape_github
-                scrape_github.delay()
+
+                await asyncio.to_thread(scrape_github.delay)
     except Exception as exc:
         logger.warning("Could not check or enqueue startup scrape bootstrap: %s", exc)
 
     logger.info("Startup complete")
 
-    yield  # App runs here
+    yield
 
-    # ── SHUTDOWN ──────────────────────────────────────────────────────────
     logger.info("Shutting down...")
     await close_redis_pool()
+    await engine.dispose()
     logger.info("Shutdown complete")
 
 
 def create_app() -> FastAPI:
-    # Interactive docs and the schema map every route and parameter; useful
-    # in dev, pure reconnaissance in production. nginx's IP allowlist for
-    # /docs didn't hold under Docker Desktop (every client arrives from the
-    # bridge gateway), so production doesn't serve them at all.
     docs_enabled = not settings.is_production
     app = FastAPI(
         title="Job Prep Platform",
         version="1.0.0",
-        docs_url="/docs" if docs_enabled else None,          # Swagger UI
-        redoc_url="/redoc" if docs_enabled else None,        # ReDoc
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
-    
-    # Rate limiting (Redis-backed, shared across replicas).
+
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _json_rate_limit_handler)
     app.add_middleware(SlowAPIMiddleware)
 
-    # CORS: Allow the frontend to call the API. Explicit origins only;
-    # Settings rejects "*" because credentials are allowed.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-CSRF-Token", "Last-Event-ID"],
     )
-    
-    # Register routers
+
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
     app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
     app.include_router(news.router, prefix="/api/v1/news", tags=["News"])
@@ -97,12 +92,26 @@ def create_app() -> FastAPI:
     app.include_router(sse.router, prefix="/api/v1/stream", tags=["SSE"])
     app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["Tasks"])
     app.include_router(stats.router, prefix="/api/v1/stats", tags=["Stats"])
-    
+
     @app.get("/health")
     async def health_check():
-        """Kubernetes/Docker healthcheck endpoint."""
+        """Liveness probe."""
         return {"status": "ok"}
-    
+
+    @app.get("/readyz")
+    async def readiness_check():
+        """Readiness probe verifying Postgres and Redis connectivity."""
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            redis = await get_redis_pool()
+            if not await redis.ping():
+                raise RuntimeError("Redis ping returned false")
+        except Exception as exc:
+            logger.warning("Readiness check failed: %s", exc)
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
+        return {"status": "ready"}
+
     return app
 
 

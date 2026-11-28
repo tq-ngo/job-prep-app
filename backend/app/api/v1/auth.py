@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -8,7 +9,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from redis.exceptions import RedisError
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -21,6 +24,7 @@ from app.core.auth_cookies import (
     await_rotation_result,
     claim_rotation,
     clear_auth_cookies,
+    delete_rotation_result,
     deny_token,
     is_payload_revoked,
     revoke_family,
@@ -39,6 +43,7 @@ from app.core.google_oauth import (
     verify_id_token,
 )
 from app.core.rate_limit import limiter
+from app.core.redis import get_redis_pool
 from app.core.security import (
     TOKEN_TYPE_ACCESS,
     TOKEN_TYPE_REFRESH,
@@ -64,9 +69,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Kept so Swagger still offers a bearer flow, and so existing bearer clients
-# keep working during the migration to cookies. auto_error=False because a
-# cookie is now the primary transport.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 # Constant-time guard for the "no such user" branch of /login.
@@ -78,18 +80,18 @@ _CREDENTIALS_EXC = HTTPException(
     headers={"WWW-Authenticate": "Bearer"},
 )
 
+# Per-email credential-stuffing lockout thresholds.
+_LOGIN_FAIL_PREFIX = "auth:fail:"
+_LOGIN_FAIL_LIMIT = 10
+_LOGIN_FAIL_WINDOW_SECONDS = 900
+
 
 async def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
     access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """
-    Resolve the caller from an HttpOnly cookie, falling back to a bearer header.
-
-    Cookie is preferred; the Authorization header remains accepted so API
-    clients and the interactive docs keep working.
-    """
+    """Resolve the caller from an HttpOnly cookie, falling back to a bearer header."""
     raw = access_token or token
     if not raw:
         raise _CREDENTIALS_EXC
@@ -99,13 +101,16 @@ async def get_current_user(
     except TokenError:
         raise _CREDENTIALS_EXC
 
-    # Check revocation and `user:profile:{sub}` in a single Redis round-trip.
     is_revoked, cached_profile = await check_revocation_and_get_profile(payload)
     if is_revoked:
         raise _CREDENTIALS_EXC
 
+    token_ver = payload.get("ver")
+
     if cached_profile is not None:
         if not cached_profile.is_active:
+            raise _CREDENTIALS_EXC
+        if token_ver is not None and cached_profile.token_version != token_ver:
             raise _CREDENTIALS_EXC
         return to_user_model(cached_profile)
 
@@ -114,26 +119,25 @@ async def get_current_user(
     if user is None or not user.is_active:
         await invalidate_user_profile(payload["sub"])
         raise _CREDENTIALS_EXC
+    if token_ver is not None and user.token_version != token_ver:
+        await invalidate_user_profile(payload["sub"])
+        raise _CREDENTIALS_EXC
     await set_cached_user_profile(user)
     return user
 
 
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Enforce administrative privileges on operational trigger endpoints."""
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator privileges required",
+        )
+    return current_user
+
+
 async def require_csrf(request: Request) -> None:
-    """
-    Double-submit CSRF check for cookie-authenticated state changes.
-
-    SameSite=Lax already blocks cross-site POSTs in modern browsers; this is
-    the second layer, and it matters because CORS runs with
-    allow_credentials=True.
-
-    Skipped only for pure bearer-token callers, which are not subject to CSRF
-    (the browser won't attach an Authorization header on its own). It used
-    to skip whenever ANY Authorization header was present — but
-    get_current_user prefers the cookie, so a request carrying the victim's
-    cookie plus a junk `Authorization: Bearer x` authenticated as the victim
-    while bypassing this check. If an auth cookie is present, the request is
-    cookie-authenticated and must pass the check.
-    """
+    """Double-submit CSRF check for cookie-authenticated state changes."""
     has_auth_cookie = bool(
         request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
     )
@@ -147,16 +151,61 @@ async def require_csrf(request: Request) -> None:
         raise HTTPException(status_code=403, detail="CSRF token mismatch")
 
 
-async def _find_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
-    """
-    Case-insensitive lookup for sign-in paths (login, register, Google link).
+def _check_same_origin(request: Request) -> None:
+    """Mitigate Login CSRF on browser form submissions."""
+    sec_fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if sec_fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="Cross-site request rejected")
+    origin = (request.headers.get("origin") or "").strip()
+    if origin and origin not in settings.cors_origins:
+        raise HTTPException(status_code=403, detail="Origin not allowed")
 
-    New rows are stored lowercased, but rows created before normalization may
-    be mixed-case; comparing on lower() matches both without a data
-    migration. Ordered so that a legacy case-variant duplicate resolves
-    deterministically to the oldest account. (Token lookups keep the exact
-    match on `sub`, which is always the stored value.)
-    """
+
+def _email_fail_key(email: str) -> str:
+    digest = hashlib.sha256(normalize_email(email).encode("utf-8")).hexdigest()[:32]
+    return f"{_LOGIN_FAIL_PREFIX}{digest}"
+
+
+async def _check_email_lockout(email: str) -> None:
+    try:
+        redis = await get_redis_pool()
+        count = int(await redis.get(_email_fail_key(email)) or 0)
+        if count >= _LOGIN_FAIL_LIMIT:
+            ttl = await redis.ttl(_email_fail_key(email))
+            headers = {"Retry-After": str(max(1, int(ttl)))} if ttl and ttl > 0 else None
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Please try again later.",
+                headers=headers,
+            )
+    except HTTPException:
+        raise
+    except RedisError as exc:
+        logger.warning("Email lockout check failed; continuing: %s", exc)
+
+
+async def _record_email_failure(email: str) -> None:
+    try:
+        redis = await get_redis_pool()
+        key = _email_fail_key(email)
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, _LOGIN_FAIL_WINDOW_SECONDS)
+            await pipe.execute()
+    except RedisError as exc:
+        logger.warning("Failed to record login failure counter: %s", exc)
+
+
+async def _clear_email_failures(email: str) -> None:
+    try:
+        redis = await get_redis_pool()
+        await redis.delete(_email_fail_key(email))
+    except RedisError:
+        pass
+
+
+async def _find_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
+    """Case-insensitive lookup for sign-in paths."""
     result = await session.execute(
         select(User)
         .where(func.lower(User.email) == normalize_email(email))
@@ -167,41 +216,40 @@ async def _find_user_by_email(session: AsyncSession, email: str) -> Optional[Use
 
 
 def _safe_next(next_path: Optional[str], default: str = "/jobs") -> str:
-    """
-    Accept only same-origin relative paths, so `next` can't be an open redirect.
-
-    Backslashes are rejected too: browsers normalise `/\\evil.com` to
-    `//evil.com`, a protocol-relative URL to another host.
-    """
+    """Accept only same-origin relative paths, so `next` can't be an open redirect."""
     if (
         next_path
         and next_path.startswith("/")
         and not next_path.startswith("//")
         and "\\" not in next_path
-        and not any(ord(c) < 0x20 for c in next_path)
+        and not any(ord(c) < 0x20 or ord(c) == 0x7F for c in next_path)
     ):
         return next_path
     return default
 
 
-def _mint(email: str, family: str) -> Tuple[str, str, str]:
+def _mint(email: str, family: str, token_version: int = 1) -> Tuple[str, str, str]:
     """Mint an (access, refresh, csrf) triple within one token family."""
-    access, _, _ = create_access_token(email, family)
-    refresh, _, _ = create_refresh_token(email, family)
+    access, _, _ = create_access_token(email, family, token_version=token_version)
+    refresh, _, _ = create_refresh_token(email, family, token_version=token_version)
     return access, refresh, secrets.token_urlsafe(32)
 
 
 async def _issue_session(response: Response, user: User, session: AsyncSession) -> dict:
     """Start a new token family for a fresh sign-in, set cookies, stamp last_login_at."""
-    access, refresh, csrf = _mint(user.email, new_token_family())
+    access, refresh, csrf = _mint(
+        user.email,
+        new_token_family(),
+        token_version=int(getattr(user, "token_version", 1) or 1),
+    )
     set_auth_cookies(response, access, refresh, csrf)
+    response.headers["Cache-Control"] = "private, no-store"
 
     user.last_login_at = utc_now()
     session.add(user)
     await session.commit()
     await set_cached_user_profile(user)
 
-    # Body no longer carries the token — it lives only in the HttpOnly cookie.
     return {"status": "ok", "csrf_token": csrf}
 
 
@@ -211,22 +259,26 @@ async def _issue_session(response: Response, user: User, session: AsyncSession) 
 @limiter.limit("5/hour")
 async def register(
     request: Request,
+    response: Response,
     user_in: UserCreate,
     session: AsyncSession = Depends(get_session),
 ):
+    response.headers["Cache-Control"] = "private, no-store"
     if await _find_user_by_email(session, user_in.email):
-        # Always execute bcrypt hashing even when email is duplicate to ensure
-        # constant-time latency parity and eliminate the registration timing oracle.
         await get_password_hash_async(user_in.password)
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        email=user_in.email,  # already normalized by UserCreate
+        email=user_in.email,
         hashed_password=await get_password_hash_async(user_in.password),
         skills=[],
     )
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="Email already registered")
     await session.refresh(user)
     return user
 
@@ -239,21 +291,24 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_session),
 ):
+    _check_same_origin(request)
+    response.headers["Cache-Control"] = "private, no-store"
+    await _check_email_lockout(form_data.username)
+
     user = await _find_user_by_email(session, form_data.username)
 
-    # Always run bcrypt, even with no matching user: returning early otherwise
-    # made response latency a reliable oracle for which emails are registered.
     hashed = user.hashed_password if user and user.hashed_password else _DUMMY_HASH
     pwd_ok = await verify_password_async(form_data.password, hashed)
 
-    # The raw email is deliberately not logged (was at INFO on every attempt).
     if not user or not user.hashed_password or not pwd_ok or not user.is_active:
+        await _record_email_failure(form_data.username)
         logger.warning("Failed login attempt")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    await _clear_email_failures(form_data.username)
     return await _issue_session(response, user, session)
 
 
@@ -275,6 +330,7 @@ async def google_login(request: Request, next: str = "/jobs"):
     _require_google_configured()
     url, binding = await build_authorization_url(_safe_next(next))
     redirect = RedirectResponse(url, status_code=307)
+    redirect.headers["Cache-Control"] = "private, no-store"
     redirect.set_cookie(
         BINDING_COOKIE,
         binding,
@@ -282,8 +338,6 @@ async def google_login(request: Request, next: str = "/jobs"):
         path=BINDING_COOKIE_PATH,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        # Always Lax, even if COOKIE_SAMESITE is strict: the callback is a
-        # cross-site top-level navigation from Google, which Strict drops.
         samesite="lax",
     )
     return redirect
@@ -292,8 +346,18 @@ async def google_login(request: Request, next: str = "/jobs"):
 def _oauth_redirect(url: str, status_code: int = 307) -> RedirectResponse:
     """A callback redirect that also clears the single-use binding cookie."""
     redirect = RedirectResponse(url, status_code=status_code)
+    redirect.headers["Cache-Control"] = "private, no-store"
     redirect.delete_cookie(BINDING_COOKIE, path=BINDING_COOKIE_PATH)
     return redirect
+
+
+def _oauth_error_url(code: str, next_path: Optional[str] = None) -> str:
+    base = f"{settings.FRONTEND_URL}/login?error={code}"
+    if next_path and next_path != "/jobs":
+        safe = _safe_next(next_path, default="")
+        if safe:
+            return f"{base}&next={quote(safe)}"
+    return base
 
 
 @router.get("/google/callback")
@@ -306,15 +370,13 @@ async def google_callback(
     oauth_binding: Optional[str] = Cookie(default=None, alias=BINDING_COOKIE),
     session: AsyncSession = Depends(get_session),
 ):
-    """
-    Handle Google's redirect: verify state, exchange the code, verify the
-    id_token, then upsert the user and set session cookies.
-    """
+    """Handle Google's redirect: verify state, exchange code, verify id_token, upsert user."""
     _require_google_configured()
 
     if error:
-        return _oauth_redirect(f"{settings.FRONTEND_URL}/login?error=access_denied")
+        return _oauth_redirect(_oauth_error_url("access_denied"))
 
+    stored: dict = {}
     try:
         stored = await consume_state(state or "", oauth_binding)
         if not code:
@@ -323,49 +385,46 @@ async def google_callback(
         raw_id_token = tokens.get("id_token")
         if not raw_id_token:
             raise OAuthError("Token response contained no id_token")
-        # google-auth verifies synchronously and may fetch Google's JWKS over
-        # the network; keep that off the event loop.
         claims = await asyncio.to_thread(
             verify_id_token, raw_id_token, stored.get("nonce")
         )
     except OAuthError as exc:
         logger.warning("Google OAuth failed: %s", exc)
-        return _oauth_redirect(f"{settings.FRONTEND_URL}/login?error=oauth_failed")
+        return _oauth_redirect(_oauth_error_url("oauth_failed", stored.get("next")))
 
+    next_target = _safe_next(stored.get("next"), default="/jobs")
     email = normalize_email(claims["email"])
     google_sub = claims["sub"]
 
-    # Look up by google_sub first: a Google account's email can change, but
-    # `sub` is stable for the life of the account.
     user = (
         await session.execute(select(User).where(User.google_sub == google_sub))
     ).scalar_one_or_none()
 
     if user is None:
         if await _find_user_by_email(session, email) is not None:
-            # Never auto-link to an existing account. Local registration
-            # doesn't verify email ownership, so anyone could pre-register
-            # victim@gmail.com with a password; linking here handed the
-            # victim's Google sign-in to that account, password still live.
-            # The same holds for an account already linked to a different
-            # Google `sub` (e.g. a reassigned Workspace address).
             logger.info("Google sign-in refused: email belongs to another account")
             return _oauth_redirect(
-                f"{settings.FRONTEND_URL}/login?error=account_exists", status_code=303
+                _oauth_error_url("account_exists", next_target), status_code=303
             )
         user = User(email=email, google_sub=google_sub, skills=[])
     elif not user.is_active:
-        # Checked before anything is written for a disabled account.
-        return _oauth_redirect(f"{settings.FRONTEND_URL}/login?error=account_disabled")
+        return _oauth_redirect(_oauth_error_url("account_disabled", next_target))
 
     user.full_name = user.full_name or claims.get("name")
     user.avatar_url = claims.get("picture") or user.avatar_url
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        logger.info("Google sign-in race: account email/sub already exists")
+        return _oauth_redirect(
+            _oauth_error_url("account_exists", next_target), status_code=303
+        )
     await session.refresh(user)
 
     redirect = _oauth_redirect(
-        f"{settings.FRONTEND_URL}{stored.get('next', '/jobs')}", status_code=303
+        f"{settings.FRONTEND_URL}{next_target}", status_code=303
     )
     await _issue_session(redirect, user, session)
     return redirect
@@ -377,22 +436,14 @@ class _RefreshFailed(Exception):
     """The refresh cookie can't be exchanged; the caller must sign in again."""
 
 
-# How long a concurrent caller presenting an already-rotated refresh token
-# still receives the pair minted for it (multi-tab refresh races).
-_ROTATION_GRACE_SECONDS = 30
+# Narrow multi-tab refresh race grace window (bounded reads in auth_cookies.py).
+_ROTATION_GRACE_SECONDS = 5
 
 
 async def _rotate_refresh(
     raw_refresh: Optional[str], session: AsyncSession
 ) -> Tuple[str, str, str]:
-    """
-    Exchange a refresh token for a new (access, refresh, csrf) triple.
-
-    Each refresh token is single-use. A reuse inside the grace window is a
-    concurrent tab and gets the same new pair; a reuse after it is a replayed
-    (likely stolen) token, so the whole family is revoked — logging out both
-    the thief and the victim, who then signs in again.
-    """
+    """Exchange a refresh token for a new (access, refresh, csrf) triple."""
     if not raw_refresh:
         raise _RefreshFailed("No refresh token")
     try:
@@ -403,7 +454,6 @@ async def _rotate_refresh(
         raise _RefreshFailed("Refresh token revoked")
 
     jti = payload["jti"]
-    # Tokens minted before families existed fall back to their own jti.
     family = payload.get("fam") or jti
     remaining = int(payload["exp"] - datetime.now(timezone.utc).timestamp())
 
@@ -421,9 +471,13 @@ async def _rotate_refresh(
     if user is None or not user.is_active:
         await invalidate_user_profile(payload["sub"])
         raise _RefreshFailed("User not found or disabled")
+    token_ver = payload.get("ver")
+    if token_ver is not None and user.token_version != token_ver:
+        await invalidate_user_profile(payload["sub"])
+        raise _RefreshFailed("Session invalidated")
 
     await set_cached_user_profile(user)
-    tokens = _mint(user.email, family)
+    tokens = _mint(user.email, family, token_version=int(user.token_version or 1))
     await store_rotation_result(jti, tokens, _ROTATION_GRACE_SECONDS)
     return tokens
 
@@ -441,14 +495,16 @@ async def refresh_session(
     try:
         access, refresh, csrf = await _rotate_refresh(refresh_token, session)
     except _RefreshFailed as exc:
-        # Build the 401 directly: headers set on the injected `response` are
-        # discarded when an HTTPException is raised, so the old code's
-        # clear_auth_cookies() calls never reached the browser.
-        failed = JSONResponse(status_code=401, content={"detail": str(exc)})
+        failed = JSONResponse(
+            status_code=401,
+            content={"detail": str(exc)},
+            headers={"Cache-Control": "private, no-store"},
+        )
         clear_auth_cookies(failed)
         return failed
 
     set_auth_cookies(response, access, refresh, csrf)
+    response.headers["Cache-Control"] = "private, no-store"
     return {"status": "ok", "csrf_token": csrf}
 
 
@@ -463,25 +519,26 @@ async def resume_session(
     """
     Navigation-time refresh, used by the Next.js edge proxy.
 
-    The access cookie lives 15 minutes and the refresh cookie is scoped to
-    /api/v1/auth, so a full page load of /jobs after an idle spell has no
-    usable credential the proxy can see — it used to bounce straight to
-    /login despite a valid 30-day refresh token. The proxy now redirects
-    here instead; this path receives the refresh cookie, rotates it, and
-    sends the browser back.
-
-    A GET that rotates tokens is CSRF-triggerable under SameSite=Lax, but the
-    only effect is rotating the victim's own session, which is harmless.
+    Rejects cross-site top-level GET navigations (Sec-Fetch-Site: cross-site
+    or same-site) so third-party origins cannot trigger silent token rotations.
     """
     target = _safe_next(next)
+    sec_fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if sec_fetch_site and sec_fetch_site not in ("same-origin", "none"):
+        reject = RedirectResponse(f"/login?next={quote(target)}", status_code=303)
+        reject.headers["Cache-Control"] = "private, no-store"
+        return reject
+
     try:
         access, refresh, csrf = await _rotate_refresh(refresh_token, session)
     except _RefreshFailed:
         to_login = RedirectResponse(f"/login?next={quote(target)}", status_code=303)
+        to_login.headers["Cache-Control"] = "private, no-store"
         clear_auth_cookies(to_login)
         return to_login
 
     back = RedirectResponse(target, status_code=303)
+    back.headers["Cache-Control"] = "private, no-store"
     set_auth_cookies(back, access, refresh, csrf)
     return back
 
@@ -491,14 +548,20 @@ async def resume_session(
 async def logout(
     request: Request,
     response: Response,
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
     access_token: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
     _: None = Depends(require_csrf),
 ):
-    """Revoke both tokens and the sign-in family, and clear the cookies."""
+    """Revoke cookie and/or bearer tokens and the sign-in family, and clear cookies."""
     now = datetime.now(timezone.utc).timestamp()
     subjects = set()
-    for raw, kind in ((access_token, TOKEN_TYPE_ACCESS), (refresh_token, TOKEN_TYPE_REFRESH)):
+    candidates = (
+        (access_token, TOKEN_TYPE_ACCESS),
+        (bearer_token, TOKEN_TYPE_ACCESS),
+        (refresh_token, TOKEN_TYPE_REFRESH),
+    )
+    for raw, kind in candidates:
         if not raw:
             continue
         try:
@@ -507,8 +570,8 @@ async def logout(
             continue
         ttl = int(payload["exp"] - now)
         await deny_token(payload["jti"], ttl)
-        # Revoking the family also kills any rotation result still held for
-        # the grace window, and tokens another tab may have just minted.
+        if kind == TOKEN_TYPE_REFRESH:
+            await delete_rotation_result(payload["jti"])
         if payload.get("fam"):
             await revoke_family(payload["fam"], settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
         subjects.add(payload["sub"])
@@ -517,31 +580,40 @@ async def logout(
         await invalidate_user_profile(sub)
 
     clear_auth_cookies(response)
+    response.headers["Cache-Control"] = "private, no-store"
     return {"status": "logged_out"}
 
 
 # ── Current user ────────────────────────────────────────────────────────
 
 @router.get("/me", response_model=UserRead)
-async def get_me(current_user: User = Depends(get_current_user)):
+@limiter.limit("120/minute")
+async def get_me(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    response.headers["Cache-Control"] = "private, no-store"
     return current_user
 
 
 @router.put("/me/skills", response_model=UserRead)
+@limiter.limit("30/minute")
 async def update_skills(
+    request: Request,
+    response: Response,
     skills_in: UserUpdate,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     _: None = Depends(require_csrf),
 ):
-    # `current_user` may be a transient model hydrated from Redis, so fetch the
-    # persistent row before mutating to avoid an accidental INSERT.
+    response.headers["Cache-Control"] = "private, no-store"
     user = await session.get(User, current_user.id)
     if user is None or not user.is_active:
         await invalidate_user_profile(current_user.email)
         raise _CREDENTIALS_EXC
 
-    user.skills = skills_in.skills  # normalized and bounded by UserUpdate
+    user.skills = skills_in.skills
     session.add(user)
     await session.commit()
     await session.refresh(user)

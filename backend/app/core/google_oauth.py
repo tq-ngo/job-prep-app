@@ -128,43 +128,45 @@ async def consume_state(state: str, binding: Optional[str]) -> Dict[str, Any]:
     return stored
 
 
+# Module-level transport so google-auth caches Google's JWKS across logins.
+_GOOGLE_REQUEST = google_requests.Request()
+
+
 async def exchange_code(code: str, code_verifier: str) -> Dict[str, Any]:
     """Exchange an authorization code for tokens."""
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            TOKEN_ENDPOINT,
-            data={
-                "code": code,
-                "client_id": settings.GOOGLE_CLIENT_ID,
-                "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code",
-                "code_verifier": code_verifier,
-            },
-            headers={"Accept": "application/json"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                TOKEN_ENDPOINT,
+                data={
+                    "code": code,
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                    "code_verifier": code_verifier,
+                },
+                headers={"Accept": "application/json"},
+            )
+    except httpx.HTTPError as exc:
+        raise OAuthError(f"Token exchange network error: {exc}") from exc
     if resp.status_code != 200:
         # Never log the body verbatim: it can echo the client secret.
         raise OAuthError(f"Token exchange failed with HTTP {resp.status_code}")
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise OAuthError("Token exchange returned invalid JSON") from exc
 
 
 def verify_id_token(raw_id_token: str, expected_nonce: Optional[str] = None) -> Dict[str, Any]:
     """
     Verify Google's id_token and return its claims.
-
-    google-auth fetches Google's JWKS and validates the signature, `iss`,
-    `aud` and `exp`. Verifying locally (rather than calling a tokeninfo
-    endpoint) avoids an extra network hop on every login.
-
-    `expected_nonce` is the value stored with the state. It is optional only
-    so that a sign-in already in flight when this check shipped (its state
-    record predates the nonce) still completes; every new flow stores one.
     """
     try:
         claims = google_id_token.verify_oauth2_token(
             raw_id_token,
-            google_requests.Request(),
+            _GOOGLE_REQUEST,
             settings.GOOGLE_CLIENT_ID,
         )
     except ValueError as exc:
@@ -172,7 +174,7 @@ def verify_id_token(raw_id_token: str, expected_nonce: Optional[str] = None) -> 
 
     if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
         raise OAuthError("Unexpected id_token issuer")
-    if expected_nonce is not None and not secrets.compare_digest(
+    if not expected_nonce or not secrets.compare_digest(
         str(claims.get("nonce") or ""), expected_nonce
     ):
         raise OAuthError("id_token nonce mismatch")

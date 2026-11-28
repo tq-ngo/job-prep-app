@@ -34,6 +34,8 @@ _FAMILY_REVOKED_PREFIX = "jwt:family:revoked:"
 _ROTATION_CLAIM_PREFIX = "jwt:rotating:"
 # The pair minted by that rotation, kept briefly for concurrent callers.
 _ROTATION_RESULT_PREFIX = "jwt:rotated:"
+_ROTATION_READS_PREFIX = "jwt:rotated:reads:"
+_MAX_GRACE_READS = 3
 
 
 def _base_kwargs() -> dict:
@@ -157,21 +159,34 @@ async def store_rotation_result(
     )
 
 
+async def delete_rotation_result(jti: str) -> None:
+    """Remove any cached grace-window rotation tuple on explicit logout."""
+    if not jti:
+        return
+    redis = await get_redis_pool()
+    await redis.delete(f"{_ROTATION_RESULT_PREFIX}{jti}", f"{_ROTATION_READS_PREFIX}{jti}")
+
+
 async def await_rotation_result(
     jti: str, timeout: float = 3.0, interval: float = 0.1
 ) -> Optional[Tuple[str, str, str]]:
     """
-    Fetch the pair minted for an already-claimed jti.
-
-    Polls briefly because a concurrent caller may have claimed the jti but
-    not yet finished minting. None means the grace window has passed.
+    Fetch the pair minted for an already-claimed jti, bounded to at most
+    `_MAX_GRACE_READS` concurrent tab reads so a stolen spent refresh token
+    cannot be replayed indefinitely inside the grace window.
     """
     redis = await get_redis_pool()
     key = f"{_ROTATION_RESULT_PREFIX}{jti}"
+    reads_key = f"{_ROTATION_READS_PREFIX}{jti}"
     deadline = asyncio.get_running_loop().time() + timeout
     while True:
         raw = await redis.get(key)
         if raw is not None:
+            reads = await redis.incr(reads_key)
+            await redis.expire(reads_key, 30)
+            if int(reads) > _MAX_GRACE_READS:
+                await redis.delete(key)
+                return None
             access, refresh, csrf = json.loads(raw)
             return access, refresh, csrf
         if asyncio.get_running_loop().time() >= deadline:

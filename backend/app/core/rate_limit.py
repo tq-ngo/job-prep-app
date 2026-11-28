@@ -1,14 +1,8 @@
 """
 Request rate limiting.
 
-/login and /register previously had no limiting and no lockout, leaving an
-unbounded credential-stuffing surface on a 7-day, non-revocable token. The
-scrape triggers were likewise unbounded: any authenticated user could spam
-Celery dispatch (the Redis NX lock made that mostly harmless, but it is still
-free queue pressure).
-
-Storage is Redis so limits are shared across API replicas rather than being
-per-process.
+Storage is Redis so limits are shared across API replicas, with in-memory
+fallback enabled so transient Redis outages do not turn into API-wide 500s.
 """
 import logging
 
@@ -22,24 +16,20 @@ logger = logging.getLogger(__name__)
 
 def _client_key(request) -> str:
     """
-    Identify the caller for limiting purposes.
+    Identify the caller using Uvicorn's ProxyHeadersMiddleware-validated
+    `request.client.host`.
 
-    Behind nginx, get_remote_address() sees the proxy's IP and would bucket
-    every user together, so X-Forwarded-For is used — but its RIGHT-most
-    entry, the one written by our own proxy. The left-most entry (used
-    previously) is whatever the client sent: any caller could put a random
-    value there and get a fresh bucket per request, defeating the /login
-    brute-force limit. nginx.conf also overwrites the header with
-    $remote_addr, so in the supported setup it holds exactly one address.
+    Never read raw `X-Forwarded-For` directly here: doing so lets any caller
+    bypassing nginx (or hitting a dev/internal port) spoof arbitrary IPs.
+    Behind nginx, Uvicorn runs with `--proxy-headers` and `FORWARDED_ALLOW_IPS`
+    pinned to nginx's static IP, which safely populates `request.client.host`.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
     return get_remote_address(request)
 
 
 limiter = Limiter(
     key_func=_client_key,
     storage_uri=settings.REDIS_URL,
-    strategy="fixed-window",
+    strategy="moving-window",
+    in_memory_fallback_enabled=True,
 )

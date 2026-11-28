@@ -106,7 +106,11 @@ def new_token_family() -> str:
 
 
 def _create_token(
-    subject: str, token_type: str, expires_delta: timedelta, family: str
+    subject: str,
+    token_type: str,
+    expires_delta: timedelta,
+    family: str,
+    token_version: int = 1,
 ) -> tuple[str, str, datetime]:
     """Mint a signed JWT. Returns (token, jti, expiry)."""
     now = datetime.now(timezone.utc)
@@ -117,6 +121,7 @@ def _create_token(
         "typ": token_type,
         "jti": jti,
         "fam": family,
+        "ver": token_version,
         "iat": now,
         "nbf": now,
         "exp": expire,
@@ -127,24 +132,32 @@ def _create_token(
 
 
 def create_access_token(
-    subject: str, family: str, expires_delta: Optional[timedelta] = None
+    subject: str,
+    family: str,
+    expires_delta: Optional[timedelta] = None,
+    token_version: int = 1,
 ):
     return _create_token(
         subject,
         TOKEN_TYPE_ACCESS,
         expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         family,
+        token_version=token_version,
     )
 
 
 def create_refresh_token(
-    subject: str, family: str, expires_delta: Optional[timedelta] = None
+    subject: str,
+    family: str,
+    expires_delta: Optional[timedelta] = None,
+    token_version: int = 1,
 ):
     return _create_token(
         subject,
         TOKEN_TYPE_REFRESH,
         expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         family,
+        token_version=token_version,
     )
 
 
